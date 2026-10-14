@@ -2,6 +2,9 @@ package dev.istarvin.fetcharr.ui.settings
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import dev.istarvin.fetcharr.data.CategoryRepository
+import dev.istarvin.fetcharr.data.SystemRepository
+import dev.istarvin.fetcharr.data.network.ApiError
+import dev.istarvin.fetcharr.data.network.Fixtures
 import dev.istarvin.fetcharr.data.network.ConnectionTester
 import dev.istarvin.fetcharr.data.network.FetcharrApiFactory
 import dev.istarvin.fetcharr.data.network.FetcharrApiProvider
@@ -42,6 +45,7 @@ class SettingsViewModelTest {
     private lateinit var server: MockWebServer
     private lateinit var settings: SettingsRepository
     private lateinit var vm: SettingsViewModel
+    private lateinit var factory: FetcharrApiFactory
 
     @Before
     fun setUp() {
@@ -51,11 +55,98 @@ class SettingsViewModelTest {
             .connectTimeout(4, TimeUnit.SECONDS)
             .readTimeout(4, TimeUnit.SECONDS)
             .build()
-        val factory = FetcharrApiFactory(client, FetcharrJson)
+        factory = FetcharrApiFactory(client, FetcharrJson)
         val dataStore = PreferenceDataStoreFactory.create(scope = scope) { tmp.newFile("settings.preferences_pb") }
         settings = SettingsRepository(dataStore, FetcharrJson, scope)
-        val categories = CategoryRepository(FetcharrApiProvider(factory, settings), factory, settings)
-        vm = SettingsViewModel(settings, categories, ConnectionTester(factory))
+        vm = newVm()
+    }
+
+    private fun newVm(): SettingsViewModel {
+        val provider = FetcharrApiProvider(factory, settings)
+        val categories = CategoryRepository(provider, factory, settings)
+        return SettingsViewModel(settings, categories, SystemRepository(provider), ConnectionTester(factory))
+    }
+
+    /** Saves the mock server as the configured one and builds a VM that has loaded `/api/info` (managed yt-dlp). */
+    private fun vmWithSavedServer(infoBody: String = infoJson()): SettingsViewModel {
+        await { settings.setServer("http://$hostPort", "tok") }
+        server.enqueue(MockResponse().setResponseCode(200).setBody(infoBody))
+        val v = newVm()
+        await { v.uiState.first { it.serverVersion != null } }
+        return v
+    }
+
+    private fun ytdlpResult(v: SettingsViewModel): YtdlpUpdateStatus =
+        await { v.uiState.first { it.ytdlpUpdate !is YtdlpUpdateStatus.Idle && it.ytdlpUpdate !is YtdlpUpdateStatus.Running } }.ytdlpUpdate
+
+    @Test
+    fun aboutAndYtdlpShowInfo() {
+        val v = vmWithSavedServer()
+        val state = v.uiState.value
+        assertEquals("1.0.0", state.serverVersion)
+        assertEquals("2026.09.30", state.ytdlpVersion)
+        assertTrue(state.ytdlpManaged)
+    }
+
+    @Test
+    fun unmanagedInfoHidesUpdate() {
+        val v = vmWithSavedServer(infoJson().replace("\"ytdlp_managed\": true", "\"ytdlp_managed\": false"))
+        assertFalse(v.uiState.value.ytdlpManaged)
+        assertEquals("2026.09.30", v.uiState.value.ytdlpVersion)
+    }
+
+    @Test
+    fun ytdlpUpdateSuccessShowsNewVersionAndRefreshesInfo() {
+        val v = vmWithSavedServer()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(Fixtures.text("ytdlp-update.json")))
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .setBody(infoJson().replace("2026.09.30", "2026.10.01")),
+        )
+        v.updateYtdlp()
+        assertEquals(YtdlpUpdateStatus.Updated("2026.09.30"), ytdlpResult(v))
+        assertEquals("2026.10.01", await { v.uiState.first { it.ytdlpVersion == "2026.10.01" } }.ytdlpVersion)
+        server.takeRequest() // /api/info
+        val post = server.takeRequest()
+        assertEquals("POST", post.method)
+        assertEquals("/api/system/ytdlp/update", post.path)
+        assertEquals("Bearer tok", post.getHeader("Authorization"))
+    }
+
+    @Test
+    fun ytdlpBusyShowsTryLater() {
+        val v = vmWithSavedServer()
+        server.enqueue(MockResponse().setResponseCode(409).setBody(Fixtures.text("error-ytdlp_busy.json")))
+        v.updateYtdlp()
+        val status = ytdlpResult(v) as YtdlpUpdateStatus.Failed
+        assertEquals(ApiError.YtdlpBusy, status.error)
+        assertEquals("Downloads are running — try again when they finish", status.error.userMessage)
+        assertTrue(v.uiState.value.ytdlpManaged) // can retry
+    }
+
+    @Test
+    fun ytdlpUnmanagedHidesButtonAndShowsMessage() {
+        val v = vmWithSavedServer()
+        server.enqueue(MockResponse().setResponseCode(409).setBody(Fixtures.text("error-ytdlp_unmanaged.json")))
+        v.updateYtdlp()
+        val status = ytdlpResult(v) as YtdlpUpdateStatus.Failed
+        assertEquals(ApiError.YtdlpUnmanaged, status.error)
+        assertFalse(v.uiState.value.ytdlpManaged)
+    }
+
+    @Test
+    fun ytdlpOtherErrorsUseUserMessage() {
+        val v = vmWithSavedServer()
+        server.enqueue(MockResponse().setResponseCode(401).setBody(Fixtures.text("error-unauthorized.json")))
+        v.updateYtdlp()
+        assertEquals("Wrong API token", (ytdlpResult(v) as YtdlpUpdateStatus.Failed).error.userMessage)
+        server.enqueue(MockResponse().setResponseCode(500).setBody("boom"))
+        v.updateYtdlp()
+        assertEquals(
+            "Server error — try again",
+            (await { v.uiState.first { (it.ytdlpUpdate as? YtdlpUpdateStatus.Failed)?.error is ApiError.Server } }
+                .ytdlpUpdate as YtdlpUpdateStatus.Failed).error.userMessage,
+        )
     }
 
     @After

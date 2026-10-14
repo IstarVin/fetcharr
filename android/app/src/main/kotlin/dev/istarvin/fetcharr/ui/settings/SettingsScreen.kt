@@ -2,10 +2,14 @@ package dev.istarvin.fetcharr.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -13,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -25,6 +30,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -33,7 +39,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -138,16 +147,78 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                 )
             }
 
+            if (state.serverVersion != null) YtdlpSection(state, onUpdate = viewModel::updateYtdlp)
+
             GroupTitle(R.string.settings_group_about)
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(stringResource(R.string.settings_app_version), style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    BuildConfig.VERSION_NAME,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            AboutRow(stringResource(R.string.settings_app_version), BuildConfig.VERSION_NAME)
+            AboutRow(
+                stringResource(R.string.settings_server_version),
+                state.serverVersion ?: stringResource(R.string.settings_no_value),
+            )
+            val uriHandler = LocalUriHandler.current
+            val sourceUrl = stringResource(R.string.settings_source_code_url)
+            TextButton(
+                onClick = { uriHandler.openUri(sourceUrl) },
+                contentPadding = PaddingValues(0.dp),
+            ) {
+                Text(stringResource(R.string.settings_source_code), modifier = Modifier.fillMaxWidth())
             }
         }
+    }
+}
+
+@Composable
+private fun AboutRow(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** yt-dlp version + "Update now". The button is hidden when the server doesn't manage yt-dlp. */
+@Composable
+private fun YtdlpSection(state: SettingsUiState, onUpdate: () -> Unit) {
+    val update = state.ytdlpUpdate
+    val version = state.ytdlpVersion
+        ?: (update as? YtdlpUpdateStatus.Updated)?.version
+    GroupTitle(R.string.settings_group_ytdlp)
+    AboutRow(
+        stringResource(R.string.settings_ytdlp_version),
+        version ?: stringResource(R.string.settings_ytdlp_unknown),
+    )
+    val running = update == YtdlpUpdateStatus.Running
+    if (state.ytdlpManaged) {
+        val updatingDesc = stringResource(R.string.settings_ytdlp_updating_desc)
+        OutlinedButton(onClick = onUpdate, enabled = !running) {
+            if (running) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .size(16.dp)
+                        .semantics { contentDescription = updatingDesc },
+                    strokeWidth = 2.dp,
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(stringResource(if (running) R.string.settings_ytdlp_updating else R.string.settings_ytdlp_update))
+        }
+    }
+    when (update) {
+        is YtdlpUpdateStatus.Updated -> Text(
+            update.version?.let { stringResource(R.string.settings_ytdlp_updated, it) }
+                ?: stringResource(R.string.settings_ytdlp_updated_unknown),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        is YtdlpUpdateStatus.Failed -> Text(
+            update.error.userMessage,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+        )
+        else -> Unit
     }
 }
 

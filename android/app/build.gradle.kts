@@ -6,6 +6,19 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+// Release signing comes from the environment (CI) or gradle properties (local). Read lazily so the
+// configuration cache tracks the inputs; an unset or unreadable keystore just means an unsigned release build.
+fun releaseProp(name: String): Provider<String> =
+    providers.environmentVariable(name).orElse(providers.gradleProperty(name))
+
+val releaseKeystorePath = releaseProp("FETCHARR_KEYSTORE_PATH")
+val releaseKeystorePassword = releaseProp("FETCHARR_KEYSTORE_PASSWORD")
+val releaseKeyAlias = releaseProp("FETCHARR_KEY_ALIAS")
+val releaseKeyPassword = releaseProp("FETCHARR_KEY_PASSWORD")
+val releaseKeystoreFile: File? = releaseKeystorePath.orNull?.takeIf { it.isNotBlank() }?.let(::file)?.takeIf { it.isFile }
+val canSignRelease = releaseKeystoreFile != null &&
+    releaseKeystorePassword.isPresent && releaseKeyAlias.isPresent && releaseKeyPassword.isPresent
+
 android {
     namespace = "dev.istarvin.fetcharr"
     compileSdk = 37 // libs (compose 1.12, core-ktx 1.19, okhttp 5.5) require >= 37; targetSdk stays 36
@@ -14,13 +27,28 @@ android {
         applicationId = "dev.istarvin.fetcharr"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI passes -PversionName / -PversionCode (from the tag and run number).
+        versionCode = providers.gradleProperty("versionCode").map(String::toInt).getOrElse(1)
+        versionName = providers.gradleProperty("versionName").getOrElse("0.1.0")
+    }
+
+    signingConfigs {
+        if (canSignRelease) {
+            create("release") {
+                storeFile = releaseKeystoreFile
+                storePassword = releaseKeystorePassword.get()
+                keyAlias = releaseKeyAlias.get()
+                keyPassword = releaseKeyPassword.get()
+            }
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (canSignRelease) signingConfig = signingConfigs.getByName("release")
         }
     }
 

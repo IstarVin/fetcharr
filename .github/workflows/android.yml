@@ -29,4 +29,4 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-      - run: ./gradlew test lint
+      - run: ./gradlew test lint assembleDebug assembleRelease

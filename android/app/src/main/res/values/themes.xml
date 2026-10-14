@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Fetcharr" parent="android:Theme.Material.NoActionBar" />
+    <!-- Window background before Compose draws; the real colors come from FetcharrTheme (dynamic color + dark). -->
+    <style name="Theme.Fetcharr" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>

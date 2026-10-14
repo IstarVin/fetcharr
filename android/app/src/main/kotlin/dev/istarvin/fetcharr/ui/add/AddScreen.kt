@@ -25,6 +25,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -32,11 +33,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.istarvin.fetcharr.R
+import dev.istarvin.fetcharr.data.network.ApiError
 import dev.istarvin.fetcharr.ui.incoming.CategoryChips
 import dev.istarvin.fetcharr.ui.incoming.ItemFormActions
 import dev.istarvin.fetcharr.ui.incoming.ItemFormFields
@@ -174,13 +178,19 @@ fun AddScreen(
 
             state.error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                if (it == ApiError.Unauthorized.userMessage) {
+                    TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.queue_snackbar_settings)) }
+                }
             }
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (state.submitting) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                if (state.submitting) {
+                    val sending = stringResource(R.string.a11y_sending)
+                    CircularProgressIndicator(Modifier.size(24.dp).semantics { contentDescription = sending }, strokeWidth = 2.dp)
+                }
                 Button(onClick = viewModel::submit, enabled = state.canSubmit) {
                     Text(stringResource(R.string.add_submit))
                 }

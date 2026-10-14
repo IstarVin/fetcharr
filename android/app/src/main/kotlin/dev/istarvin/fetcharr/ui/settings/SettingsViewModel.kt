@@ -4,12 +4,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.istarvin.fetcharr.data.CategoryRepository
+import dev.istarvin.fetcharr.data.SystemRepository
+import dev.istarvin.fetcharr.data.network.ApiError
+import dev.istarvin.fetcharr.data.network.ApiResult
 import dev.istarvin.fetcharr.data.network.ConnectionTester
 import dev.istarvin.fetcharr.data.network.ServerConfig
 import dev.istarvin.fetcharr.data.network.TestConnectionResult
 import dev.istarvin.fetcharr.data.network.dto.CategoryDto
 import dev.istarvin.fetcharr.data.settings.SettingsRepository
 import dev.istarvin.fetcharr.data.settings.UrlNormalizer
+import javax.inject.Inject
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -19,7 +23,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 sealed interface TestStatus {
     data object Idle : TestStatus
@@ -27,6 +30,17 @@ sealed interface TestStatus {
     data object Running : TestStatus
 
     data class Done(val result: TestConnectionResult) : TestStatus
+}
+
+sealed interface YtdlpUpdateStatus {
+    data object Idle : YtdlpUpdateStatus
+
+    data object Running : YtdlpUpdateStatus
+
+    /** [version] is the version now installed (null if the server didn't say). */
+    data class Updated(val version: String?) : YtdlpUpdateStatus
+
+    data class Failed(val error: ApiError) : YtdlpUpdateStatus
 }
 
 data class SettingsUiState(
@@ -41,12 +55,19 @@ data class SettingsUiState(
     val tvCategories: List<CategoryDto> = emptyList(),
     val defaultMovieCategoryId: String? = null,
     val defaultTvCategoryId: String? = null,
+    /** From the last successful `/api/info`; null until one arrives. */
+    val serverVersion: String? = null,
+    val ytdlpVersion: String? = null,
+    /** False when the server didn't report yt-dlp as managed (or info is unknown): "Update now" is hidden. */
+    val ytdlpManaged: Boolean = false,
+    val ytdlpUpdate: YtdlpUpdateStatus = YtdlpUpdateStatus.Idle,
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settings: SettingsRepository,
     private val categories: CategoryRepository,
+    private val system: SystemRepository,
     private val connectionTester: ConnectionTester,
 ) : ViewModel() {
 
@@ -60,9 +81,10 @@ class SettingsViewModel @Inject constructor(
     )
 
     private val form = MutableStateFlow(Form())
+    private val ytdlpUpdate = MutableStateFlow<YtdlpUpdateStatus>(YtdlpUpdateStatus.Idle)
     private var testJob: Job? = null
 
-    val uiState: StateFlow<SettingsUiState> = combine(form, settings.settings) { f, s ->
+    val uiState: StateFlow<SettingsUiState> = combine(form, settings.settings, categories.info, ytdlpUpdate) { f, s, info, update ->
         SettingsUiState(
             loaded = f.loaded,
             url = f.url,
@@ -76,10 +98,16 @@ class SettingsViewModel @Inject constructor(
             tvCategories = s.cachedCategories.filter { it.layout == CategoryDto.LAYOUT_TV },
             defaultMovieCategoryId = s.defaultMovieCategoryId,
             defaultTvCategoryId = s.defaultTvCategoryId,
+            serverVersion = info?.version,
+            ytdlpVersion = info?.ytdlpVersion,
+            ytdlpManaged = info?.ytdlpManaged == true && update != YtdlpUpdateStatus.Failed(ApiError.YtdlpUnmanaged),
+            ytdlpUpdate = update,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
     init {
+        // Make sure the About/yt-dlp rows have data even when the sync connection hasn't fetched /api/info yet.
+        viewModelScope.launch { if (categories.info.value == null) categories.refresh() }
         viewModelScope.launch {
             val saved = settings.settings.first()
             form.update { it.copy(loaded = true, url = saved.serverUrl, token = saved.token) }
@@ -144,5 +172,20 @@ class SettingsViewModel @Inject constructor(
 
     fun onDefaultTvCategory(id: String?) {
         viewModelScope.launch { settings.setDefaultTvCategoryId(id) }
+    }
+
+    /** `POST /api/system/ytdlp/update`, then refreshes `/api/info` so the new version shows. */
+    fun updateYtdlp() {
+        if (ytdlpUpdate.value == YtdlpUpdateStatus.Running) return
+        ytdlpUpdate.value = YtdlpUpdateStatus.Running
+        viewModelScope.launch {
+            when (val result = system.updateYtdlp()) {
+                is ApiResult.Success -> {
+                    categories.refresh()
+                    ytdlpUpdate.value = YtdlpUpdateStatus.Updated(result.value.current)
+                }
+                is ApiResult.Failure -> ytdlpUpdate.value = YtdlpUpdateStatus.Failed(result.error)
+            }
+        }
     }
 }

@@ -11,6 +11,8 @@ import dev.istarvin.fetcharr.data.network.dto.InfoDto
 import dev.istarvin.fetcharr.data.network.safeApiCall
 import dev.istarvin.fetcharr.data.settings.SettingsRepository
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -27,11 +29,17 @@ class CategoryRepository @Inject constructor(
     val categories: Flow<List<CategoryDto>> =
         settings.settings.map { it.cachedCategories }.distinctUntilChanged()
 
+    private val _info = MutableStateFlow<InfoDto?>(null)
+
+    /** The last `/api/info` fetched from the saved server in this process (version, yt-dlp), or null. */
+    val info: StateFlow<InfoDto?> = _info
+
     /**
      * Fetches `/api/info` from the saved server and caches its categories.
      * Fails with [ApiError.Unreachable] when no server is saved.
      */
-    suspend fun refresh(): ApiResult<InfoDto> = fetchAndCache { apiProvider.current() }
+    suspend fun refresh(): ApiResult<InfoDto> =
+        fetchAndCache { apiProvider.current() }.also { if (it is ApiResult.Success) _info.value = it.value }
 
     /** Like [refresh], but against [config], for example values entered but not saved yet. */
     suspend fun refresh(config: ServerConfig): ApiResult<InfoDto> = fetchAndCache { apiFactory.create(config) }

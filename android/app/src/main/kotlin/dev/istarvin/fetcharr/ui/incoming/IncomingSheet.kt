@@ -1,6 +1,5 @@
 package dev.istarvin.fetcharr.ui.incoming
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,6 +8,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.selection.triStateToggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -19,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -27,11 +29,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.istarvin.fetcharr.R
+import dev.istarvin.fetcharr.data.network.ApiError
 import dev.istarvin.fetcharr.incoming.IncomingSheet
 import dev.istarvin.fetcharr.incoming.SeasonEpisode
 import java.util.Locale
@@ -83,6 +89,9 @@ fun IncomingSheetHost(
                 }
                 state.error?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                    if (it == ApiError.Unauthorized.userMessage) {
+                        TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.queue_snackbar_settings)) }
+                    }
                 }
             }
             Row(
@@ -90,7 +99,10 @@ fun IncomingSheetHost(
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (state.submitting) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                if (state.submitting) {
+                    val sending = stringResource(R.string.a11y_sending)
+                    CircularProgressIndicator(Modifier.size(24.dp).semantics { contentDescription = sending }, strokeWidth = 2.dp)
+                }
                 OutlinedButton(onClick = viewModel::cancel) { Text(stringResource(R.string.incoming_cancel)) }
                 if (state.serverConfigured) {
                     Button(onClick = viewModel::download, enabled = state.canDownload) {
@@ -147,7 +159,15 @@ private fun EpisodeChecklist(
     val allSelected = selected == episodes.size
     Column {
         Row(
-            Modifier.fillMaxWidth().clickable { onSetAll(!allSelected) },
+            Modifier.fillMaxWidth().triStateToggleable(
+                state = when (selected) {
+                    0 -> ToggleableState.Off
+                    episodes.size -> ToggleableState.On
+                    else -> ToggleableState.Indeterminate
+                },
+                role = Role.Checkbox,
+                onClick = { onSetAll(!allSelected) },
+            ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TriStateCheckbox(
@@ -156,17 +176,21 @@ private fun EpisodeChecklist(
                     episodes.size -> ToggleableState.On
                     else -> ToggleableState.Indeterminate
                 },
-                onClick = { onSetAll(!allSelected) },
+                onClick = null,
             )
             Text(stringResource(R.string.incoming_select_all, selected, episodes.size), style = MaterialTheme.typography.titleSmall)
         }
         HorizontalDivider()
         episodes.forEach { episode ->
             Row(
-                Modifier.fillMaxWidth().clickable { onToggle(episode.episode) },
+                Modifier.fillMaxWidth().toggleable(
+                    value = episode.selected,
+                    role = Role.Checkbox,
+                    onValueChange = { onToggle(episode.episode) },
+                ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Checkbox(checked = episode.selected, onCheckedChange = { onToggle(episode.episode) })
+                Checkbox(checked = episode.selected, onCheckedChange = null)
                 Text(
                     "E%02d".format(Locale.ROOT, episode.episode),
                     style = MaterialTheme.typography.labelLarge,

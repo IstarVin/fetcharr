@@ -11,8 +11,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.items
@@ -48,9 +48,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -228,7 +228,10 @@ private fun LazyItemScope.EmptyQueue(state: QueueUiState) {
     ) {
         when {
             state.hasSnapshot -> EmptyState(Icons.Outlined.Download, R.string.queue_empty_title, R.string.queue_empty_body)
-            state.connecting -> CircularProgressIndicator()
+            state.connecting -> {
+                val loading = stringResource(R.string.a11y_loading)
+                CircularProgressIndicator(Modifier.semantics { contentDescription = loading })
+            }
             else -> EmptyState(Icons.Outlined.HourglassEmpty, R.string.queue_unavailable_title, R.string.queue_unavailable_body)
         }
     }

@@ -61,8 +61,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
@@ -439,7 +439,8 @@ private fun LazyItemScope.EmptyHistory() {
 
 @Composable
 private fun LazyItemScope.LoadingState() {
-    CenteredItem { CircularProgressIndicator() }
+    val loading = stringResource(R.string.a11y_loading)
+    CenteredItem { CircularProgressIndicator(Modifier.semantics { contentDescription = loading }) }
 }
 
 @Composable
