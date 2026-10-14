@@ -38,7 +38,7 @@
 
 # DTOs: the wire names live in @SerialName strings, so members may be renamed, but the generated
 # serializers and constructors must survive.
--keepclassmembers @kotlinx.serialization.Serializable class dev.istarvin.fetcharr.data.network.dto.** {
+-keepclassmembers @kotlinx.serialization.Serializable class com.istarvin.fetcharr.data.network.dto.** {
     <init>(...);
 }
 
@@ -48,7 +48,7 @@
 -keepclassmembers,allowshrinking,allowobfuscation interface * {
     @retrofit2.http.* <methods>;
 }
--keep,allowobfuscation,allowshrinking interface dev.istarvin.fetcharr.data.network.FetcharrApi
+-keep,allowobfuscation,allowshrinking interface com.istarvin.fetcharr.data.network.FetcharrApi
 # Suspend functions: Retrofit reads the Continuation generic argument and retrofit2.Response.
 -keep,allowobfuscation,allowshrinking class kotlin.coroutines.Continuation
 -keep,allowobfuscation,allowshrinking class retrofit2.Response

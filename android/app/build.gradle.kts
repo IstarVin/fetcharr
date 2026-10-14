@@ -20,11 +20,11 @@ val canSignRelease = releaseKeystoreFile != null &&
     releaseKeystorePassword.isPresent && releaseKeyAlias.isPresent && releaseKeyPassword.isPresent
 
 android {
-    namespace = "dev.istarvin.fetcharr"
+    namespace = "com.istarvin.fetcharr"
     compileSdk = 37 // libs (compose 1.12, core-ktx 1.19, okhttp 5.5) require >= 37; targetSdk stays 36
 
     defaultConfig {
-        applicationId = "dev.istarvin.fetcharr"
+        applicationId = "com.istarvin.fetcharr"
         minSdk = 29
         targetSdk = 36
         // CI passes -PversionName / -PversionCode (from the tag and run number).
