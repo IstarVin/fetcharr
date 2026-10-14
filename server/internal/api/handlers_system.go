@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"os/exec"
-	"strings"
 	"sync"
 	"time"
+
+	"github.com/istarvin/fetcharr/server/internal/ytdlp"
 )
 
 const (
@@ -37,11 +37,7 @@ func newVersionCache(probe func(context.Context, string) (string, error)) *versi
 func runVersion(ctx context.Context, binary string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, ytdlpProbeTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, binary, "--version").Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
+	return ytdlp.Version(ctx, binary)
 }
 
 // get returns the version of binary, or "" when it cannot be determined.

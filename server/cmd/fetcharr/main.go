@@ -18,6 +18,7 @@ import (
 	"github.com/istarvin/fetcharr/server/internal/config"
 	"github.com/istarvin/fetcharr/server/internal/events"
 	"github.com/istarvin/fetcharr/server/internal/jobs"
+	"github.com/istarvin/fetcharr/server/internal/runner"
 	"github.com/istarvin/fetcharr/server/internal/service"
 	"github.com/istarvin/fetcharr/server/internal/store"
 	"github.com/istarvin/fetcharr/server/internal/ws"
@@ -97,6 +98,12 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 	bus := events.NewBus()
 	defer bus.Close()
 	svc := service.New(st, cfg, service.WithPublisher(bus))
+	rn := runner.New(runner.Options{Config: cfg, Store: st, Publisher: bus, Logger: log})
+	svc.SetController(rn)
+	rn.Start()
+	// Safety net for early returns; the normal path shuts the runner down
+	// explicitly, between the HTTP server and the hub.
+	defer func() { _ = rn.Shutdown(context.Background()) }()
 	hub := ws.New(ws.Options{
 		Bus:    bus,
 		Logger: log,
@@ -130,14 +137,23 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 	case <-ctx.Done():
 	}
 	log.Info("shutting down")
-	// WebSocket connections are hijacked, so http.Server.Shutdown neither
-	// closes nor waits for them: disconnect them first.
-	hub.Close()
+	// Stop accepting requests, then kill running downloads and put their jobs
+	// back to pending (their change events still reach WebSocket clients),
+	// then disconnect the WebSocket clients. Hijacked WebSocket connections
+	// are not tracked by http.Server, so Shutdown neither closes nor waits for
+	// them.
 	sctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	if err := srv.Shutdown(sctx); err != nil {
+	shutdownErr := srv.Shutdown(sctx)
+	if shutdownErr != nil {
 		_ = srv.Close()
-		return fmt.Errorf("graceful shutdown: %w", err)
+	}
+	if err := rn.Shutdown(sctx); err != nil {
+		log.Error("runner shutdown", "err", err)
+	}
+	hub.Close()
+	if shutdownErr != nil {
+		return fmt.Errorf("graceful shutdown: %w", shutdownErr)
 	}
 	if err := <-errc; err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("http server: %w", err)

@@ -402,3 +402,34 @@ func TestResolvePath(t *testing.T) {
 		t.Errorf("flag: %q", got)
 	}
 }
+
+func TestMakeAbsolute(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := Default()
+	c.DataDir = "data"
+	c.Categories = []Category{{ID: "misc", Path: "media/misc"}}
+	c.Ytdlp.Binary = "./bin/yt-dlp"
+	if err := c.MakeAbsolute(); err != nil {
+		t.Fatal(err)
+	}
+	if c.DataDir != filepath.Join(cwd, "data") || c.Categories[0].Path != filepath.Join(cwd, "media/misc") ||
+		c.Ytdlp.Binary != filepath.Join(cwd, "bin/yt-dlp") {
+		t.Errorf("not absolute: %q %q %q", c.DataDir, c.Categories[0].Path, c.Ytdlp.Binary)
+	}
+	if got := c.JobWorkDir("j1"); !filepath.IsAbs(got) {
+		t.Errorf("JobWorkDir = %q", got)
+	}
+	// A bare binary name is left for the PATH lookup; empty stays empty.
+	c = Default()
+	c.Ytdlp.Binary = "yt-dlp"
+	if err := c.MakeAbsolute(); err != nil || c.Ytdlp.Binary != "yt-dlp" {
+		t.Errorf("bare name changed: %q %v", c.Ytdlp.Binary, err)
+	}
+	c.Ytdlp.Binary = ""
+	if err := c.MakeAbsolute(); err != nil || c.Ytdlp.Binary != "" {
+		t.Errorf("empty binary changed: %q %v", c.Ytdlp.Binary, err)
+	}
+}

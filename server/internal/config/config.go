@@ -129,10 +129,46 @@ func LoadWithOptions(path string, opts Options) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config %s: %w", path, err)
 	}
+	if err := cfg.MakeAbsolute(); err != nil {
+		return nil, fmt.Errorf("config %s: %w", path, err)
+	}
 	if err := cfg.ValidateEnvironment(opts); err != nil {
 		return nil, fmt.Errorf("config %s: %w", path, err)
 	}
 	return cfg, nil
+}
+
+// MakeAbsolute turns the configured paths into absolute ones, resolved against
+// the current directory: data_dir, the category paths and ytdlp.binary (the
+// last only when it contains a path separator; a bare name is looked up on
+// PATH). yt-dlp runs with its work directory as the current directory, so
+// every path handed to it must not depend on the server's working directory.
+func (c *Config) MakeAbsolute() error {
+	abs := func(p *string) error {
+		if *p == "" {
+			return nil
+		}
+		a, err := filepath.Abs(*p)
+		if err != nil {
+			return err
+		}
+		*p = a
+		return nil
+	}
+	if err := abs(&c.DataDir); err != nil {
+		return fmt.Errorf("data_dir: %w", err)
+	}
+	for i := range c.Categories {
+		if err := abs(&c.Categories[i].Path); err != nil {
+			return fmt.Errorf("categories[%d]: path: %w", i, err)
+		}
+	}
+	if strings.ContainsRune(c.Ytdlp.Binary, filepath.Separator) {
+		if err := abs(&c.Ytdlp.Binary); err != nil {
+			return fmt.Errorf("ytdlp.binary: %w", err)
+		}
+	}
+	return nil
 }
 
 // Parse decodes YAML, applies defaults and runs the checks that need no

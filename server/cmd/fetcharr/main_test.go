@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -101,19 +102,38 @@ func TestServeRecoversAndShutsDown(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- serve(ctx, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), ln) }()
+	var logs bytes.Buffer // read only after serve returned
+	go func() { done <- serve(ctx, cfg, slog.New(slog.NewTextHandler(&logs, nil)), ln) }()
 
 	base := "http://" + ln.Addr().String()
 	if code, body := get(t, base+"/api/health"); code != 200 || !strings.Contains(string(body), `"ok"`) {
 		t.Fatalf("health: %d %s", code, body)
 	}
-	code, body := get(t, base+"/api/jobs/"+j.ID)
-	if code != 200 {
-		t.Fatalf("get job: %d %s", code, body)
+	// Recovery sets the job back to pending, then the runner picks it up at
+	// once. The test config has no yt-dlp binary, so the run fails: reaching
+	// failed/download_failed proves the job left "downloading" and was
+	// dispatched again.
+	var got struct {
+		Status    string `json:"status"`
+		ErrorCode string `json:"error_code"`
 	}
-	var got struct{ Status string }
-	if err := json.Unmarshal(body, &got); err != nil || got.Status != "pending" {
-		t.Errorf("interrupted job status = %q (%v), want pending", got.Status, err)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		code, body := get(t, base+"/api/jobs/"+j.ID)
+		if code != 200 {
+			t.Fatalf("get job: %d %s", code, body)
+		}
+		got.Status, got.ErrorCode = "", ""
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Status == "failed" || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got.Status != "failed" || got.ErrorCode != "download_failed" {
+		t.Errorf("recovered job = %+v, want failed/download_failed", got)
 	}
 
 	cancel()
@@ -124,6 +144,9 @@ func TestServeRecoversAndShutsDown(t *testing.T) {
 		}
 	case <-time.After(15 * time.Second):
 		t.Fatal("serve did not return after cancel")
+	}
+	if !strings.Contains(logs.String(), "requeued interrupted jobs") {
+		t.Errorf("startup recovery was not logged:\n%s", logs.String())
 	}
 }
 
