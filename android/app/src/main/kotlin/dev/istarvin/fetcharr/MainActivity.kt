@@ -7,8 +7,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import dagger.hilt.android.AndroidEntryPoint
 import dev.istarvin.fetcharr.data.sync.SyncManager
+import dev.istarvin.fetcharr.notifications.BackgroundController
+import dev.istarvin.fetcharr.notifications.NotificationIntents
 import dev.istarvin.fetcharr.ui.FetcharrAppUi
 import dev.istarvin.fetcharr.ui.incoming.IncomingHub
+import dev.istarvin.fetcharr.ui.navigation.NavigationEvents
+import dev.istarvin.fetcharr.ui.navigation.OpenTarget
 import dev.istarvin.fetcharr.ui.theme.FetcharrTheme
 import javax.inject.Inject
 
@@ -20,6 +24,12 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var syncManager: SyncManager
 
+    @Inject
+    lateinit var backgroundController: BackgroundController
+
+    @Inject
+    lateinit var navigationEvents: NavigationEvents
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -28,7 +38,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) handle(intent)
         setContent {
             FetcharrTheme {
-                FetcharrAppUi()
+                FetcharrAppUi(navigationEvents.events)
             }
         }
     }
@@ -36,6 +46,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         syncManager.acquire(SYNC_REASON)
+        backgroundController.onAppForegrounded()
     }
 
     override fun onStop() {
@@ -59,6 +70,8 @@ class MainActivity : ComponentActivity() {
             extraText = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString(),
             payloadExtra = intent.getStringExtra(EXTRA_PAYLOAD),
         )
+        // A notification tap names the tab to open; it carries no fetcharr:// data, so the router ignored it above.
+        OpenTarget.fromExtra(intent.getStringExtra(NotificationIntents.EXTRA_OPEN))?.let(navigationEvents::open)
     }
 
     private companion object {

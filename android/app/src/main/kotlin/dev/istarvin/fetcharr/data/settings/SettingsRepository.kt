@@ -3,6 +3,7 @@ package dev.istarvin.fetcharr.data.settings
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -68,6 +69,13 @@ class SettingsRepository @Inject constructor(
         dataStore.edit { if (it[LAST_SEEN] == null) it[LAST_SEEN] = nowMs }
     }
 
+    /** True once the POST_NOTIFICATIONS prompt has been shown (it is only asked once). */
+    val notificationPermissionAsked: Flow<Boolean> = dataStore.data.map { it[NOTIFICATION_PERMISSION_ASKED] ?: false }
+
+    suspend fun markNotificationPermissionAsked() {
+        dataStore.edit { it[NOTIFICATION_PERMISSION_ASKED] = true }
+    }
+
     private fun Preferences.toAppSettings() = AppSettings(
         serverUrl = this[SERVER_URL].orEmpty(),
         token = this[TOKEN].orEmpty(),
@@ -97,6 +105,7 @@ class SettingsRepository @Inject constructor(
         val DEFAULT_TV = stringPreferencesKey("default_tv_category_id")
         val CACHED_CATEGORIES = stringPreferencesKey("cached_categories")
         val LAST_SEEN = longPreferencesKey("last_seen_finished_at")
+        val NOTIFICATION_PERMISSION_ASKED = booleanPreferencesKey("notification_permission_asked")
         val CATEGORIES_SERIALIZER = ListSerializer(CategoryDto.serializer())
     }
 }

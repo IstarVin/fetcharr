@@ -1,0 +1,134 @@
+package dev.istarvin.fetcharr.notifications.logic
+
+import dev.istarvin.fetcharr.data.network.dto.JobStatus.DOWNLOADING
+import dev.istarvin.fetcharr.data.network.dto.JobStatus.PAUSED
+import dev.istarvin.fetcharr.data.network.dto.JobStatus.PENDING
+import dev.istarvin.fetcharr.data.network.dto.JobStatus.PROCESSING
+import dev.istarvin.fetcharr.notifications.logic.ForegroundEvent.ActiveJobsChanged
+import dev.istarvin.fetcharr.notifications.logic.ForegroundEvent.ConnectionChanged
+import dev.istarvin.fetcharr.notifications.logic.ForegroundEvent.Tick
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class ForegroundPolicyTest {
+    private val min = 60_000L
+    private val limit = 15 * min
+
+    private class Driver {
+        var state = ForegroundState()
+        fun send(e: ForegroundEvent): ServiceCommand {
+            val (s, c) = ForegroundPolicy.reduce(state, e)
+            state = s
+            return c
+        }
+    }
+
+    private fun active(vararg s: dev.istarvin.fetcharr.data.network.dto.JobStatus) =
+        ActiveJobsChanged(s.mapIndexed { i, st -> job("j$i", st, finishedAt = null) })
+
+    @Test fun startsWhenSyncFindsActiveJobs() {
+        val d = Driver()
+        assertEquals(ServiceCommand.Start, d.send(active(PENDING)))
+        assertEquals(ServiceCommand.KeepRunning, d.send(active(DOWNLOADING, PAUSED)))
+    }
+
+    @Test fun eachActiveStatusCounts() {
+        for (s in listOf(PENDING, DOWNLOADING, PROCESSING)) {
+            assertEquals(ServiceCommand.Start, Driver().send(active(s)))
+        }
+    }
+
+    @Test fun pausedOnlyDoesNotStart() {
+        assertEquals(ServiceCommand.Idle, Driver().send(active(PAUSED)))
+    }
+
+    @Test fun pausedOnlyStopsWithoutNotice() {
+        val d = Driver()
+        d.send(active(DOWNLOADING))
+        assertEquals(ServiceCommand.Stop(false), d.send(active(PAUSED)))
+        assertEquals(ServiceCommand.Idle, d.send(Tick(1)))
+    }
+
+    @Test fun stopsAsSoonAsNothingActive() {
+        val d = Driver()
+        d.send(active(DOWNLOADING))
+        assertEquals(ServiceCommand.Stop(false), d.send(ActiveJobsChanged(emptyList())))
+    }
+
+    @Test fun submitStartsBeforeJobAppears() {
+        val d = Driver()
+        assertEquals(ServiceCommand.Start, d.send(ForegroundEvent.SubmitSucceeded))
+        assertEquals(ServiceCommand.KeepRunning, d.send(Tick(1000)))
+        assertEquals(ServiceCommand.KeepRunning, d.send(active(PENDING)))
+    }
+
+    @Test fun submitGraceEndsAtFirstSyncWithNothingActive() {
+        val d = Driver()
+        d.send(ForegroundEvent.SubmitSucceeded)
+        assertEquals(ServiceCommand.Stop(false), d.send(ActiveJobsChanged(emptyList())))
+    }
+
+    @Test fun unreachableBoundary() {
+        val d = Driver()
+        d.send(active(DOWNLOADING))
+        d.send(ConnectionChanged(false, 1_000))
+        assertEquals(ServiceCommand.KeepRunning, d.send(Tick(1_000 + limit - 1)))
+        assertEquals(ServiceCommand.Stop(true), d.send(Tick(1_000 + limit)))
+    }
+
+    @Test fun reconnectResetsTimer() {
+        val d = Driver()
+        d.send(active(DOWNLOADING))
+        d.send(ConnectionChanged(false, 0))
+        assertEquals(ServiceCommand.KeepRunning, d.send(Tick(14 * min + 59_000)))
+        d.send(ConnectionChanged(true, 14 * min + 59_500))
+        d.send(ConnectionChanged(false, 15 * min))
+        assertEquals(ServiceCommand.KeepRunning, d.send(Tick(15 * min + 14 * min + 59_000)))
+        assertEquals(ServiceCommand.Stop(true), d.send(Tick(15 * min + limit)))
+    }
+
+    @Test fun repeatedDisconnectEventsKeepEarliestTime() {
+        val d = Driver()
+        d.send(active(DOWNLOADING))
+        d.send(ConnectionChanged(false, 0))
+        d.send(ConnectionChanged(false, 10 * min))
+        assertEquals(ServiceCommand.Stop(true), d.send(Tick(limit)))
+    }
+
+    @Test fun systemTimeoutStopsWithNotice() {
+        val d = Driver()
+        d.send(active(DOWNLOADING))
+        assertEquals(ServiceCommand.Stop(true), d.send(ForegroundEvent.SystemTimeout))
+    }
+
+    @Test fun systemTimeoutWhileNotRunningIsIdle() {
+        assertEquals(ServiceCommand.Idle, Driver().send(ForegroundEvent.SystemTimeout))
+    }
+
+    @Test fun noticeStopIsNotUndoneByNextSyncButByForegroundOrSubmit() {
+        val d = Driver()
+        d.send(active(DOWNLOADING))
+        d.send(ForegroundEvent.SystemTimeout)
+        assertEquals(ServiceCommand.Idle, d.send(active(DOWNLOADING)))
+        assertEquals(ServiceCommand.Start, d.send(ForegroundEvent.AppForegrounded))
+        val e = Driver()
+        e.send(active(DOWNLOADING))
+        e.send(ForegroundEvent.SystemTimeout)
+        assertEquals(ServiceCommand.Start, e.send(ForegroundEvent.SubmitSucceeded))
+    }
+
+    @Test fun submitAfterUnreachableStopRestartsWithFreshTimer() {
+        val d = Driver()
+        d.send(active(DOWNLOADING))
+        d.send(ConnectionChanged(false, 0))
+        d.send(Tick(limit))
+        assertEquals(ServiceCommand.Start, d.send(ForegroundEvent.SubmitSucceeded))
+        assertEquals(ServiceCommand.KeepRunning, d.send(Tick(limit + 1)))
+    }
+
+    @Test fun deterministic() {
+        val events = listOf(active(DOWNLOADING), ConnectionChanged(false, 5), Tick(5 + limit))
+        fun run() = events.fold(ForegroundState() to ServiceCommand.Idle as ServiceCommand) { (s, _), e -> ForegroundPolicy.reduce(s, e) }
+        assertEquals(run(), run())
+    }
+}

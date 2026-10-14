@@ -35,6 +35,7 @@ import dev.istarvin.fetcharr.ui.add.AddScreen
 import dev.istarvin.fetcharr.ui.history.HistoryScreen
 import dev.istarvin.fetcharr.ui.navigation.AddRoute
 import dev.istarvin.fetcharr.ui.navigation.HistoryRoute
+import dev.istarvin.fetcharr.ui.navigation.OpenTarget
 import dev.istarvin.fetcharr.ui.navigation.QueueRoute
 import dev.istarvin.fetcharr.ui.navigation.SettingsRoute
 import dev.istarvin.fetcharr.ui.incoming.HubEvent
@@ -42,6 +43,8 @@ import dev.istarvin.fetcharr.ui.incoming.IncomingSheetHost
 import dev.istarvin.fetcharr.ui.incoming.IncomingViewModel
 import dev.istarvin.fetcharr.ui.queue.QueueScreen
 import dev.istarvin.fetcharr.ui.settings.SettingsScreen
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import kotlin.reflect.KClass
 
@@ -62,7 +65,7 @@ private val tabs = listOf(
 )
 
 @Composable
-fun FetcharrAppUi() {
+fun FetcharrAppUi(openTargets: Flow<OpenTarget> = emptyFlow()) {
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -96,7 +99,20 @@ fun FetcharrAppUi() {
         }
     }
 
+    // Notification taps ("open Queue" / "open History").
+    LaunchedEffect(openTargets) {
+        openTargets.collect { target ->
+            navController.navigate(if (target == OpenTarget.HISTORY) HistoryRoute else QueueRoute) {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+
     val showBottomBar = destination == null || tabs.any { tab -> destination.hierarchy.any { it.hasRoute(tab.routeClass) } }
+
+    NotificationPermissionEffect()
 
     CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
         Scaffold(

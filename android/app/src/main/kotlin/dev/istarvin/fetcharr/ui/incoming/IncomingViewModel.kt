@@ -8,6 +8,7 @@ import dev.istarvin.fetcharr.data.network.dto.SubtitleDto
 import dev.istarvin.fetcharr.data.settings.AppSettings
 import dev.istarvin.fetcharr.data.settings.SettingsRepository
 import dev.istarvin.fetcharr.incoming.CategoryOption
+import dev.istarvin.fetcharr.notifications.SubmitListener
 import dev.istarvin.fetcharr.incoming.CategoryPreselector
 import dev.istarvin.fetcharr.incoming.IncomingRequest
 import dev.istarvin.fetcharr.incoming.IncomingSheet
@@ -78,6 +79,7 @@ class IncomingViewModel @Inject constructor(
     settings: SettingsRepository,
     private val categoryRepository: CategoryRepository,
     private val submit: SubmitUseCase,
+    private val submitListener: SubmitListener,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(IncomingUiState())
@@ -156,7 +158,10 @@ class IncomingViewModel @Inject constructor(
                     }
             }
             when (outcome) {
-                is SubmitOutcome.Success -> finish(sheet.id, outcome.message)
+                is SubmitOutcome.Success -> {
+                    submitListener.onSubmitSucceeded()
+                    finish(sheet.id, outcome.message)
+                }
                 SubmitOutcome.DuplicateSingle -> finish(sheet.id, SubmitOutcome.MESSAGE_DUPLICATE)
                 is SubmitOutcome.Error -> fail(sheet.id, outcome.message)
                 SubmitOutcome.NotConfigured -> fail(sheet.id, SubmitOutcome.MESSAGE_NOT_CONFIGURED)

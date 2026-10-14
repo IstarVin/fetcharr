@@ -137,4 +137,11 @@
     <string name="settings_defaults_hint">Test the connection to load your server\'s categories.</string>
     <string name="settings_group_about">About</string>
     <string name="settings_app_version">App version</string>
+
+    <!-- Notifications -->
+    <string name="channel_active_name">Active downloads</string>
+    <string name="channel_active_description">Shown while downloads are running</string>
+    <string name="channel_results_name">Download results</string>
+    <string name="channel_results_description">Completed and failed downloads</string>
+    <string name="notification_retry">Retry</string>
 </resources>

@@ -31,12 +31,13 @@ class IncomingViewModelTest {
 
     private lateinit var env: VmTestEnv
     private lateinit var vm: IncomingViewModel
+    private val submitListener = dev.istarvin.fetcharr.notifications.SubmitListener { }
 
     @Before
     fun setUp() {
         kotlinx.coroutines.Dispatchers.setMain(UnconfinedTestDispatcher())
         env = VmTestEnv(tmp.root)
-        vm = IncomingViewModel(env.hub, env.settings, env.categoryRepository, env.submit)
+        vm = IncomingViewModel(env.hub, env.settings, env.categoryRepository, env.submit, submitListener)
     }
 
 

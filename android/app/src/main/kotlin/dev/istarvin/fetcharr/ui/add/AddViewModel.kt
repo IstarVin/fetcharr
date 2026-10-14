@@ -10,6 +10,7 @@ import dev.istarvin.fetcharr.data.settings.SettingsRepository
 import dev.istarvin.fetcharr.incoming.CategoryOption
 import dev.istarvin.fetcharr.incoming.CategoryPreselector
 import dev.istarvin.fetcharr.incoming.IncomingRequest
+import dev.istarvin.fetcharr.notifications.SubmitListener
 import dev.istarvin.fetcharr.ui.incoming.IncomingHub
 import dev.istarvin.fetcharr.ui.incoming.ItemForm
 import dev.istarvin.fetcharr.ui.incoming.SubmitOutcome
@@ -69,6 +70,7 @@ class AddViewModel @Inject constructor(
     settings: SettingsRepository,
     private val categoryRepository: CategoryRepository,
     private val submit: SubmitUseCase,
+    private val submitListener: SubmitListener,
 ) : ViewModel() {
 
     // Type-safe navigation stores AddRoute's arguments in the SavedStateHandle under their property names.
@@ -169,6 +171,7 @@ class AddViewModel @Inject constructor(
             )
             when (outcome) {
                 is SubmitOutcome.Success -> {
+                    submitListener.onSubmitSucceeded()
                     hub.showMessage(outcome.message)
                     eventChannel.trySend(AddEvent.Done)
                 }

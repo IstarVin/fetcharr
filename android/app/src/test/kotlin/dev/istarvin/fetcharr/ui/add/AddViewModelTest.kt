@@ -45,10 +45,12 @@ class AddViewModelTest {
     }
 
     private val created = mutableListOf<AddViewModel>()
+    private var submitsReported = 0
+    private val submitListener = dev.istarvin.fetcharr.notifications.SubmitListener { submitsReported++ }
 
     private fun vm(url: String? = null) = AddViewModel(
         SavedStateHandle(if (url == null) emptyMap() else mapOf("url" to url)),
-        env.hub, env.settings, env.categoryRepository, env.submit,
+        env.hub, env.settings, env.categoryRepository, env.submit, submitListener,
     ).also { created += it }
 
     private fun run(block: suspend () -> Unit) {
@@ -111,6 +113,7 @@ class AddViewModelTest {
         vm.submit()
         assertEquals(AddEvent.Done, vm.events.first())
         assertEquals(HubEvent.Snackbar("Added 1 download"), env.hub.events.first())
+        assertEquals(1, submitsReported)
 
         val body = Json.parseToJsonElement(env.server.takeRequest().body.readUtf8()).jsonObject
         assertEquals("movies", body["category"]!!.jsonPrimitive.content)
@@ -146,6 +149,7 @@ class AddViewModelTest {
         assertEquals("Already in the queue", vm.uiState.first { it.error != null }.error)
         assertEquals("https://cdn.example/a", vm.uiState.value.url)
         assertFalse(vm.uiState.value.submitting)
+        assertEquals(0, submitsReported)
     }
 
     @Test

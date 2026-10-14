@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
         android:name=".FetcharrApp"
@@ -34,6 +37,17 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+
+        <!-- Keeps the WebSocket alive while downloads run (dataSync; Android 15 limits it, see onTimeout). -->
+        <service
+            android:name=".notifications.SyncForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Retry action on result notifications. -->
+        <receiver
+            android:name=".notifications.RetryReceiver"
+            android:exported="false" />
     </application>
 
 </manifest>
