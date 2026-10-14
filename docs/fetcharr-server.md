@@ -71,6 +71,9 @@ The normal path is `pending → downloading → processing → completed`. A job
 
 Any other action on a job returns `409 invalid_state`.
 
+- **Cancel during processing** is accepted only until file placement (§4.3, step 3) starts. After that, cancel returns `409 invalid_state` and the job completes normally, so the library never holds a half-placed job.
+- **Retry after cancel** starts the download from scratch, because cancel deletes the work directory. To stop a job and keep its partial files, pause it.
+
 ### 2.5 Queue order
 
 Pending jobs are dispatched in ascending `queued_at` order. `queued_at` is set when a job is created, resumed or retried, so those jobs go to the back of the queue. A batch's episodes are queued in ascending episode order.
@@ -175,7 +178,7 @@ yt-dlp runs as a subprocess in its own process group. It writes into the job's w
 
 1. **Subtitles.** Download each subtitle URL using the job's headers. Anything that isn't SRT is converted to SRT with ffmpeg. A subtitle that fails to download or convert does not fail the job; it adds an entry to `warnings`.
 2. **Existing file, again.** Repeat the check from §4.1, because another job may have created the file during the download.
-3. **Place files.** Move the media file and subtitles to their final paths (§5), creating folders as needed. If the work directory and library are on different filesystems, copy to `<target>.partial` and then rename, so the library never contains a half-written file.
+3. **Place files.** Move the media file and subtitles to their final paths (§5), creating folders as needed. If the work directory and library are on different filesystems, copy to `<target>.partial` and then rename, so the library never contains a half-written file. Once placement starts, the job can no longer be cancelled (§2.4).
 4. **Clean up.** Delete the work directory.
 5. **Complete.** Set `status=completed`, `progress.percent=100` and `file_path`.
 6. **Notify media servers** (§4.5). This runs asynchronously and never affects the job's status.
@@ -185,7 +188,7 @@ Any error in steps 2–4 fails the job with `processing_failed` (or `already_exi
 ### 4.4 Pause, cancel, shutdown
 
 - **Pause.** Kill the yt-dlp process group, keep the work directory, and set `paused`. The worker slot is freed. Resume sets the job back to `pending`; yt-dlp later continues from the partial files.
-- **Cancel.** Kill the process group (yt-dlp or ffmpeg), delete the work directory, and set `cancelled`.
+- **Cancel.** Kill the process group (yt-dlp or ffmpeg), delete the work directory, and set `cancelled`. Not allowed once placement has started (§2.4). A later retry starts from scratch.
 - **Graceful shutdown (SIGINT/SIGTERM).** Stop accepting requests, kill all running processes, set `downloading` and `processing` jobs back to `pending`, close WebSocket connections, and exit.
 - **Startup recovery.** Any job left in `downloading` or `processing` after a crash is set back to `pending` and keeps its work directory. Paused jobs stay paused.
 
@@ -240,7 +243,7 @@ Example:
 
 - **Base URL:** `http://<host>:<port>/api`. Bodies are JSON (`application/json`).
 - **Auth:** when `server.auth_token` is set, every endpoint except `/api/health` requires `Authorization: Bearer <token>`. The WebSocket upgrade request also needs it. A missing or wrong token returns `401 unauthorized`. Tokens are compared in constant time.
-- **Times:** RFC 3339 in UTC.
+- **Times:** RFC 3339 in UTC with millisecond precision, e.g. `2026-10-14T14:30:00.123Z`. The precision keeps `finished_after` catch-up from skipping jobs that finish in the same second.
 - **Errors:** every non-2xx response has this shape:
 
 ```json
@@ -255,6 +258,7 @@ Example:
 | 409 | `invalid_state` | Action not allowed in the current status |
 | 409 | `duplicate` | The same URL is already `pending`, `downloading`, `processing` or `paused` |
 | 409 | `ytdlp_unmanaged` | Update requested but `ytdlp.binary` is set |
+| 409 | `ytdlp_busy` | Update requested while a job is `downloading` |
 | 500 | `internal` | Unexpected server error |
 
 ### 6.2 Job object
@@ -285,9 +289,9 @@ Returned by every endpoint that returns jobs. **Request headers are never includ
   "error_code": null,
   "error_message": null,
   "warnings": [],
-  "created_at": "2026-10-14T14:30:00Z",
-  "queued_at": "2026-10-14T14:30:00Z",
-  "started_at": "2026-10-14T14:30:05Z",
+  "created_at": "2026-10-14T14:30:00.000Z",
+  "queued_at": "2026-10-14T14:30:00.000Z",
+  "started_at": "2026-10-14T14:30:05.412Z",
   "finished_at": null
 }
 ```
@@ -397,7 +401,7 @@ Returns one Job, or `404`.
 Apply the transition (§2.4). Return `200` with the updated Job.
 
 #### `POST /api/jobs/{id}/retry`
-Requeues a `failed` or `cancelled` job with the same URL, headers and subtitles. It clears `error_*`, `warnings` and `progress`. Optional body: `{ "overwrite": true }` replaces an existing library file (see `already_exists`). Returns `200` with the Job.
+Requeues a `failed` or `cancelled` job with the same URL, headers and subtitles. A cancelled job starts from scratch, because its work directory was deleted. A failed job reuses whatever its work directory still holds. It clears `error_*`, `warnings` and `progress`. Optional body: `{ "overwrite": true }` replaces an existing library file (see `already_exists`). Returns `200` with the Job.
 
 #### `DELETE /api/jobs/{id}`
 Removes a finished job's record. Returns `204`.
@@ -412,7 +416,7 @@ Clears history. Deletes every finished job matching `?status=` (default `complet
 Applies the action to each job in the batch where the transition is allowed and skips the rest. Returns `200 { "jobs": [ …updated jobs… ] }`, or `404` if the batch doesn't exist.
 
 #### `POST /api/system/ytdlp/update`
-Updates the managed yt-dlp binary right away. Returns `200 {"previous": "2026.09.01", "current": "2026.09.30"}`. Returns `409 ytdlp_unmanaged` when `ytdlp.binary` is set.
+Updates the managed yt-dlp binary right away. Returns `200 {"previous": "2026.09.01", "current": "2026.09.30"}`. Returns `409 ytdlp_unmanaged` when `ytdlp.binary` is set, and `409 ytdlp_busy` while any job is `downloading`. A manual update never waits; the client tries again later.
 
 #### `GET /api/ws`
 WebSocket upgrade. See §7.
@@ -443,7 +447,7 @@ Clients recover finished jobs they missed while disconnected with `GET /api/jobs
 ## 8. yt-dlp Management
 
 - **Managed mode** (`ytdlp.binary` empty). The binary lives at `<data_dir>/bin/yt-dlp`. If it is missing at startup, the server downloads the latest release from the official yt-dlp GitHub releases.
-- **Auto-update** (`ytdlp.auto_update: true`, managed mode only). The server runs `yt-dlp -U` at startup and every 24 hours. If downloads are running, the update waits until no job is `downloading`.
+- **Auto-update** (`ytdlp.auto_update: true`, managed mode only). The server runs `yt-dlp -U` at startup and every 24 hours. If downloads are running when an update is due, the dispatcher stops starting new jobs, waits until no job is `downloading`, runs the update, and then resumes dispatching. A busy queue can therefore delay an update only by as long as the current downloads take. Jobs in `processing` don't block the update. If the update fails, the error is logged and dispatching resumes.
 - **Manual update.** `POST /api/system/ytdlp/update` (§6.3).
 - **Unmanaged mode** (`ytdlp.binary` set). The server uses that binary and never updates it.
 

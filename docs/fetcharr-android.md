@@ -4,6 +4,7 @@ The Android client for the [Fetcharr server](fetcharr-server.md). It receives do
 
 **Stack:** Kotlin · Jetpack Compose (Material 3) · Hilt · Retrofit/OkHttp · kotlinx.serialization · DataStore
 **Package:** `com.istarvin.fetcharr`
+**Platform:** minSdk 29 (Android 10) · targetSdk 36 · signed APK on GitHub Releases
 
 Related contracts:
 
@@ -59,6 +60,8 @@ The activity uses `singleTask`, so it receives intents in both `onCreate` and `o
 ### 3.1 Settings needed
 
 The server URL and an optional API token, both stored in DataStore. Until a URL is saved, the Queue shows a "Set up your server" empty state that links to Settings.
+
+Plain `http://` URLs are allowed. The app's network security config permits cleartext traffic, because most servers run on a LAN or VPN without TLS. The token is then sent unencrypted, so a server reachable from the internet should sit behind an HTTPS reverse proxy.
 
 Every REST call and the WebSocket send `Authorization: Bearer <token>` when a token is set. Changing either setting reconnects right away.
 
@@ -229,6 +232,7 @@ About
 
 - **Test connection** calls `GET /api/info` and reports one of: connected (with version and latency), "Can't reach server", "Wrong API token" (`401`), or "Not a Fetcharr server" (the response doesn't parse).
 - A URL entered without a scheme gets `http://` added. A trailing slash is removed.
+- **Update now** calls `POST /api/system/ytdlp/update` and shows the new version. On `409 ytdlp_busy` it shows "Downloads are running — try again when they finish".
 
 ---
 
@@ -261,7 +265,7 @@ About
 
 - On first run, *last seen* is set to the current time, so older history never triggers notifications.
 - **Catch-up:** after reconnecting, the app fetches `GET /api/jobs?finished_after=<last seen>` and posts results for anything it missed. It then advances *last seen*.
-- No result notification is posted when the user cancels a job.
+- No result notification is posted when the user cancels a job. A batch summary counts only downloaded and failed episodes, and is not posted if every episode was cancelled. An episode retried after its batch summary gets its own per-job notification.
 
 ---
 

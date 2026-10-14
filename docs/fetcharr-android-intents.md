@@ -29,7 +29,7 @@ Root object. It must contain **exactly one** of `single` or `batch`.
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `url` | string | yes | `http`/`https` media URL (direct file, HLS or DASH) |
-| `title` | string | yes | Movie title, or the episode title for episodes |
+| `title` | string | yes* | Movie title, or the episode title for episodes. *Optional when `showName`, `season` and `episode` are all set |
 | `showName` | string | no | Together with `season` and `episode`, marks the request as an episode |
 | `season` | int | no | ≥0 |
 | `episode` | int | no | ≥0 |
@@ -92,7 +92,7 @@ There are two ways to send a season:
     val batch: Batch? = null,
 )
 @Serializable data class Single(
-    val url: String, val title: String,
+    val url: String, val title: String? = null,
     val showName: String? = null, val season: Int? = null, val episode: Int? = null,
     val year: Int? = null, val subtitles: List<Subtitle> = emptyList(),
 )
