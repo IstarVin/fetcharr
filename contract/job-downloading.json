@@ -1,0 +1,33 @@
+{
+  "id": "0f6c1a6e-6f5e-4a8a-9a0e-2b7f8f4f1c11",
+  "batch_id": "b1d3a7c4-52e8-4f0b-9c61-7a3e2d5f8b90",
+  "category": "tv",
+  "url": "https://cdn.example/sev/s02e01.m3u8",
+  "title": "Hello, Ms. Cobel",
+  "show_name": "Severance",
+  "season": 2,
+  "episode": 1,
+  "year": 2022,
+  "subtitles": [
+    {
+      "url": "https://cdn.example/sev/s02e01.en.vtt",
+      "lang": "en"
+    }
+  ],
+  "status": "downloading",
+  "progress": {
+    "percent": 42.7,
+    "downloaded_bytes": 325058560,
+    "total_bytes": 754974720,
+    "speed_bps": 3250585,
+    "eta_seconds": 132
+  },
+  "file_path": null,
+  "error_code": null,
+  "error_message": null,
+  "warnings": [],
+  "created_at": "2026-10-14T14:30:00.000Z",
+  "queued_at": "2026-10-14T14:30:00.000Z",
+  "started_at": "2026-10-14T14:30:05.412Z",
+  "finished_at": null
+}

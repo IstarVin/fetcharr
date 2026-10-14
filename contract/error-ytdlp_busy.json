@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "ytdlp_busy",
+    "message": "cannot update yt-dlp while a job is downloading"
+  }
+}

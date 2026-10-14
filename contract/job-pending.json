@@ -1,0 +1,22 @@
+{
+  "id": "7c2e9d40-3b1a-4e57-8d26-91f4a0c6b5e2",
+  "batch_id": "b1d3a7c4-52e8-4f0b-9c61-7a3e2d5f8b90",
+  "category": "tv",
+  "url": "https://cdn.example/sev/s02e02.m3u8",
+  "title": "Goodbye, Mrs. Selvig",
+  "show_name": "Severance",
+  "season": 2,
+  "episode": 2,
+  "year": 2022,
+  "subtitles": [],
+  "status": "pending",
+  "progress": null,
+  "file_path": null,
+  "error_code": null,
+  "error_message": null,
+  "warnings": [],
+  "created_at": "2026-10-14T14:30:00.001Z",
+  "queued_at": "2026-10-14T14:30:00.001Z",
+  "started_at": null,
+  "finished_at": null
+}

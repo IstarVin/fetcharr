@@ -1,0 +1,33 @@
+{
+  "category": "tv",
+  "headers": {
+    "Referer": "https://stream.example/"
+  },
+  "batch": {
+    "showName": "Example Show",
+    "season": 1,
+    "year": 2026,
+    "episodes": [
+      {
+        "episode": 1,
+        "title": "Pilot",
+        "url": "https://cdn.example/show/s01e01.mp4",
+        "subtitles": [
+          {
+            "url": "https://cdn.example/show/s01e01.en.vtt",
+            "lang": "en"
+          }
+        ]
+      },
+      {
+        "episode": 2,
+        "url": "https://cdn.example/show/s01e02.mp4"
+      },
+      {
+        "episode": 3,
+        "title": "Third Episode",
+        "url": "https://cdn.example/show/s01e03.mp4"
+      }
+    ]
+  }
+}

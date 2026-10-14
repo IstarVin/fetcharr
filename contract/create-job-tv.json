@@ -1,0 +1,11 @@
+{
+  "url": "https://cdn.example/andor/s01e03.m3u8",
+  "category": "tv",
+  "show_name": "Andor",
+  "season": 1,
+  "episode": 3,
+  "year": 2022,
+  "headers": {
+    "Referer": "https://example.com/"
+  }
+}

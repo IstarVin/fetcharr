@@ -1,0 +1,33 @@
+{
+  "id": "3a9b5f12-8c4d-4b6e-a1f7-6d0e2c93b845",
+  "batch_id": null,
+  "category": "movies",
+  "url": "https://cdn.example/dune2.m3u8",
+  "title": "Dune Part Two",
+  "show_name": null,
+  "season": null,
+  "episode": null,
+  "year": 2024,
+  "subtitles": [
+    {
+      "url": "https://cdn.example/dune2.en.vtt",
+      "lang": "en"
+    }
+  ],
+  "status": "processing",
+  "progress": {
+    "percent": 100.0,
+    "downloaded_bytes": 3412284416,
+    "total_bytes": 3412284416,
+    "speed_bps": 0,
+    "eta_seconds": 0
+  },
+  "file_path": null,
+  "error_code": null,
+  "error_message": null,
+  "warnings": [],
+  "created_at": "2026-10-14T14:12:41.208Z",
+  "queued_at": "2026-10-14T14:12:41.208Z",
+  "started_at": "2026-10-14T14:12:42.037Z",
+  "finished_at": null
+}

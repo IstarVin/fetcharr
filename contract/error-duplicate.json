@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "duplicate",
+    "message": "url is already active: https://cdn.example/dune2.m3u8"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "category": "movies",
+  "single": {
+    "url": "https://cdn.example/movie.mp4",
+    "title": "Example Movie",
+    "year": 2026
+  }
+}

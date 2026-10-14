@@ -1,0 +1,39 @@
+{
+  "id": "91b4c6e8-0d3f-4a25-8e7b-c5a2f1d60937",
+  "batch_id": null,
+  "category": "movies",
+  "url": "https://cdn.example/oppenheimer.mp4",
+  "title": "Oppenheimer",
+  "show_name": null,
+  "season": null,
+  "episode": null,
+  "year": 2023,
+  "subtitles": [
+    {
+      "url": "https://cdn.example/oppenheimer.en.vtt",
+      "lang": "en"
+    },
+    {
+      "url": "https://cdn.example/oppenheimer.es.vtt",
+      "lang": "es"
+    }
+  ],
+  "status": "completed",
+  "progress": {
+    "percent": 100.0,
+    "downloaded_bytes": 5368709120,
+    "total_bytes": 5368709120,
+    "speed_bps": 0,
+    "eta_seconds": 0
+  },
+  "file_path": "/media/movies/Oppenheimer (2023)/Oppenheimer (2023).mp4",
+  "error_code": null,
+  "error_message": null,
+  "warnings": [
+    "subtitle es (https://cdn.example/oppenheimer.es.vtt): download failed: HTTP 404"
+  ],
+  "created_at": "2026-10-14T12:05:00.119Z",
+  "queued_at": "2026-10-14T12:05:00.119Z",
+  "started_at": "2026-10-14T12:05:01.502Z",
+  "finished_at": "2026-10-14T12:41:37.846Z"
+}

@@ -1,0 +1,10 @@
+{
+  "category": "tv",
+  "single": {
+    "url": "https://cdn.example/show/special.mp4",
+    "title": "Behind the Scenes",
+    "showName": "Example Show",
+    "season": 0,
+    "episode": 0
+  }
+}

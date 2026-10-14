@@ -1,0 +1,9 @@
+{
+  "category": "tv",
+  "single": {
+    "url": "https://cdn.example/show/s01e02.mp4",
+    "showName": "Example Show",
+    "season": 1,
+    "episode": 2
+  }
+}

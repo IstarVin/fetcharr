@@ -1,0 +1,12 @@
+{
+  "category": "movies",
+  "futureField": true,
+  "single": {
+    "url": "https://cdn.example/movie.mp4",
+    "title": "Example Movie",
+    "rating": "PG",
+    "extra": {
+      "a": 1
+    }
+  }
+}

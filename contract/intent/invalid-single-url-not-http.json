@@ -1,0 +1,6 @@
+{
+  "single": {
+    "url": "ftp://cdn.example/movie.mp4",
+    "title": "Example Movie"
+  }
+}

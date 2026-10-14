@@ -1,0 +1,11 @@
+{
+  "single": {
+    "url": "https://cdn.example/show/s01e01.mp4",
+    "title": "Pilot",
+    "subtitles": [
+      {
+        "lang": "en"
+      }
+    ]
+  }
+}

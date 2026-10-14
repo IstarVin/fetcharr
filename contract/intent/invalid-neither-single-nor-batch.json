@@ -1,0 +1,7 @@
+{
+  "category": "tv",
+  "headers": {
+    "Referer": "https://stream.example/",
+    "User-Agent": "CloudStream"
+  }
+}

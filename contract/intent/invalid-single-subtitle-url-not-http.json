@@ -1,0 +1,12 @@
+{
+  "single": {
+    "url": "https://cdn.example/show/s01e01.mp4",
+    "title": "Pilot",
+    "subtitles": [
+      {
+        "url": "file:///sdcard/sub.vtt",
+        "lang": "en"
+      }
+    ]
+  }
+}

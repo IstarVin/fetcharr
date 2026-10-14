@@ -1,0 +1,30 @@
+{
+  "version": "1.0.0",
+  "ytdlp_version": "2026.09.30",
+  "ytdlp_managed": true,
+  "concurrency": 2,
+  "auth_required": true,
+  "categories": [
+    {
+      "id": "movies",
+      "label": "Movies",
+      "layout": "movie",
+      "path": "/media/movies",
+      "free_bytes": 812345678901
+    },
+    {
+      "id": "tv",
+      "label": "TV Shows",
+      "layout": "tv",
+      "path": "/media/tv",
+      "free_bytes": 812345678901
+    },
+    {
+      "id": "misc",
+      "label": "Misc",
+      "layout": "flat",
+      "path": "/media/misc",
+      "free_bytes": 812345678901
+    }
+  ]
+}

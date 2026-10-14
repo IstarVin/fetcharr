@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "ytdlp_unmanaged",
+    "message": "yt-dlp is not managed: ytdlp.binary is set"
+  }
+}

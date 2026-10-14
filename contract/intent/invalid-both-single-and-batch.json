@@ -1,0 +1,16 @@
+{
+  "single": {
+    "url": "https://cdn.example/show/s01e01.mp4",
+    "title": "Pilot"
+  },
+  "batch": {
+    "showName": "Example Show",
+    "season": 1,
+    "episodes": [
+      {
+        "episode": 1,
+        "url": "https://cdn.example/show/s01e01.mp4"
+      }
+    ]
+  }
+}
