@@ -27,3 +27,8 @@ func redact(s string, secrets []string) string {
 	}
 	return urlQuery.ReplaceAllString(s, "$1")
 }
+
+// Redact removes every secret substring and every URL query string from s.
+// Other subprocess wrappers (ffmpeg) use it for text that may reach a job's
+// error message or warnings.
+func Redact(s string, secrets []string) string { return redact(s, secrets) }

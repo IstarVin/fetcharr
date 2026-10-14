@@ -10,6 +10,7 @@ import (
 
 	"github.com/istarvin/fetcharr/server/internal/config"
 	"github.com/istarvin/fetcharr/server/internal/jobs"
+	"github.com/istarvin/fetcharr/server/internal/library"
 	"github.com/istarvin/fetcharr/server/internal/naming"
 	"github.com/istarvin/fetcharr/server/internal/store"
 	"github.com/istarvin/fetcharr/server/internal/timefmt"
@@ -403,9 +404,12 @@ func (s *Service) afterAction(ev jobs.Event, from jobs.Status, j *store.Job) {
 }
 
 // Delete removes the record of a finished job. The status check and the
-// delete are one atomic statement. Errors: not_found, invalid_state (job still
-// active).
-func (s *Service) Delete(ctx context.Context, id string, _ DeleteOptions) error {
+// delete are one atomic statement. With opts.DeleteFile, the media file and
+// subtitle sidecars of a completed job are deleted first (and the folders
+// that leaves empty, up to the category root); a failure keeps the record so
+// the request can be repeated. Errors: not_found, invalid_state (job still
+// active), invalid_request (delete_file for a file outside its category).
+func (s *Service) Delete(ctx context.Context, id string, opts DeleteOptions) error {
 	for range maxCASAttempts {
 		cur, err := s.Get(ctx, id)
 		if err != nil {
@@ -413,6 +417,11 @@ func (s *Service) Delete(ctx context.Context, id string, _ DeleteOptions) error 
 		}
 		if _, err := jobs.Transition(cur.Status, jobs.EventDelete, cur.Placing); err != nil {
 			return invalidState(cur, jobs.EventDelete, err)
+		}
+		if opts.DeleteFile && cur.Status == jobs.StatusCompleted && cur.FilePath != nil {
+			if err := s.deleteFiles(cur); err != nil {
+				return err
+			}
 		}
 		err = s.store.DeleteIf(ctx, id, jobs.FinishedStatuses())
 		switch {
@@ -428,6 +437,22 @@ func (s *Service) Delete(ctx context.Context, id string, _ DeleteOptions) error 
 		}
 	}
 	return newErr(CodeInvalidState, nil, "job %s is changing concurrently, try again", id)
+}
+
+// deleteFiles removes the library files of a completed job (spec §6.3). A file
+// that is already gone is not an error.
+func (s *Service) deleteFiles(j *store.Job) error {
+	cat, ok := s.cfg.Category(j.Category)
+	if !ok {
+		return invalid("category '%s' no longer exists; cannot delete the file", j.Category)
+	}
+	if _, err := library.RemoveFiles(cat.Path, *j.FilePath); err != nil {
+		if errors.Is(err, library.ErrOutsideRoot) {
+			return newErr(CodeInvalidRequest, err, "the file is outside category '%s'; not deleted", cat.ID)
+		}
+		return fmt.Errorf("delete files of job %s: %w", j.ID, err)
+	}
+	return nil
 }
 
 // DeleteMany clears history: it deletes every job whose status is in statuses

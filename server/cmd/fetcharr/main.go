@@ -18,6 +18,7 @@ import (
 	"github.com/istarvin/fetcharr/server/internal/config"
 	"github.com/istarvin/fetcharr/server/internal/events"
 	"github.com/istarvin/fetcharr/server/internal/jobs"
+	"github.com/istarvin/fetcharr/server/internal/process"
 	"github.com/istarvin/fetcharr/server/internal/runner"
 	"github.com/istarvin/fetcharr/server/internal/service"
 	"github.com/istarvin/fetcharr/server/internal/store"
@@ -98,7 +99,9 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 	bus := events.NewBus()
 	defer bus.Close()
 	svc := service.New(st, cfg, service.WithPublisher(bus))
-	rn := runner.New(runner.Options{Config: cfg, Store: st, Publisher: bus, Logger: log})
+	// S5 plugs the media server refresh into OnCompleted.
+	proc := process.New(process.Options{Config: cfg, Store: st, Publisher: bus, Logger: log})
+	rn := runner.New(runner.Options{Config: cfg, Store: st, Publisher: bus, Processor: proc, Logger: log})
 	svc.SetController(rn)
 	rn.Start()
 	// Safety net for early returns; the normal path shuts the runner down

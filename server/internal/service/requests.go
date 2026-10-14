@@ -74,8 +74,8 @@ type RetryOptions struct {
 // DeleteOptions are the optional parameters of Delete.
 type DeleteOptions struct {
 	// DeleteFile asks to also delete the media file and sidecars of a
-	// completed job (spec §6.3). Not implemented before phase S4: it is
-	// accepted and ignored, so files are never touched.
+	// completed job, then the folders that leaves empty up to the category
+	// root (spec §6.3). It is ignored for failed and cancelled jobs.
 	DeleteFile bool
 }
 

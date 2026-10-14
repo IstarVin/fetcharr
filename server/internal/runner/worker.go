@@ -103,7 +103,7 @@ func (w *run) execute() {
 	}
 	w.status, w.job = jobs.StatusProcessing, row
 	r.log.Info("job downloaded", "job", row)
-	// The "job completed" info log (spec §9) belongs to the S4 Processor,
+	// The "job completed" info log (spec §9) is written by the Processor,
 	// which owns the processing -> completed transition.
 	r.leaveDownloading(w.e) // processing jobs do not block the hold's idle signal
 
