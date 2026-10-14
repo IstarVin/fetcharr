@@ -14,6 +14,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -28,6 +29,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import dev.istarvin.fetcharr.R
 import dev.istarvin.fetcharr.ui.add.AddScreen
 import dev.istarvin.fetcharr.ui.history.HistoryScreen
@@ -35,8 +37,12 @@ import dev.istarvin.fetcharr.ui.navigation.AddRoute
 import dev.istarvin.fetcharr.ui.navigation.HistoryRoute
 import dev.istarvin.fetcharr.ui.navigation.QueueRoute
 import dev.istarvin.fetcharr.ui.navigation.SettingsRoute
+import dev.istarvin.fetcharr.ui.incoming.HubEvent
+import dev.istarvin.fetcharr.ui.incoming.IncomingSheetHost
+import dev.istarvin.fetcharr.ui.incoming.IncomingViewModel
 import dev.istarvin.fetcharr.ui.queue.QueueScreen
 import dev.istarvin.fetcharr.ui.settings.SettingsScreen
+import kotlinx.coroutines.launch
 import kotlin.reflect.KClass
 
 /**
@@ -61,6 +67,28 @@ fun FetcharrAppUi() {
     val snackbarHostState = remember { SnackbarHostState() }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val destination = backStackEntry?.destination
+    val incomingViewModel: IncomingViewModel = hiltViewModel()
+    val openSettings = {
+        navController.navigate(SettingsRoute) {
+            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+
+    // Snackbars and "open Add" requests from intents and from the Incoming sheet.
+    LaunchedEffect(incomingViewModel) {
+        incomingViewModel.events.collect { event ->
+            when (event) {
+                is HubEvent.Snackbar -> {
+                    snackbarHostState.currentSnackbarData?.dismiss()
+                    launch { snackbarHostState.showSnackbar(event.message) }
+                }
+                is HubEvent.OpenAdd -> navController.navigate(AddRoute(event.url)) { launchSingleTop = true }
+            }
+        }
+    }
+
     val showBottomBar = destination == null || tabs.any { tab -> destination.hierarchy.any { it.hasRoute(tab.routeClass) } }
 
     CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
@@ -97,19 +125,21 @@ fun FetcharrAppUi() {
             ) {
                 composable<QueueRoute> {
                     QueueScreen(
-                        onOpenSettings = {
-                            navController.navigate(SettingsRoute) {
-                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
+                        onOpenSettings = { openSettings() },
+                        onAdd = { navController.navigate(AddRoute()) },
                     )
                 }
                 composable<HistoryRoute> { HistoryScreen() }
                 composable<SettingsRoute> { SettingsScreen() }
-                composable<AddRoute> { AddScreen(onBack = { navController.popBackStack() }) }
+                composable<AddRoute> {
+                    AddScreen(onBack = { navController.popBackStack() }, onOpenSettings = { openSettings() })
+                }
             }
         }
+        IncomingSheetHost(
+            onOpenSettings = { openSettings() },
+            onSettingsDestination = destination?.hierarchy?.any { it.hasRoute(SettingsRoute::class) } == true,
+            viewModel = incomingViewModel,
+        )
     }
 }

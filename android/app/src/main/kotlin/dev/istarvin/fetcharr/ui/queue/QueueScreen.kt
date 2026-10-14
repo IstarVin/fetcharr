@@ -5,10 +5,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -46,9 +48,17 @@ class QueueViewModel @Inject constructor(settings: SettingsRepository) : ViewMod
 /** Placeholder; the live job list arrives in a later phase. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun QueueScreen(onOpenSettings: () -> Unit, viewModel: QueueViewModel = hiltViewModel()) {
+fun QueueScreen(onOpenSettings: () -> Unit, onAdd: () -> Unit, viewModel: QueueViewModel = hiltViewModel()) {
     val hasServer by viewModel.hasServer.collectAsStateWithLifecycle()
-    Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.nav_queue)) }) }) { padding ->
+    Scaffold(
+        topBar = { TopAppBar(title = { Text(stringResource(R.string.nav_queue)) }) },
+        // Temporary: the real Queue FAB arrives with the Queue phase.
+        floatingActionButton = {
+            FloatingActionButton(onClick = onAdd) {
+                Icon(Icons.Outlined.Add, contentDescription = stringResource(R.string.queue_add))
+            }
+        },
+    ) { padding ->
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 32.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),

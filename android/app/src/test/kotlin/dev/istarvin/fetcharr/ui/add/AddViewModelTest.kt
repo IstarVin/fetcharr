@@ -1,0 +1,149 @@
+package dev.istarvin.fetcharr.ui.add
+
+import androidx.lifecycle.SavedStateHandle
+import dev.istarvin.fetcharr.data.network.Fixtures
+import dev.istarvin.fetcharr.ui.incoming.HubEvent
+import dev.istarvin.fetcharr.ui.incoming.VmTestEnv
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class AddViewModelTest {
+    @get:Rule
+    val tmp = TemporaryFolder()
+
+    private lateinit var env: VmTestEnv
+
+    @Before
+    fun setUp() {
+        kotlinx.coroutines.Dispatchers.setMain(UnconfinedTestDispatcher())
+        env = VmTestEnv(tmp.root)
+    }
+
+    @After
+    fun tearDown() {
+        created.forEach { it.viewModelScope.cancel() } // stop collectors that dispatch on Main before Main is reset
+        env.close()
+        kotlinx.coroutines.Dispatchers.resetMain()
+    }
+
+    private val created = mutableListOf<AddViewModel>()
+
+    private fun vm(url: String? = null) = AddViewModel(
+        SavedStateHandle(if (url == null) emptyMap() else mapOf("url" to url)),
+        env.hub, env.settings, env.categoryRepository, env.submit,
+    ).also { created += it }
+
+    private fun run(block: suspend () -> Unit) {
+        env.await(block)
+    }
+
+    private suspend fun prepare() {
+        env.configureServer()
+        env.settings.setCachedCategories(env.categories)
+        env.settings.setDefaultMovieCategoryId("movies")
+    }
+
+    @Test
+    fun urlIsPrefilledFromTheRouteAndCategoryPreselected() = run {
+        prepare()
+        val vm = vm("https://example.com/v.m3u8")
+        val s = vm.uiState.first { it.categoryId != null }
+        assertEquals("https://example.com/v.m3u8", s.url)
+        assertEquals("movies", s.categoryId)
+        assertEquals("movie", s.layout)
+    }
+
+    @Test
+    fun submitRulesRequireHttpUrlAndLayoutFields() = run {
+        prepare()
+        val vm = vm()
+        vm.uiState.first { it.categoryId != null }
+        assertFalse(vm.uiState.value.canSubmit)
+        vm.onUrl("example.com/v")
+        vm.onTitle("Dune")
+        assertTrue(vm.uiState.value.urlInvalid)
+        assertFalse(vm.uiState.value.canSubmit)
+        vm.onUrl("https://example.com/v")
+        assertTrue(vm.uiState.value.canSubmit)
+        vm.addSubtitle()
+        vm.updateSubtitle(vm.uiState.value.subtitles.single().id, url = "ftp://x")
+        assertFalse(vm.uiState.value.canSubmit)
+        vm.updateSubtitle(vm.uiState.value.subtitles.single().id, url = "")
+        assertTrue("blank subtitle rows are ignored", vm.uiState.value.canSubmit)
+        vm.selectCategory("tv")
+        assertFalse(vm.uiState.value.canSubmit)
+    }
+
+    @Test
+    fun successSendsHeadersAndSubtitlesThenEmitsDoneAndSnackbar() = run {
+        prepare()
+        env.server.enqueue(env.json(201, Fixtures.text("job-pending.json")))
+        val vm = vm("https://cdn.example/dune2.m3u8")
+        vm.uiState.first { it.categoryId != null }
+        vm.onTitle("Dune Part Two")
+        vm.onYear("2024")
+        vm.addHeader()
+        val h = vm.uiState.value.headers.single().id
+        vm.updateHeader(h, name = "Referer", value = "https://example.com/")
+        vm.addHeader() // blank row is dropped
+        vm.addSubtitle()
+        val sub = vm.uiState.value.subtitles.single().id
+        vm.updateSubtitle(sub, url = "https://cdn.example/dune2.en.vtt", lang = "en")
+
+        vm.submit()
+        assertEquals(AddEvent.Done, vm.events.first())
+        assertEquals(HubEvent.Snackbar("Added 1 download"), env.hub.events.first())
+
+        val body = Json.parseToJsonElement(env.server.takeRequest().body.readUtf8()).jsonObject
+        assertEquals("movies", body["category"]!!.jsonPrimitive.content)
+        assertEquals("Dune Part Two", body["title"]!!.jsonPrimitive.content)
+        assertEquals("2024", body["year"]!!.jsonPrimitive.content)
+        assertEquals(setOf("Referer"), body["headers"]!!.jsonObject.keys)
+        assertEquals("en", body["subtitles"]!!.jsonArray.single().jsonObject["lang"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun errorsStayInlineAndKeepTheForm() = run {
+        prepare()
+        env.server.enqueue(env.json(400, Fixtures.text("error-invalid_request.json")))
+        env.server.enqueue(env.json(409, Fixtures.text("error-duplicate.json")))
+        val vm = vm("https://cdn.example/a")
+        vm.uiState.first { it.categoryId != null }
+        vm.onTitle("X")
+        vm.submit()
+        assertEquals("category 'foo' does not exist", vm.uiState.first { it.error != null }.error)
+        vm.onTitle("Y") // editing clears the error
+        vm.submit()
+        assertEquals("Already in the queue", vm.uiState.first { it.error != null }.error)
+        assertEquals("https://cdn.example/a", vm.uiState.value.url)
+        assertFalse(vm.uiState.value.submitting)
+    }
+
+    @Test
+    fun withoutServerSubmitIsDisabled() = run {
+        env.settings.setCachedCategories(env.categories)
+        val vm = vm("https://cdn.example/a")
+        vm.uiState.first { it.settingsLoaded && it.categoryId != null }
+        vm.onTitle("X")
+        assertFalse(vm.uiState.value.serverConfigured)
+        assertFalse(vm.uiState.value.canSubmit)
+    }
+}

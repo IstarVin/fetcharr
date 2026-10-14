@@ -19,8 +19,46 @@
     <string name="history_empty_title">No finished downloads</string>
     <string name="history_empty_body">Completed, failed and cancelled downloads will show up here.</string>
 
+    <string name="queue_add">Add download</string>
+
+    <!-- Incoming sheet and form fields -->
+    <string name="incoming_title">Download</string>
+    <plurals name="incoming_waiting">
+        <item quantity="one">%1$d more request waiting</item>
+        <item quantity="other">%1$d more requests waiting</item>
+    </plurals>
+    <string name="incoming_receiving">Receiving episodes…</string>
+    <string name="incoming_cancel">Cancel</string>
+    <string name="incoming_download">Download (%1$d)</string>
+    <string name="incoming_select_all">%1$d of %2$d selected</string>
+    <string name="incoming_no_categories">No categories yet. Test the connection in Settings to load them.</string>
+    <string name="incoming_no_server_title">Server not set up</string>
+    <string name="incoming_no_server_body">Add your Fetcharr server in Settings. Your download request is kept until then.</string>
+    <string name="incoming_open_settings">Open Settings</string>
+    <string name="field_category">Category</string>
+    <string name="field_title">Title</string>
+    <string name="field_year">Year</string>
+    <string name="field_show">Show</string>
+    <string name="field_season">Season</string>
+    <string name="field_episode">Episode</string>
+    <string name="field_episode_title">Episode title</string>
+
     <!-- Add -->
     <string name="add_title">Add download</string>
+    <string name="add_url">URL</string>
+    <string name="add_url_invalid">Enter an http:// or https:// address</string>
+    <string name="add_headers">Headers</string>
+    <string name="add_header_name">Name</string>
+    <string name="add_header_value">Value</string>
+    <string name="add_header_add">Add header</string>
+    <string name="add_header_remove">Remove header</string>
+    <string name="add_subtitles">Subtitles</string>
+    <string name="add_subtitle_url">Subtitle URL</string>
+    <string name="add_subtitle_lang">Language</string>
+    <string name="add_subtitle_add">Add subtitle</string>
+    <string name="add_subtitle_remove">Remove subtitle</string>
+    <string name="add_subtitle_url_invalid">Subtitle URLs must start with http:// or https://</string>
+    <string name="add_submit">Add download</string>
 
     <!-- Settings -->
     <string name="settings_group_server">Server</string>
