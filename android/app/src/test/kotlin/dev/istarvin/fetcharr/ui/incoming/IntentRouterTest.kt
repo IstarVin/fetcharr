@@ -45,10 +45,19 @@ class IntentRouterTest {
     }
 
     @Test
-    fun wrongOrMissingActionIsIgnored() {
-        assertEquals(RouteDecision.Ignore, router.route("android.intent.action.DELETE", "fetcharr://download", null, b64(movieJson)))
+    fun wrongActionCarryingFetcharrDataOrPayloadIsUnreadable() {
+        assertEquals(RouteDecision.Unreadable, router.route("android.intent.action.DELETE", "fetcharr://download", null, b64(movieJson)))
+        assertEquals(RouteDecision.Unreadable, router.route("android.intent.action.DELETE", "fetcharr://download", null, null))
+        assertEquals(RouteDecision.Unreadable, router.route("com.example.CUSTOM", null, null, b64(movieJson)))
+        assertEquals(RouteDecision.Unreadable, router.route(null, "FETCHARR://download", "https://a.example", b64(movieJson)))
+    }
+
+    @Test
+    fun otherIntentsAreIgnored() {
         assertEquals(RouteDecision.Ignore, router.route("android.intent.action.MAIN", null, null, null))
-        assertEquals(RouteDecision.Ignore, router.route(null, "fetcharr://download", "https://a.example", b64(movieJson)))
+        assertEquals(RouteDecision.Ignore, router.route("android.intent.action.MAIN", "fetcharr://download", null, b64(movieJson)))
+        assertEquals(RouteDecision.Ignore, router.route(null, null, "https://a.example", null))
+        assertEquals(RouteDecision.Ignore, router.route("android.intent.action.DELETE", "https://example.com", null, null))
     }
 
     @Test

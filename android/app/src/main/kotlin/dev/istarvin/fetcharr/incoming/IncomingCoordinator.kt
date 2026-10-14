@@ -66,6 +66,7 @@ class IncomingCoordinator(
     private var nextId = 1L
     private var windowGeneration = 0L
     private var windowJob: Job? = null
+    private var submittingSheetId: Long? = null
 
     private val _state = MutableStateFlow(IncomingState())
     val state: StateFlow<IncomingState> = _state.asStateFlow()
@@ -83,7 +84,7 @@ class IncomingCoordinator(
             if (open == null) {
                 val pending = newPending(request)
                 openLocked(pending)
-            } else if (open is IncomingSheet.SeasonSheet && key != null && open.key() == key) {
+            } else if (open is IncomingSheet.SeasonSheet && key != null && open.key() == key && submittingSheetId != open.id) {
                 _state.value = _state.value.copy(sheet = mergeInto(open, request))
                 restartWindowLocked()
             } else {
@@ -98,6 +99,28 @@ class IncomingCoordinator(
                 }
                 _state.value = _state.value.copy(waitingCount = queue.size)
             }
+        }
+    }
+
+    /**
+     * Locks the open sheet [sheetId] while its episodes are being submitted and returns its current content (the
+     * snapshot to submit), or null when [sheetId] is not the open sheet. While locked, new requests for the same
+     * season are queued as their own request instead of being merged, so they are not lost when the sheet closes.
+     * Selection edits are ignored while locked. [close] and [endSubmit] release the lock.
+     */
+    fun beginSubmit(sheetId: Long): IncomingSheet? {
+        synchronized(lock) {
+            val open = _state.value.sheet ?: return null
+            if (open.id != sheetId) return null
+            submittingSheetId = sheetId
+            return open
+        }
+    }
+
+    /** Releases the lock taken by [beginSubmit] (after a failed submit); merging resumes. */
+    fun endSubmit(sheetId: Long) {
+        synchronized(lock) {
+            if (submittingSheetId == sheetId) submittingSheetId = null
         }
     }
 
@@ -126,6 +149,7 @@ class IncomingCoordinator(
     /** Dismisses the open sheet (cancel or after a successful submit) and opens the next queued request. */
     fun close() {
         synchronized(lock) {
+            submittingSheetId = null
             cancelWindowLocked()
             val next = queue.removeFirstOrNull()
             if (next == null) {
@@ -141,6 +165,7 @@ class IncomingCoordinator(
     private fun updateOpenSeason(transform: (IncomingSheet.SeasonSheet) -> IncomingSheet.SeasonSheet) {
         synchronized(lock) {
             val open = _state.value.sheet as? IncomingSheet.SeasonSheet ?: return
+            if (submittingSheetId == open.id) return
             _state.value = _state.value.copy(sheet = transform(open))
         }
     }

@@ -121,6 +121,17 @@ class AddViewModelTest {
     }
 
     @Test
+    fun aSecondShareReplacesTheUrlButKeepsOtherFields() = run {
+        prepare()
+        val vm = vm("https://cdn.example/first")
+        vm.uiState.first { it.categoryId != null }
+        vm.onTitle("Keep me")
+        env.hub.replaceAddUrl("https://cdn.example/second")
+        assertEquals("https://cdn.example/second", vm.uiState.value.url)
+        assertEquals("Keep me", vm.uiState.value.form.title)
+    }
+
+    @Test
     fun errorsStayInlineAndKeepTheForm() = run {
         prepare()
         env.server.enqueue(env.json(400, Fixtures.text("error-invalid_request.json")))

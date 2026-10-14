@@ -37,6 +37,8 @@ class MainActivity : ComponentActivity() {
 
     /** Thin extraction only; all decisions are made by [IncomingHub] / `IntentRouter`. Never log the values. */
     private fun handle(intent: Intent) {
+        // Relaunching from Recents re-delivers the original intent; it was already handled.
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
         incomingHub.handleIntent(
             action = intent.action,
             dataString = intent.dataString,

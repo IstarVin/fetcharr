@@ -24,7 +24,11 @@ object CategoryPreselector {
         defaultMovieCategoryId: String?,
         defaultTvCategoryId: String?,
     ): String? {
-        val episodic = request.isEpisodic
+        // Rule 2 reads "has a season and episode (or is a batch)", so showName is not required here.
+        val episodic = when (request) {
+            is IncomingRequest.Batch -> true
+            is IncomingRequest.Single -> request.season != null && request.episode != null
+        }
 
         // 1. The hint matches a server category id (exact match first, then case-insensitive).
         request.categoryHint?.takeIf { it.isNotBlank() }?.let { hint ->

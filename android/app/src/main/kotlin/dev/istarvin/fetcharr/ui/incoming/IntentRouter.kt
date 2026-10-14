@@ -31,8 +31,14 @@ class IntentRouter(private val parser: IntentPayloadParser = IntentPayloadParser
         when (action) {
             ACTION_VIEW -> routeView(dataString, payloadExtra)
             ACTION_SEND -> RouteDecision.OpenAdd(firstHttpUrl(extraText))
-            else -> RouteDecision.Ignore
+            ACTION_MAIN -> RouteDecision.Ignore
+            // Any other action that still carries a fetcharr URI or a payload is a rejected request (Intent Guide:
+            // wrong action -> "Couldn't read the download request"); anything else is not ours.
+            else -> if (carriesFetcharrData(dataString, payloadExtra)) RouteDecision.Unreadable else RouteDecision.Ignore
         }
+
+    private fun carriesFetcharrData(dataString: String?, payloadExtra: String?): Boolean =
+        !payloadExtra.isNullOrBlank() || dataString?.trim()?.startsWith("$SCHEME:", ignoreCase = true) == true
 
     private fun routeView(dataString: String?, payloadExtra: String?): RouteDecision {
         val data = dataString?.trim().orEmpty()
@@ -47,6 +53,7 @@ class IntentRouter(private val parser: IntentPayloadParser = IntentPayloadParser
     companion object {
         const val ACTION_VIEW = "android.intent.action.VIEW"
         const val ACTION_SEND = "android.intent.action.SEND"
+        const val ACTION_MAIN = "android.intent.action.MAIN"
         const val SCHEME = "fetcharr"
 
         private val URL = Regex("""https?://[^\s<>"']+""", RegexOption.IGNORE_CASE)

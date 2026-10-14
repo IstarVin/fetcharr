@@ -83,6 +83,9 @@ class AddViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
+            hub.addUrls.collect { url -> onUrl(url) }
+        }
+        viewModelScope.launch {
             settings.settings.collect { app ->
                 val categories = app.cachedCategories.map { CategoryOption(it.id, it.label, it.layout) }
                 _uiState.update { cur ->

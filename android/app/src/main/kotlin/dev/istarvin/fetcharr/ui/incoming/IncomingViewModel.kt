@@ -86,6 +86,9 @@ class IncomingViewModel @Inject constructor(
     /** Snackbar / navigation events for the root UI. */
     val events = hub.events
 
+    /** A new share arrived while the Add screen is open: it replaces the Add screen's URL. */
+    fun replaceAddUrl(url: String) = hub.replaceAddUrl(url)
+
     private var refreshedForSheet = 0L
 
     init {
@@ -128,8 +131,9 @@ class IncomingViewModel @Inject constructor(
     fun download() {
         val state = _uiState.value
         if (!state.canDownload) return
-        val sheet = state.sheet ?: return
         val categoryId = state.categoryId ?: return
+        // Lock the sheet: episodes arriving from now on are queued separately instead of merged and lost on close.
+        val sheet = state.sheet?.let { hub.coordinator.beginSubmit(it.id) } ?: return
         _uiState.update { it.copy(submitting = true, error = null) }
         viewModelScope.launch {
             val outcome = when (sheet) {
@@ -167,6 +171,7 @@ class IncomingViewModel @Inject constructor(
     }
 
     private fun fail(sheetId: Long, message: String) {
+        hub.coordinator.endSubmit(sheetId)
         _uiState.update { if (it.sheet?.id == sheetId) it.copy(submitting = false, error = message) else it }
     }
 

@@ -84,7 +84,14 @@ fun FetcharrAppUi() {
                     snackbarHostState.currentSnackbarData?.dismiss()
                     launch { snackbarHostState.showSnackbar(event.message) }
                 }
-                is HubEvent.OpenAdd -> navController.navigate(AddRoute(event.url)) { launchSingleTop = true }
+                is HubEvent.OpenAdd -> {
+                    val onAdd = navController.currentBackStackEntry?.destination?.hasRoute(AddRoute::class) == true
+                    when {
+                        // Add is already open: a new share replaces its URL field, other fields are kept.
+                        onAdd -> event.url?.let(incomingViewModel::replaceAddUrl)
+                        else -> navController.navigate(AddRoute(event.url)) { launchSingleTop = true }
+                    }
+                }
             }
         }
     }

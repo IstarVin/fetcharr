@@ -35,6 +35,13 @@ class CategoryPreselectorTest {
     }
 
     @Test
+    fun rule2SeasonAndEpisodeWithoutShowNameStillUsesDefaultTv() {
+        val r = IncomingRequest.Single(null, "https://a.example/e.mp4", "X", null, null, 1, 2, emptyMap(), emptyList())
+        assertEquals("anime", pick(r, movieDef = "movies", tvDef = "anime"))
+        assertEquals("shows", pick(r, movieDef = "movies"))
+    }
+
+    @Test
     fun rule2EpisodicUsesDefaultTv() {
         assertEquals("anime", pick(episode("unknown"), movieDef = "movies", tvDef = "anime"))
         assertEquals("anime", pick(batch(), tvDef = "anime"))

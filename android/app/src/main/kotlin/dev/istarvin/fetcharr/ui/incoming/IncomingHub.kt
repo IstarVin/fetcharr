@@ -5,6 +5,8 @@ import dev.istarvin.fetcharr.incoming.IncomingCoordinator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -34,6 +36,15 @@ class IncomingHub internal constructor(
 
     /** Collect from one place only (the root UI). */
     val events: Flow<HubEvent> = channel.receiveAsFlow()
+
+    private val _addUrls = MutableSharedFlow<String>(extraBufferCapacity = 1)
+
+    /** URLs shared while the Add screen is already open (no replay); the Add screen replaces its URL field. */
+    val addUrls: Flow<String> = _addUrls.asSharedFlow()
+
+    fun replaceAddUrl(url: String) {
+        _addUrls.tryEmit(url)
+    }
 
     /** Routes the strings extracted from an Android intent (see [IntentRouter.route]). */
     fun handleIntent(action: String?, dataString: String?, extraText: String?, payloadExtra: String?) {

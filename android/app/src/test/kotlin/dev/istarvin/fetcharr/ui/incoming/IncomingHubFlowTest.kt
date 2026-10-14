@@ -72,6 +72,14 @@ class IncomingHubFlowTest {
     }
 
     @Test
+    fun wrongActionWithPayloadEmitsUnreadableSnackbar() = runTest {
+        val hub = hub()
+        hub.handleIntent("android.intent.action.DELETE", "fetcharr://download", null, episodePayload(1))
+        assertEquals(HubEvent.Snackbar("Couldn't read the download request"), hub.events.first())
+        assertEquals(null, hub.coordinator.state.value.sheet)
+    }
+
+    @Test
     fun shareIntentRequestsAddScreen() = runTest {
         val hub = hub()
         hub.handleIntent(IntentRouter.ACTION_SEND, null, "look https://example.com/v.mp4 now", null)
