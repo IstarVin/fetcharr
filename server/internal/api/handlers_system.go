@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -16,15 +17,37 @@ const (
 )
 
 // versionCache caches the output of `yt-dlp --version`. Successes are kept
-// until invalidated (after an update); failures only briefly so that a
-// missing binary does not spawn a process on every request.
+// until invalidated (after a manual update) or until the binary file changes
+// (size or modification time, which covers the background auto-update that
+// replaces it in place); failures only briefly so that a missing binary does
+// not spawn a process on every request.
 type versionCache struct {
 	probe func(ctx context.Context, binary string) (string, error)
 
 	mu      sync.Mutex
 	binary  string
+	stamp   fileStamp
 	version string
 	failAt  time.Time
+}
+
+// fileStamp identifies a version of the binary file; the zero value means
+// the file could not be stat'ed.
+type fileStamp struct {
+	size    int64
+	modTime time.Time
+}
+
+func (a fileStamp) equal(b fileStamp) bool {
+	return a.size == b.size && a.modTime.Equal(b.modTime)
+}
+
+func stampOf(path string) fileStamp {
+	st, err := os.Stat(path)
+	if err != nil {
+		return fileStamp{}
+	}
+	return fileStamp{size: st.Size(), modTime: st.ModTime()}
 }
 
 func newVersionCache(probe func(context.Context, string) (string, error)) *versionCache {
@@ -44,7 +67,8 @@ func runVersion(ctx context.Context, binary string) (string, error) {
 func (c *versionCache) get(ctx context.Context, binary string) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.binary == binary {
+	stamp := stampOf(binary)
+	if c.binary == binary && c.stamp.equal(stamp) {
 		if c.version != "" {
 			return c.version
 		}
@@ -52,7 +76,7 @@ func (c *versionCache) get(ctx context.Context, binary string) string {
 			return ""
 		}
 	}
-	c.binary, c.version, c.failAt = binary, "", time.Time{}
+	c.binary, c.stamp, c.version, c.failAt = binary, stamp, "", time.Time{}
 	v, err := c.probe(ctx, binary)
 	if err != nil || v == "" {
 		c.failAt = time.Now()

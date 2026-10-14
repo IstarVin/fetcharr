@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -752,6 +755,28 @@ func TestYtdlpVersionCached(t *testing.T) {
 	c.get(t.Context(), "bin")
 	if calls != 2 {
 		t.Errorf("after invalidate: %d calls", calls)
+	}
+}
+
+func TestYtdlpVersionRefreshesWhenBinaryChanges(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "yt-dlp")
+	if err := os.WriteFile(bin, []byte("v1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	c := newVersionCache(func(context.Context, string) (string, error) { calls++; return "v" + strconv.Itoa(calls), nil })
+	if v := c.get(t.Context(), bin); v != "v1" {
+		t.Fatalf("v = %q", v)
+	}
+	if v := c.get(t.Context(), bin); v != "v1" || calls != 1 {
+		t.Fatalf("unchanged file: v = %q after %d probes", v, calls)
+	}
+	// The background auto-update replaces the file: the next read re-probes.
+	if err := os.WriteFile(bin, []byte("v2-longer"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if v := c.get(t.Context(), bin); v != "v2" || calls != 2 {
+		t.Fatalf("changed file: v = %q after %d probes", v, calls)
 	}
 }
 

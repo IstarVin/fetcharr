@@ -11,18 +11,22 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/istarvin/fetcharr/server/internal/api"
 	"github.com/istarvin/fetcharr/server/internal/config"
 	"github.com/istarvin/fetcharr/server/internal/events"
+	"github.com/istarvin/fetcharr/server/internal/history"
 	"github.com/istarvin/fetcharr/server/internal/jobs"
+	"github.com/istarvin/fetcharr/server/internal/mediaserver"
 	"github.com/istarvin/fetcharr/server/internal/process"
 	"github.com/istarvin/fetcharr/server/internal/runner"
 	"github.com/istarvin/fetcharr/server/internal/service"
 	"github.com/istarvin/fetcharr/server/internal/store"
 	"github.com/istarvin/fetcharr/server/internal/ws"
+	"github.com/istarvin/fetcharr/server/internal/ytdlpmgr"
 )
 
 // version is reported by GET /api/info; release builds override it with
@@ -99,14 +103,54 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 	bus := events.NewBus()
 	defer bus.Close()
 	svc := service.New(st, cfg, service.WithPublisher(bus))
-	// S5 plugs the media server refresh into OnCompleted.
-	proc := process.New(process.Options{Config: cfg, Store: st, Publisher: bus, Logger: log})
+	procOpts := process.Options{Config: cfg, Store: st, Publisher: bus, Logger: log}
+	var refresher *mediaserver.Refresher
+	if len(cfg.MediaServers) > 0 {
+		refresher = mediaserver.New(mediaserver.Options{Servers: cfg.MediaServers, Logger: log})
+		procOpts.OnCompleted = refresher.OnCompleted
+		// Safety net for early returns; the normal path closes it after the
+		// runner stopped, so the last completions are flushed.
+		defer closeRefresher(refresher)
+	}
+	proc := process.New(procOpts)
 	rn := runner.New(runner.Options{Config: cfg, Store: st, Publisher: bus, Processor: proc, Logger: log})
 	svc.SetController(rn)
+
+	// Managed yt-dlp (spec §8): the binary must exist before the first job
+	// can start, so it is downloaded before the runner starts.
+	var updater api.YtdlpUpdater
+	var ytdlpMgr *ytdlpmgr.Manager
+	if cfg.YtdlpManaged() {
+		ytdlpMgr = ytdlpmgr.New(ytdlpmgr.Options{
+			Binary: cfg.ManagedYtdlpPath(), Runner: rn, Logger: log, AutoUpdate: cfg.Ytdlp.AutoUpdate,
+		})
+		if err := ytdlpMgr.Ensure(ctx); err != nil {
+			return fmt.Errorf("managed yt-dlp: %w", err)
+		}
+		updater = ytdlpMgr
+	}
 	rn.Start()
 	// Safety net for early returns; the normal path shuts the runner down
 	// explicitly, between the HTTP server and the hub.
 	defer func() { _ = rn.Shutdown(context.Background()) }()
+
+	// Background work: yt-dlp auto-update and history pruning. Stopped (and
+	// waited for) before the runner and the bus go away.
+	bgCtx, bgCancel := context.WithCancel(ctx)
+	var bg sync.WaitGroup
+	stopBackground := func() {
+		bgCancel()
+		bg.Wait()
+	}
+	defer stopBackground()
+	if ytdlpMgr != nil {
+		bg.Go(func() { ytdlpMgr.Run(bgCtx) })
+	}
+	pruner := history.New(history.Options{
+		Store: st, Publisher: bus, Logger: log, RetentionDays: cfg.History.RetentionDays,
+	})
+	bg.Go(func() { pruner.Run(bgCtx) })
+
 	hub := ws.New(ws.Options{
 		Bus:    bus,
 		Logger: log,
@@ -123,6 +167,7 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 			Version:   version,
 			Logger:    log,
 			WebSocket: hub,
+			Updater:   updater,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -151,8 +196,12 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 	if shutdownErr != nil {
 		_ = srv.Close()
 	}
+	stopBackground()
 	if err := rn.Shutdown(sctx); err != nil {
 		log.Error("runner shutdown", "err", err)
+	}
+	if refresher != nil {
+		refresher.Close(sctx)
 	}
 	hub.Close()
 	if shutdownErr != nil {
@@ -162,4 +211,12 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 		return fmt.Errorf("http server: %w", err)
 	}
 	return nil
+}
+
+// closeRefresher flushes pending media server refreshes, waiting at most
+// shutdownTimeout.
+func closeRefresher(r *mediaserver.Refresher) {
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	r.Close(ctx)
 }
