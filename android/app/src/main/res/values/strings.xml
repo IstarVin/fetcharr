@@ -20,6 +20,40 @@
     <string name="history_empty_body">Completed, failed and cancelled downloads will show up here.</string>
 
     <string name="queue_add">Add download</string>
+    <string name="queue_unavailable_title">Waiting for the server</string>
+    <string name="queue_unavailable_body">The queue will show up once Fetcharr is reachable.</string>
+    <string name="queue_section_active">Active</string>
+    <string name="queue_section_queued">Queued</string>
+    <string name="queue_section_paused">Paused</string>
+    <string name="queue_action_pause">Pause</string>
+    <string name="queue_action_resume">Resume</string>
+    <string name="queue_action_cancel">Cancel</string>
+    <string name="queue_cd_pause">Pause %1$s</string>
+    <string name="queue_cd_resume">Resume %1$s</string>
+    <string name="queue_cd_cancel">Cancel %1$s</string>
+    <string name="queue_cd_progress">%1$d percent</string>
+    <string name="queue_cd_finishing">Finishing</string>
+    <string name="queue_cd_banner">Connection: %1$s</string>
+    <plurals name="queue_episode_count">
+        <item quantity="one">%1$d episode</item>
+        <item quantity="other">%1$d episodes</item>
+    </plurals>
+    <string name="queue_batch_expand">Show episodes of %1$s</string>
+    <string name="queue_batch_collapse">Hide episodes of %1$s</string>
+    <string name="queue_batch_menu">More actions for %1$s</string>
+    <string name="queue_batch_pause_all">Pause all</string>
+    <string name="queue_batch_resume_all">Resume all</string>
+    <string name="queue_batch_cancel_all">Cancel all</string>
+    <string name="queue_cancel_title">Cancel this download?</string>
+    <string name="queue_cancel_body">%1$s will be stopped and removed from the queue.</string>
+    <plurals name="queue_cancel_all_title">
+        <item quantity="one">Cancel %1$d episode?</item>
+        <item quantity="other">Cancel all %1$d episodes?</item>
+    </plurals>
+    <string name="queue_cancel_all_body">Every unfinished episode of %1$s will be stopped.</string>
+    <string name="queue_cancel_confirm">Yes, cancel</string>
+    <string name="queue_cancel_keep">Keep</string>
+    <string name="queue_snackbar_settings">Settings</string>
 
     <!-- Incoming sheet and form fields -->
     <string name="incoming_title">Download</string>

@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import dagger.hilt.android.AndroidEntryPoint
+import dev.istarvin.fetcharr.data.sync.SyncManager
 import dev.istarvin.fetcharr.ui.FetcharrAppUi
 import dev.istarvin.fetcharr.ui.incoming.IncomingHub
 import dev.istarvin.fetcharr.ui.theme.FetcharrTheme
@@ -15,6 +16,9 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
     @Inject
     lateinit var incomingHub: IncomingHub
+
+    @Inject
+    lateinit var syncManager: SyncManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -27,6 +31,16 @@ class MainActivity : ComponentActivity() {
                 FetcharrAppUi()
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        syncManager.acquire(SYNC_REASON)
+    }
+
+    override fun onStop() {
+        syncManager.release(SYNC_REASON)
+        super.onStop()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -49,5 +63,6 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val EXTRA_PAYLOAD = "payload"
+        const val SYNC_REASON = "ui"
     }
 }
