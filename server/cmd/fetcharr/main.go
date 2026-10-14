@@ -16,8 +16,11 @@ import (
 
 	"github.com/istarvin/fetcharr/server/internal/api"
 	"github.com/istarvin/fetcharr/server/internal/config"
+	"github.com/istarvin/fetcharr/server/internal/events"
+	"github.com/istarvin/fetcharr/server/internal/jobs"
 	"github.com/istarvin/fetcharr/server/internal/service"
 	"github.com/istarvin/fetcharr/server/internal/store"
+	"github.com/istarvin/fetcharr/server/internal/ws"
 )
 
 // version is reported by GET /api/info; release builds override it with
@@ -91,13 +94,25 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 		log.Info("requeued interrupted jobs", "count", len(requeued))
 	}
 
-	svc := service.New(st, cfg)
+	bus := events.NewBus()
+	defer bus.Close()
+	svc := service.New(st, cfg, service.WithPublisher(bus))
+	hub := ws.New(ws.Options{
+		Bus:    bus,
+		Logger: log,
+		Snapshot: func(ctx context.Context) ([]*store.Job, error) {
+			active, _, err := svc.List(ctx, store.ListFilter{Statuses: jobs.ActiveStatuses()})
+			return active, err
+		},
+	})
+	defer hub.Close()
 	srv := &http.Server{
 		Handler: api.New(api.Options{
-			Config:  cfg,
-			Service: svc,
-			Version: version,
-			Logger:  log,
+			Config:    cfg,
+			Service:   svc,
+			Version:   version,
+			Logger:    log,
+			WebSocket: hub,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -115,6 +130,9 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 	case <-ctx.Done():
 	}
 	log.Info("shutting down")
+	// WebSocket connections are hijacked, so http.Server.Shutdown neither
+	// closes nor waits for them: disconnect them first.
+	hub.Close()
 	sctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(sctx); err != nil {

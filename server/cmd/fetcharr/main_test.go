@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/istarvin/fetcharr/server/internal/config"
 	"github.com/istarvin/fetcharr/server/internal/jobs"
 	"github.com/istarvin/fetcharr/server/internal/naming"
@@ -115,6 +117,70 @@ func TestServeRecoversAndShutsDown(t *testing.T) {
 	}
 
 	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve returned %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("serve did not return after cancel")
+	}
+}
+
+// The WebSocket endpoint is wired: a snapshot arrives, and a graceful stop
+// disconnects the client (close code 1001) without hanging.
+func TestServeWebSocketAndShutdown(t *testing.T) {
+	cfg := testConfig(t)
+	pre, err := store.Open(cfg.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := &store.Job{Category: "misc", URL: "https://x.example/ws", Title: store.Ptr("W"), Status: jobs.StatusPaused}
+	if err := pre.Insert(t.Context(), j); err != nil {
+		t.Fatal(err)
+	}
+	if err := pre.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- serve(ctx, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), ln) }()
+
+	dctx, dcancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer dcancel()
+	c, resp, err := websocket.Dial(dctx, "ws://"+ln.Addr().String()+"/api/ws", nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.CloseNow() }()
+	_, raw, err := c.Read(dctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snap struct {
+		Type string
+		Jobs []struct{ ID, Status string }
+	}
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		t.Fatal(err)
+	}
+	if snap.Type != "snapshot" || len(snap.Jobs) != 1 || snap.Jobs[0].ID != j.ID || snap.Jobs[0].Status != "paused" {
+		t.Errorf("snapshot = %s", raw)
+	}
+
+	cancel()
+	_, _, err = c.Read(dctx)
+	if got := websocket.CloseStatus(err); got != websocket.StatusGoingAway {
+		t.Errorf("close status = %v (%v), want going away", got, err)
+	}
 	select {
 	case err := <-done:
 		if err != nil {
