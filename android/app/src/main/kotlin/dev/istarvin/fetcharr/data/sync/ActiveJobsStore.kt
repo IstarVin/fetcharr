@@ -28,6 +28,15 @@ class ActiveJobsStore @Inject constructor() {
     /** False until the first snapshot (or [clear]ed again), so the UI can tell "loading" from "empty". */
     val hasSnapshot: StateFlow<Boolean> = _hasSnapshot.asStateFlow()
 
+    private val _snapshotFresh = MutableStateFlow(false)
+
+    /**
+     * True once a snapshot has arrived on the current connection: false from [onConnectionOpened] (or [clear]) until
+     * the next snapshot. Unlike [hasSnapshot] it is not true just because an older connection had one, so a caller
+     * that needs the list to be current (the catch-up) can wait for it.
+     */
+    val snapshotFresh: StateFlow<Boolean> = _snapshotFresh.asStateFlow()
+
     private val _finished = MutableSharedFlow<JobDto>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
     /**
@@ -44,6 +53,7 @@ class ActiveJobsStore @Inject constructor() {
             is WsEvent.Snapshot -> {
                 _jobs.value = event.jobs.filter { it.status.isActive }
                 _hasSnapshot.value = true
+                _snapshotFresh.value = true
                 synchronized(lock) { event.jobs.forEach { if (it.status.isActive) recentlyFinished.remove(it.id) } }
             }
             is WsEvent.JobAdded -> upsert(event.job)
@@ -70,10 +80,16 @@ class ActiveJobsStore @Inject constructor() {
         }
     }
 
+    /** The WebSocket opened: the server's snapshot is on its way and the list is stale until it arrives. */
+    fun onConnectionOpened() {
+        _snapshotFresh.value = false
+    }
+
     /** Forgets everything, e.g. when the server changes. */
     fun clear() {
         _jobs.value = emptyList()
         _hasSnapshot.value = false
+        _snapshotFresh.value = false
         synchronized(lock) { recentlyFinished.clear() }
     }
 

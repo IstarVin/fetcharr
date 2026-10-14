@@ -19,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -36,11 +37,14 @@ class SyncForegroundService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var updates: Job? = null
+    private var stopWatcher: Job? = null
     private var acquired = false
+    private var latestStartId = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        latestStartId = startId
         NotificationChannels.create(this)
         try {
             ServiceCompat.startForeground(
@@ -58,9 +62,25 @@ class SyncForegroundService : Service() {
             giveUp()
             return START_NOT_STICKY
         }
+        // Always call startForeground first (above), even when the job is already gone: stopping before it makes
+        // the system crash the app. Only now is it safe to look at whether we are still wanted.
+        if (!controller.shouldRun.value) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         if (!acquired) {
             acquired = true
             syncManager.acquire(SYNC_REASON)
+        }
+        if (stopWatcher == null) {
+            // stopSelf(id) is a no-op when a newer start command arrived meanwhile.
+            stopWatcher = scope.launch {
+                while (true) {
+                    controller.shouldRun.first { !it }
+                    stopSelf(latestStartId)
+                    controller.shouldRun.first { it } // only reached when a newer start kept us alive
+                }
+            }
         }
         if (updates == null) {
             updates = scope.launch {
@@ -90,6 +110,7 @@ class SyncForegroundService : Service() {
 
     override fun onDestroy() {
         updates?.cancel()
+        stopWatcher?.cancel()
         scope.cancel()
         if (acquired) {
             acquired = false

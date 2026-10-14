@@ -15,9 +15,11 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -58,6 +60,15 @@ class BackgroundController internal constructor(
     /** Emits after every successful submit, for the one-time notification permission prompt. */
     val submitSucceeded: SharedFlow<Unit> = _submitSucceeded.asSharedFlow()
 
+    private val _shouldRun = MutableStateFlow(false)
+
+    /**
+     * Whether the service should be up. The service reads this after it has called `startForeground` and stops
+     * itself when it turns false. The controller never calls `stopService`: stopping a service that was started with
+     * `startForegroundService` before it called `startForeground` crashes the app.
+     */
+    val shouldRun: StateFlow<Boolean> = _shouldRun.asStateFlow()
+
     private var started = false
     private var state = ForegroundState()
     private var ticker: Job? = null
@@ -89,24 +100,25 @@ class BackgroundController internal constructor(
         scope.launch {
             connection.collect { connectionState ->
                 // Not connected while somebody wants a connection counts as unreachable. "Nobody wants it" (no
-                // holder, or no server) says nothing about the server and is ignored.
-                val connected = when (connectionState) {
-                    ConnectionState.Connected -> true
-                    ConnectionState.Connecting, is ConnectionState.Disconnected ->
-                        if (connectionState is ConnectionState.Disconnected && connectionState.retryInSeconds == null) {
-                            null
+                // holder, or no server) says nothing about the server and stops the clock.
+                val event = when (connectionState) {
+                    ConnectionState.Connected -> ForegroundEvent.ConnectionChanged(true, time.nowMs())
+                    ConnectionState.Connecting -> ForegroundEvent.ConnectionChanged(false, time.nowMs())
+                    is ConnectionState.Disconnected ->
+                        if (connectionState.retryInSeconds == null) {
+                            ForegroundEvent.ConnectionNotWanted
                         } else {
-                            false
+                            ForegroundEvent.ConnectionChanged(false, time.nowMs())
                         }
-                    ConnectionState.NotConfigured -> null
+                    ConnectionState.NotConfigured -> ForegroundEvent.ConnectionNotWanted
                 }
-                if (connected != null) events.trySend(ForegroundEvent.ConnectionChanged(connected, time.nowMs()))
+                events.trySend(event)
             }
         }
     }
 
     override fun onSubmitSucceeded() {
-        events.trySend(ForegroundEvent.SubmitSucceeded)
+        events.trySend(ForegroundEvent.SubmitSucceeded(time.nowMs()))
         _submitSucceeded.tryEmit(Unit)
     }
 
@@ -125,17 +137,20 @@ class BackgroundController internal constructor(
         state = next
         when (command) {
             ServiceCommand.Start -> {
+                _shouldRun.value = true
                 if (starter.start()) {
                     startTicker()
                 } else {
                     // The system refused (background start restriction). Not running, so a later event retries.
+                    _shouldRun.value = false
                     state = state.copy(running = false)
                 }
             }
-            ServiceCommand.KeepRunning, ServiceCommand.Idle -> Unit
+            ServiceCommand.KeepRunning -> _shouldRun.value = true
+            ServiceCommand.Idle -> Unit
             is ServiceCommand.Stop -> {
                 stopTicker()
-                starter.stop()
+                _shouldRun.value = false
                 if (command.postStoppedNotice) notices.postStoppedNotice(ForegroundPolicy.STOPPED_NOTICE)
             }
         }

@@ -154,6 +154,7 @@ class SyncManager @Inject constructor(
                             backoff.reset()
                             _state.value = ConnectionState.Connected
                             launch { refreshQuietly() }
+                            store.onConnectionOpened()
                             _connected.tryEmit(Unit)
                         }
                         is Event.Message -> WsEvent.parseOrNull(json, event.text)?.let(store::apply)

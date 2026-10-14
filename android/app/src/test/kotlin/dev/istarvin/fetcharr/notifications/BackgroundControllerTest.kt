@@ -15,6 +15,7 @@ import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -23,14 +24,9 @@ class BackgroundControllerTest {
     private class FakeStarter : ServiceStarter {
         var accept = true
         var starts = 0
-        var stops = 0
         override fun start(): Boolean {
             starts++
             return accept
-        }
-
-        override fun stop() {
-            stops++
         }
     }
 
@@ -42,6 +38,8 @@ class BackgroundControllerTest {
         val controller = BackgroundController(
             store, connection, starter, { notices += it }, { scope.currentTime }, scope.backgroundScope,
         ).also { it.start() }
+
+        val shouldRun get() = controller.shouldRun.value
 
         fun snapshot(vararg statuses: JobStatus) {
             store.apply(WsEvent.Snapshot(statuses.mapIndexed { i, s -> job("j$i", s) }))
@@ -56,7 +54,7 @@ class BackgroundControllerTest {
         env.controller.onSubmitSucceeded()
         runCurrent()
         assertEquals(1, env.starter.starts)
-        assertEquals(0, env.starter.stops)
+        assertTrue(env.shouldRun)
     }
 
     @Test
@@ -70,7 +68,7 @@ class BackgroundControllerTest {
         env.snapshot(JobStatus.DOWNLOADING) // still active: no second start
         runCurrent()
         assertEquals(1, env.starter.starts)
-        assertEquals(0, env.starter.stops)
+        assertTrue(env.shouldRun)
     }
 
     @Test
@@ -78,9 +76,12 @@ class BackgroundControllerTest {
         val env = Env(this)
         env.controller.onSubmitSucceeded()
         runCurrent()
-        env.snapshot(JobStatus.PAUSED) // only paused jobs
+        env.snapshot(JobStatus.PAUSED) // only paused jobs: the submit grace still holds
         runCurrent()
-        assertEquals(1, env.starter.stops)
+        assertTrue(env.shouldRun)
+        advanceTimeBy(ForegroundPolicy.SUBMIT_GRACE_MS + BackgroundController.TICK_MS)
+        runCurrent()
+        assertFalse(env.shouldRun)
         assertTrue(env.notices.isEmpty())
     }
 
@@ -91,7 +92,7 @@ class BackgroundControllerTest {
         runCurrent()
         env.snapshot() // all done
         runCurrent()
-        assertEquals(1, env.starter.stops)
+        assertFalse(env.shouldRun)
         assertTrue(env.notices.isEmpty())
     }
 
@@ -106,12 +107,12 @@ class BackgroundControllerTest {
         env.connection.value = ConnectionState.Disconnected(5)
         runCurrent()
         advanceTimeBy(14 * minute)
-        assertEquals(0, env.starter.stops)
+        assertTrue(env.shouldRun)
         assertTrue(env.notices.isEmpty())
 
         advanceTimeBy(minute + BackgroundController.TICK_MS)
         runCurrent()
-        assertEquals(1, env.starter.stops)
+        assertFalse(env.shouldRun)
         assertEquals(listOf(ForegroundPolicy.STOPPED_NOTICE), env.notices)
 
         // Tracking stays off for further job updates until the user comes back.
@@ -136,7 +137,7 @@ class BackgroundControllerTest {
         runCurrent()
         advanceTimeBy(10 * minute)
         runCurrent()
-        assertEquals(0, env.starter.stops)
+        assertTrue(env.shouldRun)
         assertTrue(env.notices.isEmpty())
     }
 
@@ -147,7 +148,7 @@ class BackgroundControllerTest {
         runCurrent()
         env.controller.onSystemTimeout()
         runCurrent()
-        assertEquals(1, env.starter.stops)
+        assertFalse(env.shouldRun)
         assertEquals(listOf(ForegroundPolicy.STOPPED_NOTICE), env.notices)
     }
 
@@ -167,6 +168,7 @@ class BackgroundControllerTest {
     fun aRefusedStartIsRetriedOnTheNextEvent() = runTest {
         val env = Env(this)
         env.starter.accept = false
+        runCurrent() // let the initial connection event through first
         env.controller.onSubmitSucceeded()
         runCurrent()
         assertEquals(1, env.starter.starts)
@@ -188,5 +190,72 @@ class BackgroundControllerTest {
         runCurrent()
         assertEquals(1, count)
         collector.cancel()
+    }
+
+    @Test
+    fun aJobThatFailsRightAfterItIsAddedStartsTheServiceOnceAndNeverStopsItDirectly() = runTest {
+        // job_added (pending) and job_updated (failed) milliseconds apart: Start and Stop arrive back to back.
+        val env = Env(this)
+        env.snapshot()
+        runCurrent()
+        env.store.upsert(job("x", JobStatus.PENDING, finishedAt = null))
+        runCurrent()
+        env.store.upsert(job("x", JobStatus.FAILED, errorCode = "download_failed"))
+        runCurrent()
+        assertEquals(1, env.starter.starts) // the controller has no way to stop the service: it only flips shouldRun
+        assertFalse(env.shouldRun) // the service (already foreground by then) stops itself on this
+        assertTrue(env.notices.isEmpty())
+    }
+
+    @Test
+    fun shouldRunFollowsTheServiceLifecycle() = runTest {
+        val env = Env(this)
+        assertFalse(env.shouldRun)
+        env.snapshot(JobStatus.DOWNLOADING)
+        runCurrent()
+        assertTrue(env.shouldRun)
+        env.controller.onSystemTimeout()
+        runCurrent()
+        assertFalse(env.shouldRun)
+        env.controller.onSubmitSucceeded()
+        runCurrent()
+        assertTrue(env.shouldRun)
+    }
+
+    @Test
+    fun aRestartAfterTheUnreachableStopDoesNotPostASecondNotice() = runTest {
+        val env = Env(this)
+        env.snapshot(JobStatus.DOWNLOADING)
+        env.connection.value = ConnectionState.Disconnected(5)
+        runCurrent()
+        advanceTimeBy(15 * minute + BackgroundController.TICK_MS)
+        runCurrent()
+        assertEquals(1, env.notices.size)
+
+        // The service released its connection, the user opens the app, the connection is still down.
+        env.connection.value = ConnectionState.Disconnected(null)
+        env.controller.onAppForegrounded()
+        env.connection.value = ConnectionState.Connecting
+        runCurrent()
+        assertEquals(2, env.starter.starts)
+        advanceTimeBy(minute)
+        runCurrent()
+        assertEquals(1, env.notices.size)
+        assertTrue(env.shouldRun)
+    }
+
+    @Test
+    fun anEmptySyncRightAfterASubmitDoesNotStopTheService() = runTest {
+        val env = Env(this)
+        env.snapshot(JobStatus.PAUSED) // e.g. the connection is just up and the new job is not in yet
+        runCurrent()
+        env.controller.onSubmitSucceeded()
+        runCurrent()
+        env.snapshot(JobStatus.PAUSED)
+        runCurrent()
+        assertTrue(env.shouldRun)
+        env.snapshot(JobStatus.DOWNLOADING)
+        runCurrent()
+        assertTrue(env.shouldRun)
     }
 }

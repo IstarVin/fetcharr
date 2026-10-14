@@ -34,12 +34,19 @@ class DataStoreNotifierStateStore @Inject constructor(
         }
     }
 
+    override suspend fun loadServerKey(): String? = dataStore.data.first()[SERVER_KEY]
+
+    override suspend fun saveServerKey(key: String) {
+        dataStore.edit { it[SERVER_KEY] = key }
+    }
+
     private fun decode(value: String?): Set<String> =
         value?.split(SEPARATOR)?.filterTo(LinkedHashSet()) { it.isNotEmpty() } ?: emptySet()
 
     private companion object {
         const val SEPARATOR = "\n"
         val SUMMARIZED = stringPreferencesKey("notifier_summarized_batches")
+        val SERVER_KEY = stringPreferencesKey("notifier_server_key")
         val NOTIFIED = stringPreferencesKey("notifier_notified_jobs")
     }
 }

@@ -57,15 +57,48 @@ class ForegroundPolicyTest {
 
     @Test fun submitStartsBeforeJobAppears() {
         val d = Driver()
-        assertEquals(ServiceCommand.Start, d.send(ForegroundEvent.SubmitSucceeded))
+        assertEquals(ServiceCommand.Start, d.send(ForegroundEvent.SubmitSucceeded(0)))
         assertEquals(ServiceCommand.KeepRunning, d.send(Tick(1000)))
         assertEquals(ServiceCommand.KeepRunning, d.send(active(PENDING)))
     }
 
-    @Test fun submitGraceEndsAtFirstSyncWithNothingActive() {
+    @Test fun submitGraceSurvivesASyncWithNothingActiveUntilTimeout() {
         val d = Driver()
-        d.send(ForegroundEvent.SubmitSucceeded)
+        d.send(ForegroundEvent.SubmitSucceeded(1_000))
+        assertEquals(ServiceCommand.KeepRunning, d.send(ActiveJobsChanged(emptyList())))
+        assertEquals(ServiceCommand.KeepRunning, d.send(Tick(1_000 + ForegroundPolicy.SUBMIT_GRACE_MS - 1)))
+        assertEquals(ServiceCommand.Stop(false), d.send(Tick(1_000 + ForegroundPolicy.SUBMIT_GRACE_MS)))
+    }
+
+    @Test fun submitGraceSurvivesAnUnrelatedPausedSync() {
+        val d = Driver()
+        d.send(ForegroundEvent.SubmitSucceeded(0))
+        assertEquals(ServiceCommand.KeepRunning, d.send(active(PAUSED)))
+    }
+
+    @Test fun anActiveJobEndsTheGraceSoItsFinishStopsTheService() {
+        val d = Driver()
+        d.send(ForegroundEvent.SubmitSucceeded(0))
+        d.send(active(PENDING))
         assertEquals(ServiceCommand.Stop(false), d.send(ActiveJobsChanged(emptyList())))
+    }
+
+    @Test fun foregroundingAfterANoticeStopStartsAFreshUnreachableClock() {
+        val d = Driver()
+        d.send(active(DOWNLOADING))
+        d.send(ConnectionChanged(false, 0))
+        assertEquals(ServiceCommand.Stop(true), d.send(Tick(limit)))
+        assertEquals(ServiceCommand.Start, d.send(ForegroundEvent.AppForegrounded))
+        // Not a second notice on the first tick of the restarted service.
+        assertEquals(ServiceCommand.KeepRunning, d.send(Tick(limit + 30_000)))
+    }
+
+    @Test fun noOneWantingAConnectionStopsTheUnreachableClock() {
+        val d = Driver()
+        d.send(active(DOWNLOADING))
+        d.send(ConnectionChanged(false, 0))
+        d.send(ForegroundEvent.ConnectionNotWanted)
+        assertEquals(ServiceCommand.KeepRunning, d.send(Tick(limit + 1)))
     }
 
     @Test fun unreachableBoundary() {
@@ -114,7 +147,7 @@ class ForegroundPolicyTest {
         val e = Driver()
         e.send(active(DOWNLOADING))
         e.send(ForegroundEvent.SystemTimeout)
-        assertEquals(ServiceCommand.Start, e.send(ForegroundEvent.SubmitSucceeded))
+        assertEquals(ServiceCommand.Start, e.send(ForegroundEvent.SubmitSucceeded(0)))
     }
 
     @Test fun submitAfterUnreachableStopRestartsWithFreshTimer() {
@@ -122,7 +155,7 @@ class ForegroundPolicyTest {
         d.send(active(DOWNLOADING))
         d.send(ConnectionChanged(false, 0))
         d.send(Tick(limit))
-        assertEquals(ServiceCommand.Start, d.send(ForegroundEvent.SubmitSucceeded))
+        assertEquals(ServiceCommand.Start, d.send(ForegroundEvent.SubmitSucceeded(0)))
         assertEquals(ServiceCommand.KeepRunning, d.send(Tick(limit + 1)))
     }
 

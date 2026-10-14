@@ -9,6 +9,7 @@ import dev.istarvin.fetcharr.notifications.logic.ResultNotification
 import dev.istarvin.fetcharr.notifications.logic.ep
 import dev.istarvin.fetcharr.notifications.logic.job
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
@@ -41,6 +42,14 @@ class ResultNotifierTest {
     }
 
     private class MemoryStateStore(var state: NotifierState = NotifierState()) : NotifierStateStore {
+        var serverKey: String? = null
+
+        override suspend fun loadServerKey() = serverKey
+
+        override suspend fun saveServerKey(key: String) {
+            serverKey = key
+        }
+
         override suspend fun load() = state
 
         override suspend fun save(state: NotifierState) {
@@ -49,6 +58,8 @@ class ResultNotifierTest {
     }
 
     private class MemoryLastSeen(var value: Long? = null) : LastSeenStore {
+        var initDelayMs = 0L
+
         override suspend fun get() = value
 
         override suspend fun set(epochMs: Long) {
@@ -56,6 +67,7 @@ class ResultNotifierTest {
         }
 
         override suspend fun initIfAbsent(nowMs: Long) {
+            delay(initDelayMs)
             if (value == null) value = nowMs
         }
     }
@@ -68,8 +80,10 @@ class ResultNotifierTest {
         val stateStore = MemoryStateStore(state)
         val lastSeen = MemoryLastSeen(lastSeenValue)
         var now = 5_000L
+        var server: String? = null
         val notifier = ResultNotifier(
             store, connected, gateway, { posted += it }, stateStore, lastSeen, { now }, scope.backgroundScope,
+            { server },
         )
 
         suspend fun TestScope.startAndSettle() {
@@ -326,6 +340,105 @@ class ResultNotifierTest {
         with(env) { reconnect() }
         assertTrue(env.posted.isEmpty())
         assertNull(env.gateway.batchCalls.firstOrNull())
+    }
+
+    @Test
+    fun catchUpAfterAReconnectWaitsForTheNewSnapshotNotTheOldOne() = runTest {
+        // Both episodes were running when the connection dropped. While away they finished. The store still holds
+        // the old list; judged by it, each would look blocked by the other and the summary would be lost.
+        val env = Env(this, lastSeenValue = 1_000L)
+        env.store.apply(
+            WsEvent.Snapshot(listOf(ep("e1", JobStatus.DOWNLOADING, n = 1), ep("e2", JobStatus.DOWNLOADING, n = 2))),
+        )
+        val e1 = ep("e1", JobStatus.COMPLETED, n = 1, finishedAt = 2_000L)
+        val e2 = ep("e2", JobStatus.COMPLETED, n = 2, finishedAt = 2_100L)
+        env.gateway.finished = listOf(e1, e2)
+        env.gateway.batches["b1"] = listOf(e1, e2)
+        with(env) { startAndSettle() }
+
+        env.store.onConnectionOpened() // what SyncManager does just before it announces the connection
+        with(env) { reconnect() }
+        assertTrue(env.gateway.finishedAfterCalls.isEmpty()) // still waiting for the new snapshot
+        env.store.apply(WsEvent.Snapshot(emptyList()))
+        runCurrent()
+
+        assertEquals(listOf("Severance S02 — 2 downloaded"), env.combined)
+    }
+
+    @Test
+    fun aSkippedBatchMemberIsNotRecordedSoALaterSummaryStillHappens() = runTest {
+        val env = Env(this, lastSeenValue = 100L)
+        val running = ep("e2", JobStatus.DOWNLOADING, n = 2)
+        env.store.apply(WsEvent.Snapshot(listOf(running)))
+        val e1 = ep("e1", JobStatus.COMPLETED, n = 1, finishedAt = 200L)
+        with(env) { startAndSettle() }
+        env.store.upsert(e1)
+        runCurrent()
+        assertTrue(env.posted.isEmpty())
+        assertTrue(env.stateStore.state.notifiedJobKeys.isEmpty())
+
+        val e2 = ep("e2", JobStatus.COMPLETED, n = 2, finishedAt = 300L)
+        env.gateway.batches["b1"] = listOf(e1, e2)
+        env.store.upsert(e2)
+        runCurrent()
+        assertEquals(listOf("Severance S02 — 2 downloaded"), env.combined)
+    }
+
+    @Test
+    fun aConnectionThatOpensDuringFirstRunSetupIsNotDropped() = runTest {
+        val env = Env(this)
+        env.lastSeen.initDelayMs = 50
+        env.gateway.finished = listOf(job("a", JobStatus.COMPLETED, title = "A", finishedAt = 6_000L))
+        env.notifier.start()
+        runCurrent()
+        testScheduler.advanceTimeBy(10)
+        env.connected.emit(Unit)
+        runCurrent()
+        assertTrue(env.posted.isEmpty()) // still setting up
+        testScheduler.advanceTimeBy(100)
+        runCurrent()
+        assertEquals(5_000L, env.gateway.finishedAfterCalls.single()) // last seen was set to "now" first
+        assertEquals(listOf("Downloaded · A"), env.combined)
+    }
+
+    @Test
+    fun aJobFinishingDuringFirstRunSetupIsNotDropped() = runTest {
+        val env = Env(this)
+        env.lastSeen.initDelayMs = 50
+        env.notifier.start()
+        runCurrent()
+        env.store.upsert(job("a", JobStatus.COMPLETED, title = "A", finishedAt = 6_000L))
+        testScheduler.advanceTimeBy(100)
+        runCurrent()
+        assertEquals(listOf("Downloaded · A"), env.combined)
+    }
+
+    @Test
+    fun changingTheServerForgetsStateAndStartsFromNow() = runTest {
+        val env = Env(this, lastSeenValue = 1_000L, state = NotifierState(notifiedJobKeys = setOf("x@1")))
+        env.server = "http://old:8080"
+        env.gateway.finished = listOf(job("old", JobStatus.COMPLETED, title = "Old", finishedAt = 2_000L))
+        with(env) {
+            startAndSettle()
+            reconnect()
+        }
+        // First connection to this server: starts from now, nothing from its history is announced.
+        assertTrue(env.posted.isEmpty())
+        assertEquals(5_000L, env.lastSeen.value)
+        assertEquals(listOf(5_000L), env.gateway.finishedAfterCalls)
+
+        env.now = 9_000L
+        env.server = "http://old:8080"
+        with(env) { reconnect() } // same server again: untouched
+        assertEquals(5_000L, env.lastSeen.value)
+
+        env.server = "http://new:8080"
+        env.gateway.finished = listOf(job("n", JobStatus.COMPLETED, title = "New", finishedAt = 9_500L))
+        with(env) { reconnect() }
+        assertEquals(9_000L, env.gateway.finishedAfterCalls.last())
+        assertEquals(listOf("Downloaded · New"), env.combined)
+        assertTrue("x@1" !in env.stateStore.state.notifiedJobKeys)
+        assertEquals("http://new:8080", env.stateStore.serverKey)
     }
 
     @Test

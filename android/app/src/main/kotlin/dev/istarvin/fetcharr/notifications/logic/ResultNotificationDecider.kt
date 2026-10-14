@@ -60,6 +60,9 @@ object ResultNotificationDecider {
     )
     const val DEFAULT_ERROR_TEXT = "Download failed"
 
+    /** [ResultDecision.Skip.reason] of rule 5. The caller should not [record] it: a later finish can still summarize. */
+    const val SKIP_BATCH_NOT_FINISHED = "batch not finished"
+
     fun errorText(code: String?): String = code?.let { ERROR_TEXTS[it] } ?: DEFAULT_ERROR_TEXT
 
     /**
@@ -92,7 +95,7 @@ object ResultNotificationDecider {
             return if (cancelled) ResultDecision.Skip("cancelled") else ResultDecision.PostJob(jobNotification(job))
         }
         val blocked = activeJobs.any { it.batchId == batchId && it.id != job.id && !it.status.isFinished }
-        if (blocked) return ResultDecision.Skip("batch not finished")
+        if (blocked) return ResultDecision.Skip(SKIP_BATCH_NOT_FINISHED)
         return ResultDecision.SummarizeBatch(batchId)
     }
 

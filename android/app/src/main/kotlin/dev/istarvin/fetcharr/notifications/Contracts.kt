@@ -12,12 +12,13 @@ fun interface TimeSource {
     fun nowMs(): Long
 }
 
-/** Starts and stops [SyncForegroundService]. */
-interface ServiceStarter {
+/**
+ * Starts [SyncForegroundService]. There is no stop: the service stops itself when
+ * [BackgroundController.shouldRun] turns false, after it has called `startForeground`.
+ */
+fun interface ServiceStarter {
     /** True when the start request was accepted; false when the system refused it (for example from the background). */
     fun start(): Boolean
-
-    fun stop()
 }
 
 /** Posts the "Stopped tracking downloads" notice on the `results` channel. */
@@ -49,6 +50,11 @@ interface NotifierStateStore {
     suspend fun load(): NotifierState
 
     suspend fun save(state: NotifierState)
+
+    /** Identifies the server the state and last-seen belong to (its base URL); null before the first run. */
+    suspend fun loadServerKey(): String?
+
+    suspend fun saveServerKey(key: String)
 }
 
 /** Newest `finished_at` the notifier has processed (epoch ms). */

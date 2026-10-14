@@ -1,6 +1,7 @@
 package dev.istarvin.fetcharr.notifications
 
 import dev.istarvin.fetcharr.data.network.dto.JobDto
+import dev.istarvin.fetcharr.data.network.ServerConfigProvider
 import dev.istarvin.fetcharr.data.sync.ActiveJobsStore
 import dev.istarvin.fetcharr.data.sync.SyncManager
 import dev.istarvin.fetcharr.di.ApplicationScope
@@ -8,7 +9,9 @@ import dev.istarvin.fetcharr.notifications.logic.CatchUpPlanner
 import dev.istarvin.fetcharr.notifications.logic.NotifierState
 import dev.istarvin.fetcharr.notifications.logic.ResultDecision
 import dev.istarvin.fetcharr.notifications.logic.ResultNotificationDecider
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -42,6 +45,7 @@ class ResultNotifier internal constructor(
     private val lastSeen: LastSeenStore,
     private val time: TimeSource,
     private val scope: CoroutineScope,
+    private val serverKey: () -> String? = { null },
 ) {
     @Inject
     constructor(
@@ -52,8 +56,12 @@ class ResultNotifier internal constructor(
         stateStore: NotifierStateStore,
         lastSeen: LastSeenStore,
         time: TimeSource,
+        config: ServerConfigProvider,
         @ApplicationScope scope: CoroutineScope,
-    ) : this(store, syncManager.connected, gateway, poster, stateStore, lastSeen, time, scope)
+    ) : this(
+        store, syncManager.connected, gateway, poster, stateStore, lastSeen, time, scope,
+        { config.config.value?.baseUrl },
+    )
 
     private val mutex = Mutex()
     private var started = false
@@ -65,21 +73,38 @@ class ResultNotifier internal constructor(
     fun start() {
         if (started) return
         started = true
-        scope.launch {
+        // Subscribe first (UNDISPATCHED runs up to the subscription), then wait for the first-run setup inside the
+        // collectors: a connection that opens or a job that finishes during the setup must not be dropped.
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            val ready = CompletableDeferred<Unit>()
+            launch(start = CoroutineStart.UNDISPATCHED) {
+                store.finished.collect { job ->
+                    ready.await()
+                    onLiveJob(job)
+                }
+            }
+            launch(start = CoroutineStart.UNDISPATCHED) {
+                connected.collect {
+                    ready.await()
+                    catchUp()
+                }
+            }
             // First run: "last seen" is now, so old history never notifies. Must happen before any catch-up.
             lastSeen.initIfAbsent(time.nowMs())
-            launch { store.finished.collect { job -> onLiveJob(job) } }
-            launch { connected.collect { catchUp() } }
+            ready.complete(Unit)
         }
     }
 
     internal suspend fun onLiveJob(job: JobDto) = mutex.withLock {
+        resetIfServerChanged()
         if (process(job)) advanceLastSeen(job.finishedAt)
     }
 
     internal suspend fun catchUp() = mutex.withLock {
-        // The active list must be known, or a batch with running siblings would be summarized too early.
-        withTimeoutOrNull(SNAPSHOT_WAIT_MS) { store.hasSnapshot.first { it } } ?: return@withLock
+        resetIfServerChanged()
+        // The active list must be from this connection, or a batch could be judged by stale siblings: ones that
+        // finished while we were away still look active, new ones are missing.
+        withTimeoutOrNull(SNAPSHOT_WAIT_MS) { store.snapshotFresh.first { it } } ?: return@withLock
         val last = lastSeen.get() ?: return@withLock
         val finished = gateway.listFinishedAfter(last) ?: return@withLock
         val plan = CatchUpPlanner.plan(last, finished)
@@ -95,7 +120,11 @@ class ResultNotifier internal constructor(
     private suspend fun process(job: JobDto): Boolean {
         val state = loadState()
         when (val decision = ResultNotificationDecider.onJobFinished(job, store.jobs.value, state)) {
-            is ResultDecision.Skip -> saveState(ResultNotificationDecider.record(state, job, decision))
+            is ResultDecision.Skip ->
+                // Not recorded: when the last sibling finishes (or a catch-up runs) the batch can still be summarized.
+                if (decision.reason != ResultNotificationDecider.SKIP_BATCH_NOT_FINISHED) {
+                    saveState(ResultNotificationDecider.record(state, job, decision))
+                }
             is ResultDecision.PostJob -> {
                 poster.post(decision.notification)
                 saveState(ResultNotificationDecider.record(state, job, decision))
@@ -116,6 +145,21 @@ class ResultNotifier internal constructor(
             }
         }
         return true
+    }
+
+    /**
+     * Another server has other jobs and other times: forget the old state and start from now, or its whole history
+     * would be announced. The same goes for the first connection to any server (the server was set up after the app
+     * first ran, so the "last seen" from the first run says nothing about it).
+     */
+    private suspend fun resetIfServerChanged() {
+        val current = serverKey() ?: return
+        val stored = stateStore.loadServerKey()
+        if (stored == current) return
+        cachedState = NotifierState()
+        stateStore.save(NotifierState())
+        lastSeen.set(time.nowMs())
+        stateStore.saveServerKey(current)
     }
 
     private suspend fun advanceLastSeen(finishedAt: Long?) {

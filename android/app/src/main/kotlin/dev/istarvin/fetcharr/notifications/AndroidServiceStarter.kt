@@ -23,8 +23,4 @@ class AndroidServiceStarter @Inject constructor(
         } catch (e: SecurityException) {
             false
         }
-
-    override fun stop() {
-        context.stopService(Intent(context, SyncForegroundService::class.java))
-    }
 }
