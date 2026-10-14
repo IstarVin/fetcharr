@@ -5,6 +5,7 @@ import dev.istarvin.fetcharr.data.network.ApiResult
 import dev.istarvin.fetcharr.data.network.FetcharrApi
 import dev.istarvin.fetcharr.data.network.FetcharrApiProvider
 import dev.istarvin.fetcharr.data.network.dto.JobDto
+import dev.istarvin.fetcharr.data.network.dto.RetryRequest
 import dev.istarvin.fetcharr.data.network.dto.WsEvent
 import dev.istarvin.fetcharr.data.network.safeApiCall
 import javax.inject.Inject
@@ -45,6 +46,24 @@ class JobActions @Inject constructor(
     suspend fun cancel(jobId: String): ActionOutcome = job(jobId) { it.cancelJob(jobId) }
 
     suspend fun retry(jobId: String): ActionOutcome = job(jobId) { it.retryJob(jobId) }
+
+    /**
+     * Retry with an explicit [overwrite] flag. `true` sends `{"overwrite":true}` and replaces an existing library
+     * file (`already_exists`); `false` is the same as [retry] (no body).
+     */
+    suspend fun retry(jobId: String, overwrite: Boolean): ActionOutcome =
+        if (overwrite) job(jobId) { it.retryJobWithBody(jobId, RetryRequest(overwrite = true)) } else retry(jobId)
+
+    /**
+     * `DELETE /api/jobs`: removes every finished job record (files are kept). The caller refreshes history.
+     */
+    suspend fun clearHistory(): ActionOutcome {
+        val api = api() ?: return ActionOutcome.NotConfigured
+        return when (val result = safeApiCall { api.clearHistory() }) {
+            is ApiResult.Success -> ActionOutcome.Ok
+            is ApiResult.Failure -> ActionOutcome.Failed(result.error.userMessage)
+        }
+    }
 
     suspend fun pauseAll(batchId: String): ActionOutcome = batch(batchId) { it.pauseBatch(batchId).jobs }
 

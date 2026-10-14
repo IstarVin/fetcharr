@@ -4,7 +4,10 @@ import dev.istarvin.fetcharr.data.network.dto.CategoryDto
 import dev.istarvin.fetcharr.data.network.dto.JobDto
 import dev.istarvin.fetcharr.data.network.dto.JobStatus
 import dev.istarvin.fetcharr.data.sync.ConnectionState
+import dev.istarvin.fetcharr.ui.common.heading
+import dev.istarvin.fetcharr.ui.common.isEpisode
 import dev.istarvin.fetcharr.util.Formatters
+import kotlin.math.roundToInt
 
 // Pure presentation mapping for the Queue screen (app spec §5.3). No Android or Compose types, so it is unit-tested.
 
@@ -126,7 +129,10 @@ private fun jobFraction(job: JobDto): Float? {
     return null
 }
 
-private fun percentOf(fraction: Float): String = "${(fraction * 100).toInt()}%"
+/** 0..100, rounded (0.53 shows 53, not 52). */
+internal fun percentInt(fraction: Float): Int = (fraction * 100).roundToInt().coerceIn(0, 100)
+
+internal fun percentOf(fraction: Float): String = "${percentInt(fraction)}%"
 
 private fun JobDto.toCard(categoryLabel: String, layout: String?): JobCardModel {
     val indeterminate = status == JobStatus.PROCESSING
@@ -153,20 +159,6 @@ private fun JobDto.toCard(categoryLabel: String, layout: String?): JobCardModel 
         stats = statsLine(),
         actions = actionsFor(status),
     )
-}
-
-private fun JobDto.isEpisode(): Boolean = !showName.isNullOrBlank() && (season != null || episode != null)
-
-private fun JobDto.heading(layout: String?): String {
-    if (isEpisode()) {
-        val code = buildString {
-            if (season != null) append("S").append(season.toString().padStart(2, '0'))
-            if (episode != null) append("E").append(episode.toString().padStart(2, '0'))
-        }
-        return "${showName!!.trim()} — $code"
-    }
-    val name = title?.trim()?.takeIf { it.isNotEmpty() } ?: showName?.trim()?.takeIf { it.isNotEmpty() } ?: url
-    return if (year != null && layout != "flat") "$name ($year)" else name
 }
 
 private fun JobDto.statsLine(): String? {

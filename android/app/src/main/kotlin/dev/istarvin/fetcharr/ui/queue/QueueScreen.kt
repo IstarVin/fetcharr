@@ -344,7 +344,7 @@ private fun ProgressRow(progress: Float?, indeterminate: Boolean, percentLabel: 
     val description = if (indeterminate || progress == null) {
         stringResource(R.string.queue_cd_finishing)
     } else {
-        stringResource(R.string.queue_cd_progress, (progress * 100).toInt())
+        stringResource(R.string.queue_cd_progress, percentInt(progress))
     }
     Row(
         Modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = description },
@@ -444,8 +444,7 @@ private fun CancelDialog(request: CancelRequest, onConfirm: () -> Unit, onDismis
         is CancelRequest.SingleJob ->
             stringResource(R.string.queue_cancel_title) to stringResource(R.string.queue_cancel_body, request.name)
         is CancelRequest.WholeBatch ->
-            pluralStringResource(R.plurals.queue_cancel_all_title, request.count, request.count) to
-                stringResource(R.string.queue_cancel_all_body, request.name)
+            stringResource(R.string.queue_cancel_all_title, request.name) to stringResource(R.string.queue_cancel_all_body)
     }
     AlertDialog(
         onDismissRequest = onDismiss,

@@ -136,7 +136,7 @@ fun FetcharrAppUi() {
                         onAdd = { navController.navigate(AddRoute()) },
                     )
                 }
-                composable<HistoryRoute> { HistoryScreen() }
+                composable<HistoryRoute> { HistoryScreen(onOpenSettings = { openSettings() }) }
                 composable<SettingsRoute> { SettingsScreen() }
                 composable<AddRoute> {
                     AddScreen(onBack = { navController.popBackStack() }, onOpenSettings = { openSettings() })

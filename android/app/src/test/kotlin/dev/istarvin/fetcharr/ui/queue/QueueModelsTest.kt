@@ -159,8 +159,8 @@ class QueueModelsTest {
         assertEquals("Severance — S02E01", sections(downloading).single().cards().single().heading)
         assertEquals("Dune Part Two (2024)", sections(processing).single().cards().single().heading)
         assertEquals("Conference Talk", sections(paused).single().cards().single().heading)
-        // A flat category never gets a year, even if the server sent one.
-        assertEquals("Conference Talk", sections(paused.copy(year = 2020)).single().cards().single().heading)
+        // The year shows whenever the server sent one, whatever the layout (spec §5.3).
+        assertEquals("Conference Talk (2020)", sections(paused.copy(year = 2020)).single().cards().single().heading)
         // A movie without a year, and a job without a title.
         assertEquals("Dune Part Two", sections(processing.copy(year = null)).single().cards().single().heading)
         assertEquals(processing.url, sections(processing.copy(title = null, year = null)).single().cards().single().heading)
@@ -183,7 +183,7 @@ class QueueModelsTest {
         val d = sections(downloading).single().cards().single()
         assertEquals("Downloading", d.statusLabel)
         assertEquals(0.427f, d.progress!!, 0.0001f)
-        assertEquals("42%", d.percentLabel)
+        assertEquals("43%", d.percentLabel)
         assertFalse(d.indeterminate)
         assertTrue(d.showsProgressBar)
 
@@ -250,5 +250,15 @@ class QueueModelsTest {
             connectionBanner(ConnectionState.Disconnected(4)),
         )
         assertEquals(QueueBanner("Disconnected", connecting = false), connectionBanner(ConnectionState.Disconnected(null)))
+    }
+
+    @Test
+    fun percentLabelsRoundInsteadOfTruncating() {
+        for (p in 0..100) {
+            assertEquals("$p%", percentOf(p / 100f))
+            assertEquals(p, percentInt(p / 100f))
+        }
+        assertEquals("53%", percentOf(0.53f))
+        assertEquals("100%", percentOf(1.2f))
     }
 }
