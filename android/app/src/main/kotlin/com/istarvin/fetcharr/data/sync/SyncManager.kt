@@ -152,9 +152,11 @@ class SyncManager @Inject constructor(
                     when (event) {
                         Event.Opened -> {
                             backoff.reset()
+                            // Invalidate the old snapshot before publishing Connected, so observers never show
+                            // cached transfer metrics as live while the new snapshot is still on its way.
+                            store.onConnectionOpened()
                             _state.value = ConnectionState.Connected
                             launch { refreshQuietly() }
-                            store.onConnectionOpened()
                             _connected.tryEmit(Unit)
                         }
                         is Event.Message -> WsEvent.parseOrNull(json, event.text)?.let(store::apply)

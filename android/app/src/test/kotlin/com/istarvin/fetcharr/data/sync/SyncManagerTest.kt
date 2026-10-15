@@ -8,7 +8,9 @@ import com.istarvin.fetcharr.data.network.ServerConfigProvider
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
@@ -179,6 +181,37 @@ class SyncManagerTest {
             awaitItem()
             assertEquals(2, env.refreshes)
         }
+    }
+
+    @Test
+    fun reconnectInvalidatesSnapshotBeforeReportingConnected() = runTest {
+        val env = env()
+        val freshnessWhenConnected = mutableListOf<Boolean>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            env.manager.state.collect { connection ->
+                if (connection == ConnectionState.Connected) freshnessWhenConnected += env.store.snapshotFresh.value
+            }
+        }
+        env.manager.acquire("ui")
+        runCurrent()
+        env.connector.attempts.last().open()
+        runCurrent()
+        env.connector.attempts.last().send(Fixtures.text("ws-snapshot.json"))
+        runCurrent()
+        assertTrue(env.store.snapshotFresh.value)
+
+        env.connector.attempts.last().fail()
+        runCurrent()
+        advanceTimeBy(1_000)
+        runCurrent()
+        env.connector.attempts.last().open()
+        runCurrent()
+
+        assertEquals(listOf(false, false), freshnessWhenConnected)
+        assertFalse(env.store.snapshotFresh.value)
+        env.connector.attempts.last().send(Fixtures.text("ws-snapshot.json"))
+        runCurrent()
+        assertTrue(env.store.snapshotFresh.value)
     }
 
     @Test

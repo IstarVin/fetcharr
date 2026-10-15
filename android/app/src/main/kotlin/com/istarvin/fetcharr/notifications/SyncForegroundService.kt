@@ -9,9 +9,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import dagger.hilt.android.AndroidEntryPoint
 import com.istarvin.fetcharr.R
-import com.istarvin.fetcharr.data.network.dto.JobDto
 import com.istarvin.fetcharr.data.sync.ActiveJobsStore
 import com.istarvin.fetcharr.data.sync.SyncManager
+import com.istarvin.fetcharr.notifications.logic.OngoingContent
 import com.istarvin.fetcharr.notifications.logic.OngoingNotificationText
 import com.istarvin.fetcharr.ui.navigation.OpenTarget
 import kotlinx.coroutines.CoroutineScope
@@ -19,13 +19,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
  * `dataSync` foreground service: holds the WebSocket open ([SyncManager.acquire]) while downloads run and shows
- * "Downloading 2 · 3 queued" with progress. When it starts and stops is decided by [BackgroundController].
+ * download titles, live transfer stats and progress. Its lifetime is decided by [BackgroundController].
  */
 @AndroidEntryPoint
 class SyncForegroundService : Service() {
@@ -40,19 +41,24 @@ class SyncForegroundService : Service() {
     private var stopWatcher: Job? = null
     private var acquired = false
     private var latestStartId = 0
+    private var lastPostedContent: OngoingContent? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         latestStartId = startId
         NotificationChannels.create(this)
+        val initialContent = OngoingNotificationText.content(
+            store.jobs.value, syncManager.state.value, store.snapshotFresh.value,
+        )
         try {
             ServiceCompat.startForeground(
                 this,
                 NotificationIds.ONGOING,
-                buildNotification(store.jobs.value),
+                buildNotification(initialContent),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
             )
+            lastPostedContent = initialContent
         } catch (e: IllegalStateException) {
             // Not allowed to run as a foreground service right now (for example the Android 15 dataSync budget is
             // used up). Same outcome as a timeout: stop and tell the user.
@@ -84,8 +90,13 @@ class SyncForegroundService : Service() {
         }
         if (updates == null) {
             updates = scope.launch {
-                store.jobs.collect { jobs ->
-                    postNotification(this@SyncForegroundService, null, NotificationIds.ONGOING, buildNotification(jobs))
+                combine(store.jobs, syncManager.state, store.snapshotFresh) { jobs, connection, fresh ->
+                    OngoingNotificationText.content(jobs, connection, fresh)
+                }.collect { content ->
+                    if (content != lastPostedContent) {
+                        postNotification(this@SyncForegroundService, null, NotificationIds.ONGOING, buildNotification(content))
+                        lastPostedContent = content
+                    }
                 }
             }
         }
@@ -119,11 +130,18 @@ class SyncForegroundService : Service() {
         super.onDestroy()
     }
 
-    private fun buildNotification(jobs: List<JobDto>): Notification {
-        val content = OngoingNotificationText.content(jobs)
+    private fun buildNotification(content: OngoingContent): Notification {
         val builder = NotificationCompat.Builder(this, NotificationChannels.ACTIVE)
             .setSmallIcon(R.drawable.ic_stat_fetcharr)
+            // Compact progress templates replace the body with the bar. Put live metrics first so
+            // speed stays visible, then restore the full media heading and status when expanded.
             .setContentTitle(content.text)
+            .setContentText(content.title)
+            .setSubText(content.title)
+            .setStyle(NotificationCompat.BigTextStyle()
+                .setBigContentTitle(content.title)
+                .setSummaryText(content.subtext)
+                .bigText(content.expandedText))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
