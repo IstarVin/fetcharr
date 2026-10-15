@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/istarvin/fetcharr/server/internal/events"
 	"github.com/istarvin/fetcharr/server/internal/history"
 	"github.com/istarvin/fetcharr/server/internal/jobs"
+	"github.com/istarvin/fetcharr/server/internal/logsafe"
 	"github.com/istarvin/fetcharr/server/internal/mediaserver"
 	"github.com/istarvin/fetcharr/server/internal/process"
 	"github.com/istarvin/fetcharr/server/internal/runner"
@@ -53,7 +55,7 @@ func run(args []string) int {
 	path := config.ResolvePath(*cfgFlag)
 	cfg, err := config.Load(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fetcharr: %v\n", err)
+		fmt.Fprintf(os.Stderr, "fetcharr: %v\n", logsafe.Err(err))
 		return 1
 	}
 	log := newLogger(cfg.Server.LogLevel)
@@ -67,19 +69,23 @@ func run(args []string) int {
 	defer stop()
 	log.Info("fetcharr starting", "version", version, "config", path, "addr", ln.Addr().String())
 	if err := serve(ctx, cfg, log, ln); err != nil {
-		log.Error("fetcharr stopped with an error", "err", err)
+		log.Error("fetcharr stopped with an error", "err", logsafe.Err(err))
 		return 1
 	}
 	log.Info("fetcharr stopped")
 	return 0
 }
 
-func newLogger(level string) *slog.Logger {
+func newLogger(level string) *slog.Logger { return newLoggerTo(os.Stdout, level) }
+
+// newLoggerTo is newLogger writing to w. server.log_level is one of debug,
+// info, warn, error (validated by the config); anything else means info.
+func newLoggerTo(w io.Writer, level string) *slog.Logger {
 	var lv slog.Level
 	if err := lv.UnmarshalText([]byte(level)); err != nil {
 		lv = slog.LevelInfo
 	}
-	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: lv}))
+	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: lv}))
 }
 
 // serve opens the store, wires the service and the HTTP API, and serves on ln
@@ -102,7 +108,7 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 
 	bus := events.NewBus()
 	defer bus.Close()
-	svc := service.New(st, cfg, service.WithPublisher(bus))
+	svc := service.New(st, cfg, service.WithPublisher(bus), service.WithLogger(log))
 	procOpts := process.Options{Config: cfg, Store: st, Publisher: bus, Logger: log}
 	var refresher *mediaserver.Refresher
 	if len(cfg.MediaServers) > 0 {
@@ -198,7 +204,7 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 	}
 	stopBackground()
 	if err := rn.Shutdown(sctx); err != nil {
-		log.Error("runner shutdown", "err", err)
+		log.Error("runner shutdown", "err", logsafe.Err(err))
 	}
 	if refresher != nil {
 		refresher.Close(sctx)

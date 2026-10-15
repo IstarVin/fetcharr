@@ -1,0 +1,59 @@
+# Fetcharr server systemd unit.
+#
+# Install:
+#   sudo useradd --system --home-dir /var/lib/fetcharr --shell /usr/sbin/nologin fetcharr
+#   sudo install -m 0755 fetcharr /usr/local/bin/fetcharr
+#   sudo install -d -m 0750 -o root -g fetcharr /etc/fetcharr
+#   sudo install -m 0640 -o root -g fetcharr config.example.yaml /etc/fetcharr/config.yaml
+#   sudo install -m 0644 deploy/fetcharr.service /etc/systemd/system/fetcharr.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now fetcharr
+#
+# In /etc/fetcharr/config.yaml set data_dir: /var/lib/fetcharr (created by
+# StateDirectory below) and use real host paths for the categories.
+# ffmpeg and ffprobe must be installed and on PATH.
+
+[Unit]
+Description=Fetcharr download server
+Documentation=https://github.com/istarvin/fetcharr
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fetcharr
+Group=fetcharr
+ExecStart=/usr/local/bin/fetcharr --config /etc/fetcharr/config.yaml
+Restart=on-failure
+RestartSec=5
+# Give running downloads time to stop cleanly on shutdown.
+TimeoutStopSec=30
+
+# /var/lib/fetcharr, owned by the service user: use it as data_dir.
+StateDirectory=fetcharr
+# Library folders written by the categories. Add every category path (and the
+# data_dir if it is not /var/lib/fetcharr); the directories must already exist.
+ReadWritePaths=/srv/media
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+SystemCallArchitectures=native
+# Library files stay world-readable so the media server (another user) can read them.
+UMask=0022
+
+[Install]
+WantedBy=multi-user.target

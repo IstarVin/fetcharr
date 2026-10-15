@@ -1,15 +1,13 @@
 package ytdlp
 
 import (
-	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/istarvin/fetcharr/server/internal/logsafe"
 )
 
 const redacted = "[redacted]"
-
-// urlQuery matches the query string of an http(s) URL embedded in text.
-var urlQuery = regexp.MustCompile(`(https?://[^\s?#"'<>]+)\?[^\s"'<>]*`)
 
 // redact removes every secret substring and every URL query string from s
 // (spec §9: header values are never exposed, URLs are logged without query).
@@ -25,7 +23,7 @@ func redact(s string, secrets []string) string {
 	for _, v := range sorted {
 		s = strings.ReplaceAll(s, v, redacted)
 	}
-	return urlQuery.ReplaceAllString(s, "$1")
+	return logsafe.Text(s)
 }
 
 // Redact removes every secret substring and every URL query string from s.

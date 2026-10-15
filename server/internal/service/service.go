@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -29,6 +30,7 @@ type Service struct {
 	pub   Publisher
 	ctl   Controller
 	now   func() time.Time
+	log   *slog.Logger
 }
 
 // Option customises a Service.
@@ -52,6 +54,16 @@ func WithController(c Controller) Option {
 	}
 }
 
+// WithLogger sets the logger for the "job created" info line (default:
+// slog.Default()). Only the job id, category and status are logged.
+func WithLogger(l *slog.Logger) Option {
+	return func(s *Service) {
+		if l != nil {
+			s.log = l
+		}
+	}
+}
+
 // WithClock overrides the time source (tests).
 func WithClock(now func() time.Time) Option {
 	return func(s *Service) { s.now = now }
@@ -59,7 +71,7 @@ func WithClock(now func() time.Time) Option {
 
 // New returns a Service over st and cfg.
 func New(st *store.Store, cfg *config.Config, opts ...Option) *Service {
-	s := &Service{store: st, cfg: cfg, pub: nopPublisher{}, ctl: nopController{}, now: timefmt.Now}
+	s := &Service{store: st, cfg: cfg, pub: nopPublisher{}, ctl: nopController{}, now: timefmt.Now, log: slog.Default()}
 	for _, o := range opts {
 		o(s)
 	}
@@ -153,6 +165,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*store.Job, er
 		}
 		return nil, err
 	}
+	s.log.Info("job created", "job", j)
 	s.pub.Publish(Change{Kind: ChangeAdded, Job: j})
 	s.ctl.Wake()
 	return j, nil
@@ -239,6 +252,7 @@ func (s *Service) CreateBatch(ctx context.Context, req BatchRequest) (*BatchResu
 		return nil, newErr(CodeDuplicate, nil, "every episode url is already active")
 	}
 	for _, j := range res.Jobs {
+		s.log.Info("job created", "job", j, "batch", batchID)
 		s.pub.Publish(Change{Kind: ChangeAdded, Job: j})
 	}
 	s.ctl.Wake()

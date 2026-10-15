@@ -18,6 +18,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/istarvin/fetcharr/server/internal/logsafe"
 	"github.com/istarvin/fetcharr/server/internal/naming"
 )
 
@@ -267,7 +268,7 @@ func (c *Config) Validate() error {
 			add("%s: type %q must be jellyfin or plex", where, ms.Type)
 		}
 		if u, err := url.Parse(ms.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			add("%s: url %q must be an http(s) URL", where, ms.URL)
+			add("%s: url %q must be an http(s) URL", where, logsafe.Raw(ms.URL))
 		}
 	}
 	return errors.Join(errs...)

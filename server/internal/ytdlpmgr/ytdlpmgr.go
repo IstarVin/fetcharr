@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/istarvin/fetcharr/server/internal/api"
+	"github.com/istarvin/fetcharr/server/internal/logsafe"
 	"github.com/istarvin/fetcharr/server/internal/ytdlp"
 )
 
@@ -320,7 +321,7 @@ func (m *Manager) AutoUpdate(ctx context.Context) error {
 
 func (m *Manager) autoUpdate(ctx context.Context) {
 	if err := m.AutoUpdate(ctx); err != nil && ctx.Err() == nil {
-		m.log.Error("yt-dlp auto-update failed", "err", err)
+		m.log.Error("yt-dlp auto-update failed", "err", logsafe.Err(err))
 	}
 }
 

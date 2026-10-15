@@ -13,10 +13,8 @@ package mediaserver
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -24,6 +22,7 @@ import (
 	"time"
 
 	"github.com/istarvin/fetcharr/server/internal/config"
+	"github.com/istarvin/fetcharr/server/internal/logsafe"
 	"github.com/istarvin/fetcharr/server/internal/store"
 )
 
@@ -185,7 +184,7 @@ func (r *Refresher) send(folder string) {
 			ctx, cancel := context.WithTimeout(r.baseCtx, r.timeout)
 			defer cancel()
 			if err := c.refresh(ctx, c.mapPath(folder)); err != nil {
-				r.log.Warn("media server refresh failed", "server", c.name(), "folder", folder, "err", sanitize(err))
+				r.log.Warn("media server refresh failed", "server", c.name(), "folder", folder, "err", logsafe.Err(err))
 				return
 			}
 			r.log.Info("media server refresh requested", "server", c.name(), "folder", folder)
@@ -230,13 +229,4 @@ func (r *Refresher) Close(ctx context.Context) {
 		<-done
 	}
 	r.cancel()
-}
-
-// sanitize drops the request URL from transport errors, keeping the cause.
-func sanitize(err error) error {
-	var ue *url.Error
-	if errors.As(err, &ue) {
-		return ue.Err
-	}
-	return err
 }

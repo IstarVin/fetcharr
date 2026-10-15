@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/istarvin/fetcharr/server/internal/logsafe"
 	"github.com/istarvin/fetcharr/server/internal/service"
 )
 
@@ -72,7 +73,7 @@ func (s *server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, statusFor(se.Code), string(se.Code), se.Message)
 		return
 	}
-	s.log.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", err)
+	s.log.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", logsafe.Err(err))
 	writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
 }
 

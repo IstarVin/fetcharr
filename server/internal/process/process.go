@@ -33,6 +33,7 @@ import (
 	"github.com/istarvin/fetcharr/server/internal/config"
 	"github.com/istarvin/fetcharr/server/internal/jobs"
 	"github.com/istarvin/fetcharr/server/internal/library"
+	"github.com/istarvin/fetcharr/server/internal/logsafe"
 	"github.com/istarvin/fetcharr/server/internal/runner"
 	"github.com/istarvin/fetcharr/server/internal/service"
 	"github.com/istarvin/fetcharr/server/internal/store"
@@ -276,7 +277,7 @@ func (p *Processor) complete(job *store.Job, filePath string, mediaSize int64, w
 func (p *Processor) notify(row *store.Job, refreshDir string) {
 	defer func() {
 		if r := recover(); r != nil {
-			p.log.Error("completion hook panicked", "job", row, "panic", fmt.Sprint(r))
+			p.log.Error("completion hook panicked", "job", row, "panic", logsafe.Text(fmt.Sprint(r)))
 		}
 	}()
 	p.onCompleted(row, refreshDir)

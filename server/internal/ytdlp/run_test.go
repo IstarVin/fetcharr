@@ -292,7 +292,7 @@ func TestLineWriterBoundsAndFlushes(t *testing.T) {
 
 func TestRedact(t *testing.T) {
 	got := redact("a SECRET b SECRETlong https://h/p?x=1&y=2 and http://h2/q#f", []string{"SECRET", "SECRETlong", ""})
-	want := "a [redacted] b [redacted] https://h/p and http://h2/q#f"
+	want := "a [redacted] b [redacted] https://h/p and http://h2/q" // fragments go too
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}

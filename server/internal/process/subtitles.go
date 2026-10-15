@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/istarvin/fetcharr/server/internal/logsafe"
 	"github.com/istarvin/fetcharr/server/internal/naming"
 	"github.com/istarvin/fetcharr/server/internal/store"
 	"github.com/istarvin/fetcharr/server/internal/ytdlp"
@@ -93,17 +94,6 @@ func inputFormat(f subFormat, rawURL string) (ext, demuxer string, ok bool) {
 	return "", "", false
 }
 
-// safeURL is raw without userinfo, query string and fragment (spec §9), for
-// warnings and logs.
-func safeURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return "<invalid url>"
-	}
-	u.User, u.RawQuery, u.Fragment, u.ForceQuery = nil, "", "", false
-	return u.String()
-}
-
 // subtitles downloads and converts the job's subtitles into workDir. A
 // subtitle that fails produces a warning and is skipped (spec §4.3 step 1);
 // only ctx ending returns an error.
@@ -124,7 +114,7 @@ func (p *Processor) subtitles(ctx context.Context, job *store.Job, workDir strin
 		} else {
 			// Header values and URL query strings never reach a warning.
 			warnings = append(warnings, ytdlp.Redact(
-				fmt.Sprintf("subtitle %s (%s): %s", lang, safeURL(s.URL), reason), secrets))
+				fmt.Sprintf("subtitle %s (%s): %s", lang, logsafe.URL(s.URL), reason), secrets))
 		}
 	}
 	return out, warnings, nil

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/istarvin/fetcharr/server/internal/config"
+	"github.com/istarvin/fetcharr/server/internal/logsafe"
 	"github.com/istarvin/fetcharr/server/internal/service"
 )
 
@@ -196,7 +198,7 @@ func (s *server) recoverPanics(next http.Handler) http.Handler {
 				panic(rec)
 			}
 			s.log.Error("panic in handler", "method", r.Method, "path", r.URL.Path,
-				"panic", rec, "stack", string(debug.Stack()))
+				"panic", logsafe.Text(fmt.Sprint(rec)), "stack", string(debug.Stack()))
 			if sw, ok := w.(*statusWriter); !ok || !sw.wrote {
 				writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
 			}

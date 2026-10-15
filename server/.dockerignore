@@ -1,0 +1,16 @@
+# Keep the build context small; only Go sources and go.mod/go.sum are needed.
+.git
+.github
+**/*_test.go
+testdata
+scripts
+deploy
+README.md
+Dockerfile
+.dockerignore
+.golangci.yml
+config.example.yaml
+config.yaml
+data
+*.db
+bin

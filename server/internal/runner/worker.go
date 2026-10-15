@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/istarvin/fetcharr/server/internal/jobs"
+	"github.com/istarvin/fetcharr/server/internal/logsafe"
 	"github.com/istarvin/fetcharr/server/internal/service"
 	"github.com/istarvin/fetcharr/server/internal/store"
 	"github.com/istarvin/fetcharr/server/internal/ytdlp"
@@ -169,7 +170,7 @@ func (w *run) fail(code, msg string) {
 }
 
 func (w *run) onPanic(p any) {
-	w.r.log.Error("worker panicked", "job", w.job, "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
+	w.r.log.Error("worker panicked", "job", w.job, "panic", logsafe.Text(fmt.Sprint(p)), "stack", string(debug.Stack()))
 	w.e.cancel(errPanic)
 	// Spec §9: a panicked worker's job fails with processing_failed, in
 	// whatever phase the panic happened.
@@ -217,7 +218,7 @@ type progressTracker struct {
 func (t *progressTracker) on(p ytdlp.Progress) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			t.w.r.log.Error("progress handler panicked", "panic", fmt.Sprint(rec))
+			t.w.r.log.Error("progress handler panicked", "panic", logsafe.Text(fmt.Sprint(rec)))
 		}
 	}()
 	sp := store.Progress(p)
