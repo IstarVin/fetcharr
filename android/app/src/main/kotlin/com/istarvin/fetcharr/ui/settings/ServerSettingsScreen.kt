@@ -3,6 +3,9 @@ package com.istarvin.fetcharr.ui.settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -36,11 +40,11 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -49,6 +53,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.istarvin.fetcharr.R
 import com.istarvin.fetcharr.ui.LocalSnackbarHostState
+import com.istarvin.fetcharr.ui.common.screenGutter
+import com.istarvin.fetcharr.ui.common.ScreenFrame
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,14 +87,14 @@ fun ServerSettingsScreen(onBack: () -> Unit, viewModel: ServerSettingsViewModel 
             title = { Text(stringResource(R.string.server_settings_discard_title)) },
             text = { Text(stringResource(R.string.server_settings_discard_message)) },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = {
                     val action = discardAction
                     discardAction = null
                     if (action == "reload") viewModel.reload() else onBack()
                 }) { Text(stringResource(R.string.server_settings_discard)) }
             },
             dismissButton = {
-                TextButton(onClick = { discardAction = null }) { Text(stringResource(R.string.server_settings_keep_editing)) }
+                TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = { discardAction = null }) { Text(stringResource(R.string.server_settings_keep_editing)) }
             },
         )
     }
@@ -103,33 +109,37 @@ fun ServerSettingsScreen(onBack: () -> Unit, viewModel: ServerSettingsViewModel 
                     }
                 },
                 actions = {
-                    TextButton(onClick = { focusManager.clearFocus(); viewModel.save() }, enabled = state.dirty && !state.saving && !state.conflict) {
+                    TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = { focusManager.clearFocus(); viewModel.save() }, enabled = state.dirty && !state.saving && !state.conflict) {
                         Text(stringResource(if (state.saving) R.string.server_settings_saving else R.string.settings_save))
                     }
                 },
             )
         },
     ) { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            state.serverUrl?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-            when {
-                state.serverUrl == null -> Text(stringResource(R.string.server_settings_connect_first))
-                state.loading -> CircularProgressIndicator()
-                state.unsupported -> Text(stringResource(R.string.server_settings_unsupported))
-                else -> {
-                    state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    if (state.fieldErrors.isNotEmpty()) {
-                        Text(stringResource(R.string.server_settings_check_fields), color = MaterialTheme.colorScheme.error)
+        val horizontalPadding = screenGutter()
+        ScreenFrame(Modifier.padding(padding).imePadding()) {
+            Column(
+                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                    .padding(horizontal = horizontalPadding, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                state.serverUrl?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                when {
+                    state.serverUrl == null -> Text(stringResource(R.string.server_settings_connect_first))
+                    state.loading -> CircularProgressIndicator()
+                    state.unsupported -> Text(stringResource(R.string.server_settings_unsupported))
+                    else -> {
+                        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        if (state.fieldErrors.isNotEmpty()) {
+                            Text(stringResource(R.string.server_settings_check_fields), color = MaterialTheme.colorScheme.error)
+                        }
+                        TextButton(
+                            modifier = Modifier.heightIn(min = 48.dp),
+                            onClick = { if (state.dirty) discardAction = "reload" else viewModel.reload() },
+                            enabled = !state.saving,
+                        ) { Text(stringResource(R.string.server_settings_reload)) }
+                        state.draft?.let { draft -> ServerSettingsForm(state, draft, viewModel::edit) }
                     }
-                    TextButton(
-                        onClick = { if (state.dirty) discardAction = "reload" else viewModel.reload() },
-                        enabled = !state.saving,
-                    ) { Text(stringResource(R.string.server_settings_reload)) }
-                    state.draft?.let { draft -> ServerSettingsForm(state, draft, viewModel::edit) }
                 }
             }
         }
@@ -143,7 +153,7 @@ private fun ServerSettingsForm(
     edit: ((ServerSettingsDraft) -> ServerSettingsDraft) -> Unit,
 ) {
     val enabled = !state.saving
-    SectionTitle(R.string.server_settings_downloads)
+    SectionTitle(R.string.server_settings_downloads, divider = false)
     SettingField(R.string.server_settings_concurrency, draft.concurrency, { value -> edit { it.copy(concurrency = value) } },
         enabled, state.fieldErrors["concurrency"], KeyboardType.Number)
     SettingField(R.string.server_settings_merge_format, draft.mergeFormat, { value -> edit { it.copy(mergeFormat = value) } },
@@ -156,11 +166,21 @@ private fun ServerSettingsForm(
     SettingField(R.string.server_settings_retention, draft.retentionDays, { value -> edit { it.copy(retentionDays = value) } },
         enabled, state.fieldErrors["retentionDays"], KeyboardType.Number)
     Hint(R.string.server_settings_retention_hint)
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        val autoUpdateLabel = stringResource(R.string.server_settings_auto_update)
-        Text(autoUpdateLabel, modifier = Modifier.weight(1f).padding(top = 12.dp))
-        Switch(checked = draft.autoUpdate, onCheckedChange = { value -> edit { it.copy(autoUpdate = value) } },
-            enabled = enabled && state.managedYtdlp, modifier = Modifier.semantics { contentDescription = autoUpdateLabel })
+    val autoUpdateLabel = stringResource(R.string.server_settings_auto_update)
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp)
+            .toggleable(
+                value = draft.autoUpdate,
+                enabled = enabled && state.managedYtdlp,
+                role = Role.Switch,
+                onValueChange = { value -> edit { it.copy(autoUpdate = value) } },
+            ).padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(autoUpdateLabel, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Switch(checked = draft.autoUpdate, onCheckedChange = null,
+            enabled = enabled && state.managedYtdlp)
     }
     if (!state.managedYtdlp) Hint(R.string.server_settings_unmanaged_hint)
 
@@ -176,7 +196,7 @@ private fun ServerSettingsForm(
             )
         }
     }
-    TextButton(onClick = { edit { it.copy(categories = it.categories + CategoryDraft()) } }, enabled = enabled) {
+    TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = { edit { it.copy(categories = it.categories + CategoryDraft()) } }, enabled = enabled) {
         Text(stringResource(R.string.server_settings_add_category))
     }
 
@@ -191,7 +211,7 @@ private fun ServerSettingsForm(
             )
         }
     }
-    TextButton(onClick = { edit { it.copy(integrations = it.integrations + IntegrationDraft()) } }, enabled = enabled) {
+    TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = { edit { it.copy(integrations = it.integrations + IntegrationDraft()) } }, enabled = enabled) {
         Text(stringResource(R.string.server_settings_add_integration))
     }
 }
@@ -201,26 +221,32 @@ private fun CategoryEditor(c: CategoryDraft, index: Int, state: ServerSettingsUi
     var expanded by remember { mutableStateOf(!c.existing) }
     val errors = state.fieldErrors
     val hasErrors = errors.keys.any { it.startsWith("category.$index.") }
-    HorizontalDivider()
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Column(Modifier.weight(1f).padding(top = 12.dp)) {
-            Text(c.label.ifBlank { c.id }.ifBlank { stringResource(R.string.server_settings_new_category) }, style = MaterialTheme.typography.titleMedium)
-            if (c.path.isNotBlank()) Text(c.path, style = MaterialTheme.typography.bodySmall)
+    Surface(
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(c.label.ifBlank { c.id }.ifBlank { stringResource(R.string.server_settings_new_category) }, style = MaterialTheme.typography.titleMedium)
+                    if (c.path.isNotBlank()) Text(c.path, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = { expanded = !expanded }) {
+                    Text(stringResource(if (expanded) R.string.server_settings_collapse else R.string.server_settings_edit))
+                }
+            }
+            if (expanded || hasErrors) {
+                SettingField(R.string.server_settings_category_id, c.id, { change(c.copy(id = it)) }, !state.saving && !c.existing,
+                    errors["category.$index.id"])
+                if (c.existing) Hint(R.string.server_settings_category_id_hint)
+                SettingField(R.string.server_settings_label, c.label, { change(c.copy(label = it)) }, !state.saving)
+                SettingField(R.string.server_settings_destination, c.path, { change(c.copy(path = it)) }, !state.saving,
+                    errors["category.$index.path"])
+                ChoiceField(R.string.server_settings_layout, c.layout, listOf("movie" to R.string.server_settings_movie,
+                    "tv" to R.string.server_settings_tv, "flat" to R.string.server_settings_flat), !state.saving) { change(c.copy(layout = it)) }
+                TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = remove, enabled = !state.saving) { Text(stringResource(R.string.server_settings_remove_category), color = MaterialTheme.colorScheme.error) }
+            }
         }
-        TextButton(onClick = { expanded = !expanded }) {
-            Text(stringResource(if (expanded) R.string.server_settings_collapse else R.string.server_settings_edit))
-        }
-    }
-    if (expanded || hasErrors) {
-        SettingField(R.string.server_settings_category_id, c.id, { change(c.copy(id = it)) }, !state.saving && !c.existing,
-            errors["category.$index.id"])
-        if (c.existing) Hint(R.string.server_settings_category_id_hint)
-        SettingField(R.string.server_settings_label, c.label, { change(c.copy(label = it)) }, !state.saving)
-        SettingField(R.string.server_settings_destination, c.path, { change(c.copy(path = it)) }, !state.saving,
-            errors["category.$index.path"])
-        ChoiceField(R.string.server_settings_layout, c.layout, listOf("movie" to R.string.server_settings_movie,
-            "tv" to R.string.server_settings_tv, "flat" to R.string.server_settings_flat), !state.saving) { change(c.copy(layout = it)) }
-        TextButton(onClick = remove, enabled = !state.saving) { Text(stringResource(R.string.server_settings_remove_category), color = MaterialTheme.colorScheme.error) }
     }
 }
 
@@ -229,43 +255,50 @@ private fun IntegrationEditor(s: IntegrationDraft, index: Int, state: ServerSett
     var expanded by remember { mutableStateOf(!s.existing) }
     val errors = state.fieldErrors
     val hasErrors = errors.keys.any { it.startsWith("integration.$index.") }
-    HorizontalDivider()
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Column(Modifier.weight(1f).padding(top = 12.dp)) {
-            Text(stringResource(if (s.type == "plex") R.string.server_settings_plex else R.string.server_settings_jellyfin), style = MaterialTheme.typography.titleMedium)
-            if (s.url.isNotBlank()) Text(s.url, style = MaterialTheme.typography.bodySmall)
-        }
-        TextButton(onClick = { expanded = !expanded }) {
-            Text(stringResource(if (expanded) R.string.server_settings_collapse else R.string.server_settings_edit))
-        }
-    }
-    if (expanded || hasErrors) {
-        ChoiceField(R.string.server_settings_type, s.type, listOf("jellyfin" to R.string.server_settings_jellyfin,
-            "plex" to R.string.server_settings_plex), !state.saving && !s.existing) { change(s.copy(type = it)) }
-        SettingField(R.string.server_settings_integration_url, s.url, { change(s.copy(url = it)) }, !state.saving,
-            errors["integration.$index.url"], KeyboardType.Uri)
-        SettingField(if (s.type == "plex") R.string.server_settings_plex_token else R.string.server_settings_api_key,
-            s.credential, { change(s.copy(credential = it)) }, !state.saving, errors["integration.$index.credential"], KeyboardType.Password, secret = true)
-        if (s.hasCredential) Hint(R.string.server_settings_secret_hint)
-        Text(stringResource(R.string.server_settings_path_maps), style = MaterialTheme.typography.titleSmall)
-        Hint(R.string.server_settings_mapping_hint)
-        s.paths.forEachIndexed { pathIndex, p ->
-            key(p.key) {
-                SettingField(R.string.server_settings_mapping_from, p.from, { value ->
-                    change(s.copy(paths = s.paths.map { if (it.key == p.key) it.copy(from = value) else it }))
-                }, !state.saving, errors["integration.$index.path.$pathIndex"])
-                SettingField(R.string.server_settings_mapping_to, p.to, { value ->
-                    change(s.copy(paths = s.paths.map { if (it.key == p.key) it.copy(to = value) else it }))
-                }, !state.saving)
-                TextButton(onClick = { change(s.copy(paths = s.paths.filterNot { it.key == p.key })) }, enabled = !state.saving) {
-                    Text(stringResource(R.string.server_settings_remove_mapping))
+    Surface(
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(stringResource(if (s.type == "plex") R.string.server_settings_plex else R.string.server_settings_jellyfin), style = MaterialTheme.typography.titleMedium)
+                    if (s.url.isNotBlank()) Text(s.url, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = { expanded = !expanded }) {
+                    Text(stringResource(if (expanded) R.string.server_settings_collapse else R.string.server_settings_edit))
                 }
             }
+            if (expanded || hasErrors) {
+                ChoiceField(R.string.server_settings_type, s.type, listOf("jellyfin" to R.string.server_settings_jellyfin,
+                    "plex" to R.string.server_settings_plex), !state.saving && !s.existing) { change(s.copy(type = it)) }
+                SettingField(R.string.server_settings_integration_url, s.url, { change(s.copy(url = it)) }, !state.saving,
+                    errors["integration.$index.url"], KeyboardType.Uri)
+                SettingField(if (s.type == "plex") R.string.server_settings_plex_token else R.string.server_settings_api_key,
+                    s.credential, { change(s.copy(credential = it)) }, !state.saving, errors["integration.$index.credential"], KeyboardType.Password, secret = true)
+                if (s.hasCredential) Hint(R.string.server_settings_secret_hint)
+                Text(stringResource(R.string.server_settings_path_maps), style = MaterialTheme.typography.titleSmall)
+                Hint(R.string.server_settings_mapping_hint)
+                s.paths.forEachIndexed { pathIndex, p ->
+                    key(p.key) {
+                        HorizontalDivider()
+                        SettingField(R.string.server_settings_mapping_from, p.from, { value ->
+                            change(s.copy(paths = s.paths.map { if (it.key == p.key) it.copy(from = value) else it }))
+                        }, !state.saving, errors["integration.$index.path.$pathIndex"])
+                        SettingField(R.string.server_settings_mapping_to, p.to, { value ->
+                            change(s.copy(paths = s.paths.map { if (it.key == p.key) it.copy(to = value) else it }))
+                        }, !state.saving)
+                        TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = { change(s.copy(paths = s.paths.filterNot { it.key == p.key })) }, enabled = !state.saving) {
+                            Text(stringResource(R.string.server_settings_remove_mapping))
+                        }
+                    }
+                }
+                TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = { change(s.copy(paths = s.paths + PathMappingDraft())) }, enabled = !state.saving) {
+                    Text(stringResource(R.string.server_settings_add_mapping))
+                }
+                TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = remove, enabled = !state.saving) { Text(stringResource(R.string.server_settings_remove_integration), color = MaterialTheme.colorScheme.error) }
+            }
         }
-        TextButton(onClick = { change(s.copy(paths = s.paths + PathMappingDraft())) }, enabled = !state.saving) {
-            Text(stringResource(R.string.server_settings_add_mapping))
-        }
-        TextButton(onClick = remove, enabled = !state.saving) { Text(stringResource(R.string.server_settings_remove_integration), color = MaterialTheme.colorScheme.error) }
     }
 }
 
@@ -303,12 +336,13 @@ private fun ChoiceField(label: Int, selected: String, options: List<Pair<String,
 }
 
 @Composable
-private fun SectionTitle(title: Int) {
-    Text(stringResource(title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 16.dp))
+private fun SectionTitle(title: Int, divider: Boolean = true) {
+    if (divider) HorizontalDivider(modifier = Modifier.padding(top = 12.dp))
+    Text(stringResource(title), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
 }
 
 @Composable
 private fun Hint(text: Int) {
-    Text(stringResource(text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(stringResource(text), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }

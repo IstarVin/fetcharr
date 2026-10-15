@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -22,6 +23,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Cancel
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
@@ -72,12 +75,16 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.istarvin.fetcharr.R
+import com.istarvin.fetcharr.data.network.ApiError
 import com.istarvin.fetcharr.data.network.dto.JobStatus
 import com.istarvin.fetcharr.ui.LocalSnackbarHostState
+import com.istarvin.fetcharr.ui.common.ScreenFrame
+import com.istarvin.fetcharr.ui.theme.FetcharrTheme
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
@@ -196,48 +203,51 @@ internal fun HistoryContent(
             )
         },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            when {
-                !state.loaded -> Unit
-                !state.hasServer -> SetupState(onOpenSettings)
-                else -> {
-                    val listState = rememberLazyListState()
-                    val loadMore by rememberUpdatedState(onLoadMore)
-                    LaunchedEffect(listState) {
-                        snapshotFlow {
-                            val info = listState.layoutInfo
-                            (info.visibleItemsInfo.lastOrNull()?.index ?: -1) to info.totalItemsCount
-                        }.distinctUntilChanged().collect { (last, total) ->
-                            if (last >= 0 && last >= total - LOAD_MORE_THRESHOLD) loadMore()
+        ScreenFrame(modifier = Modifier.padding(padding), maxWidth = 840.dp) {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val gutter = if (maxWidth >= 600.dp) 24.dp else 16.dp
+                when {
+                    !state.loaded -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) { LoadingFeedback() }
+                    !state.hasServer -> SetupState(onOpenSettings)
+                    else -> {
+                        val listState = rememberLazyListState()
+                        val loadMore by rememberUpdatedState(onLoadMore)
+                        LaunchedEffect(listState) {
+                            snapshotFlow {
+                                val info = listState.layoutInfo
+                                (info.visibleItemsInfo.lastOrNull()?.index ?: -1) to info.totalItemsCount
+                            }.distinctUntilChanged().collect { (last, total) ->
+                                if (last >= 0 && last >= total - LOAD_MORE_THRESHOLD) loadMore()
+                            }
                         }
-                    }
-                    PullToRefreshBox(
-                        isRefreshing = state.isRefreshing,
-                        onRefresh = onRefresh,
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        LazyColumn(
-                            state = listState,
+                        PullToRefreshBox(
+                            isRefreshing = state.isRefreshing,
+                            onRefresh = onRefresh,
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(bottom = 16.dp),
                         ) {
-                            when {
-                                !state.historyLoaded && state.error != null ->
-                                    item(key = "error") { ErrorState(state.error.userMessage, onRefresh) }
-                                !state.historyLoaded -> item(key = "loading") { LoadingState() }
-                                state.isEmpty -> item(key = "empty") { EmptyHistory() }
-                                else -> {
-                                    for (group in state.groups) {
-                                        stickyHeader(key = "header:${group.key}") { DayHeader(group.label) }
-                                        items(group.items, key = { it.id }) { row ->
-                                            HistoryRow(row, onAction = { onAction(it, row.id) }, onDeleteSwiped = { onDeleteSwiped(row.id) })
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(start = gutter, end = gutter, bottom = 24.dp),
+                            ) {
+                                when {
+                                    !state.historyLoaded && state.error != null ->
+                                        item(key = "error") { ErrorState(state.error.userMessage, onRefresh) }
+                                    !state.historyLoaded -> item(key = "loading") { LoadingState() }
+                                    state.isEmpty -> item(key = "empty") { EmptyHistory() }
+                                    else -> {
+                                        for (group in state.groups) {
+                                            stickyHeader(key = "header:${group.key}") { DayHeader(group.label) }
+                                            items(group.items, key = { it.id }) { row ->
+                                                HistoryRow(row, onAction = { onAction(it, row.id) }, onDeleteSwiped = { onDeleteSwiped(row.id) })
+                                            }
                                         }
-                                    }
-                                    if (state.loadingMore) {
-                                        item(key = "loading-more") {
-                                            val description = stringResource(R.string.history_cd_loading_more)
-                                            Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                                                CircularProgressIndicator(Modifier.size(24.dp).semantics { contentDescription = description })
+                                        if (state.loadingMore) {
+                                            item(key = "loading-more") {
+                                                val description = stringResource(R.string.history_cd_loading_more)
+                                                Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                                    CircularProgressIndicator(Modifier.size(24.dp).semantics { contentDescription = description })
+                                                }
                                             }
                                         }
                                     }
@@ -258,7 +268,7 @@ private fun DayHeader(label: String) {
             label,
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).semantics { heading() },
+            modifier = Modifier.padding(top = 24.dp, bottom = 8.dp).semantics { heading() },
         )
     }
 }
@@ -312,12 +322,22 @@ private fun LazyItemScope.HistoryRow(row: HistoryRowModel, onAction: (HistoryAct
                                 CustomAccessibilityAction(actionLabels.getValue(action)) { onAction(action); true }
                             }
                         }
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(row.heading, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Icon(
+                        imageVector = when (row.status) {
+                            JobStatus.COMPLETED -> Icons.Outlined.CheckCircle
+                            JobStatus.FAILED -> Icons.Outlined.ErrorOutline
+                            else -> Icons.Outlined.Cancel
+                        },
+                        contentDescription = null,
+                        tint = if (row.status == JobStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(row.heading, style = MaterialTheme.typography.titleMedium)
                         Text(
                             row.statusLine,
                             style = MaterialTheme.typography.bodyMedium,
@@ -342,6 +362,9 @@ private fun LazyItemScope.HistoryRow(row: HistoryRowModel, onAction: (HistoryAct
                             contentDescription = stringResource(R.string.history_cd_warning),
                             tint = MaterialTheme.colorScheme.tertiary,
                         )
+                    }
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.history_row_actions))
                     }
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -439,8 +462,7 @@ private fun LazyItemScope.EmptyHistory() {
 
 @Composable
 private fun LazyItemScope.LoadingState() {
-    val loading = stringResource(R.string.a11y_loading)
-    CenteredItem { CircularProgressIndicator(Modifier.semantics { contentDescription = loading }) }
+    CenteredItem { LoadingFeedback() }
 }
 
 @Composable
@@ -471,3 +493,48 @@ private fun StateText(icon: ImageVector, title: String, body: String) {
         textAlign = TextAlign.Center,
     )
 }
+
+@Composable
+private fun LoadingFeedback() {
+    CircularProgressIndicator(Modifier.size(32.dp))
+    Text(stringResource(R.string.a11y_loading), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable
+private fun HistoryPreview(state: HistoryUiState) {
+    FetcharrTheme { HistoryContent(state, {}, {}, {}, { _, _ -> }, {}, {}) }
+}
+
+@Preview(name = "History · populated", showBackground = true)
+@Preview(name = "History · large text", showBackground = true, fontScale = 1.5f)
+@Preview(name = "History · tablet", showBackground = true, widthDp = 900)
+@Composable
+private fun PopulatedHistoryPreview() {
+    val completed = HistoryRowModel(
+        id = "completed", status = JobStatus.COMPLETED, finishedAt = 0L, categoryLabel = "Movies",
+        heading = "A long movie title with a descriptive subtitle (2026)",
+        statusLine = "/media/movies/A long movie title (2026)/A long movie title.mkv",
+        hasWarnings = true, warnings = listOf("Some metadata could not be saved"),
+        filePath = "/media/movies/title.mkv", errorCode = null, errorMessage = null,
+        actions = listOf(HistoryAction.CopyPath, HistoryAction.Details, HistoryAction.Delete),
+    )
+    val failed = completed.copy(
+        id = "failed", status = JobStatus.FAILED, heading = "A television series — S02E03",
+        statusLine = "Not enough disk space on server", hasWarnings = false, warnings = emptyList(),
+        filePath = null, errorCode = "low_disk_space", errorMessage = "Not enough disk space on server",
+        actions = listOf(HistoryAction.Retry, HistoryAction.Details, HistoryAction.Delete),
+    )
+    HistoryPreview(HistoryUiState(loaded = true, hasServer = true, historyLoaded = true, groups = listOf(
+        HistoryGroup("today", "Today", listOf(completed)), HistoryGroup("yesterday", "Yesterday", listOf(failed)),
+    )))
+}
+
+@Preview(name = "History · error", showBackground = true)
+@Composable
+private fun ErrorHistoryPreview() {
+    HistoryPreview(HistoryUiState(loaded = true, hasServer = true, error = ApiError.Server(503)))
+}
+
+@Preview(name = "History · setup", showBackground = true)
+@Composable
+private fun SetupHistoryPreview() { HistoryPreview(HistoryUiState(loaded = true)) }

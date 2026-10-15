@@ -1,5 +1,8 @@
 package com.istarvin.fetcharr.ui
 
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Download
@@ -8,6 +11,8 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -21,6 +26,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -112,57 +118,73 @@ fun FetcharrAppUi(openTargets: Flow<OpenTarget> = emptyFlow()) {
         }
     }
 
-    val showBottomBar = destination == null || tabs.any { tab -> destination.hierarchy.any { it.hasRoute(tab.routeClass) } }
+    val showNavigation = destination == null || tabs.any { tab -> destination.hierarchy.any { it.hasRoute(tab.routeClass) } }
+    val selectTab: (Tab) -> Unit = { tab ->
+        navController.navigate(tab.route) {
+            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
 
     NotificationPermissionEffect()
 
     CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
-        Scaffold(
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-            bottomBar = {
-                if (showBottomBar) {
-                    NavigationBar {
-                        tabs.forEach { tab ->
-                            val label = stringResource(tab.labelRes)
-                            NavigationBarItem(
-                                selected = destination?.hierarchy?.any { it.hasRoute(tab.routeClass) } == true,
-                                onClick = {
-                                    navController.navigate(tab.route) {
-                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                icon = { Icon(tab.icon, contentDescription = null) },
-                                label = { Text(label) },
-                            )
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val useRail = maxWidth >= 600.dp
+            Scaffold(
+                snackbarHost = { SnackbarHost(snackbarHostState) },
+                bottomBar = {
+                    if (showNavigation && !useRail) {
+                        NavigationBar {
+                            tabs.forEach { tab ->
+                                val label = stringResource(tab.labelRes)
+                                NavigationBarItem(
+                                    selected = destination?.hierarchy?.any { it.hasRoute(tab.routeClass) } == true,
+                                    onClick = { selectTab(tab) },
+                                    icon = { Icon(tab.icon, contentDescription = null) },
+                                    label = { Text(label) },
+                                )
+                            }
                         }
                     }
-                }
-            },
-        ) { innerPadding ->
-            NavHost(
-                navController = navController,
-                startDestination = QueueRoute,
-                modifier = Modifier
-                    .padding(innerPadding)
-                    .consumeWindowInsets(innerPadding),
-            ) {
-                composable<QueueRoute> {
-                    QueueScreen(
-                        onOpenSettings = { openSettings() },
-                        onAdd = { navController.navigate(AddRoute()) },
-                    )
-                }
-                composable<HistoryRoute> { HistoryScreen(onOpenSettings = { openSettings() }) }
-                composable<SettingsRoute> {
-                    SettingsScreen(onServerSettings = { navController.navigate(ServerSettingsRoute) })
-                }
-                composable<ServerSettingsRoute> {
-                    ServerSettingsScreen(onBack = { navController.popBackStack() })
-                }
-                composable<AddRoute> {
-                    AddScreen(onBack = { navController.popBackStack() }, onOpenSettings = { openSettings() })
+                },
+            ) { innerPadding ->
+                Row(Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding)) {
+                    if (showNavigation && useRail) {
+                        NavigationRail {
+                            tabs.forEach { tab ->
+                                NavigationRailItem(
+                                    selected = destination?.hierarchy?.any { it.hasRoute(tab.routeClass) } == true,
+                                    onClick = { selectTab(tab) },
+                                    icon = { Icon(tab.icon, contentDescription = null) },
+                                    label = { Text(stringResource(tab.labelRes)) },
+                                )
+                            }
+                        }
+                    }
+                    NavHost(
+                        navController = navController,
+                        startDestination = QueueRoute,
+                        modifier = Modifier.weight(1f).fillMaxSize(),
+                    ) {
+                        composable<QueueRoute> {
+                            QueueScreen(
+                                onOpenSettings = { openSettings() },
+                                onAdd = { navController.navigate(AddRoute()) },
+                            )
+                        }
+                        composable<HistoryRoute> { HistoryScreen(onOpenSettings = { openSettings() }) }
+                        composable<SettingsRoute> {
+                            SettingsScreen(onServerSettings = { navController.navigate(ServerSettingsRoute) })
+                        }
+                        composable<ServerSettingsRoute> {
+                            ServerSettingsScreen(onBack = { navController.popBackStack() })
+                        }
+                        composable<AddRoute> {
+                            AddScreen(onBack = { navController.popBackStack() }, onOpenSettings = { openSettings() })
+                        }
+                    }
                 }
             }
         }

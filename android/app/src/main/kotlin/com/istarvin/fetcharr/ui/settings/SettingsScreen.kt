@@ -2,6 +2,9 @@ package com.istarvin.fetcharr.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Button
@@ -23,7 +27,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.Surface
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -39,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -54,6 +62,8 @@ import com.istarvin.fetcharr.R
 import com.istarvin.fetcharr.data.network.TestConnectionResult
 import com.istarvin.fetcharr.data.network.dto.CategoryDto
 import com.istarvin.fetcharr.ui.LocalSnackbarHostState
+import com.istarvin.fetcharr.ui.common.screenGutter
+import com.istarvin.fetcharr.ui.common.ScreenFrame
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,106 +76,132 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel(), onServerSetti
 
     Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.nav_settings)) }) }) { padding ->
         if (!state.loaded) return@Scaffold
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            GroupTitle(R.string.settings_group_server)
-            OutlinedTextField(
-                value = state.url,
-                onValueChange = viewModel::onUrlChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.settings_server_url)) },
-                placeholder = { Text(stringResource(R.string.settings_server_url_hint)) },
-                singleLine = true,
-                isError = state.urlInvalid,
-                supportingText = if (state.urlInvalid) {
-                    { Text(stringResource(R.string.settings_server_url_invalid)) }
-                } else {
-                    null
-                },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            )
-            OutlinedTextField(
-                value = state.token,
-                onValueChange = viewModel::onTokenChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.settings_token)) },
-                singleLine = true,
-                visualTransformation = if (state.tokenVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                trailingIcon = {
-                    IconButton(onClick = viewModel::toggleTokenVisible) {
-                        Icon(
-                            imageVector = if (state.tokenVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                            contentDescription = stringResource(
-                                if (state.tokenVisible) R.string.settings_token_hide else R.string.settings_token_show,
-                            ),
-                        )
-                    }
-                },
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = {
-                    if (viewModel.save()) scope.launch { snackbar.showSnackbar(savedMessage) }
-                }) { Text(stringResource(R.string.settings_save)) }
-                OutlinedButton(
-                    onClick = viewModel::testConnection,
-                    enabled = state.testStatus != TestStatus.Running,
+        val horizontalPadding = screenGutter()
+        ScreenFrame(Modifier.padding(padding).imePadding()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = horizontalPadding, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                GroupTitle(R.string.settings_group_server, divider = false)
+                Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
                 ) {
-                    Text(
-                        stringResource(
-                            if (state.testStatus == TestStatus.Running) R.string.settings_testing else R.string.settings_test,
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedTextField(
+                            value = state.url,
+                            onValueChange = viewModel::onUrlChange,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text(stringResource(R.string.settings_server_url)) },
+                            placeholder = { Text(stringResource(R.string.settings_server_url_hint)) },
+                            singleLine = true,
+                            isError = state.urlInvalid,
+                            supportingText = if (state.urlInvalid) {
+                                { Text(stringResource(R.string.settings_server_url_invalid)) }
+                            } else {
+                                null
+                            },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        )
+                        OutlinedTextField(
+                            value = state.token,
+                            onValueChange = viewModel::onTokenChange,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text(stringResource(R.string.settings_token)) },
+                            singleLine = true,
+                            visualTransformation = if (state.tokenVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            trailingIcon = {
+                                IconButton(onClick = viewModel::toggleTokenVisible) {
+                                    Icon(
+                                        imageVector = if (state.tokenVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                        contentDescription = stringResource(
+                                            if (state.tokenVisible) R.string.settings_token_hide else R.string.settings_token_show,
+                                        ),
+                                    )
+                                }
+                            },
+                        )
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = {
+                                if (viewModel.save()) scope.launch { snackbar.showSnackbar(savedMessage) }
+                            }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.settings_save)) }
+                            OutlinedButton(
+                                onClick = viewModel::testConnection,
+                                enabled = state.testStatus != TestStatus.Running,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            ) {
+                                Text(
+                                    stringResource(
+                                        if (state.testStatus == TestStatus.Running) R.string.settings_testing else R.string.settings_test,
+                                    ),
+                                )
+                            }
+                        }
+                        TestResultText(state.testStatus)
+                    }
+                }
+
+                Surface(
+                    onClick = onServerSettings,
+                    enabled = state.hasSavedServer,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                ) {
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.server_settings_title)) },
+                        trailingContent = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null) },
+                        colors = androidx.compose.material3.ListItemDefaults.colors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            headlineColor = if (state.hasSavedServer) MaterialTheme.colorScheme.onSurface
+                                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                            trailingIconColor = if (state.hasSavedServer) MaterialTheme.colorScheme.onSurfaceVariant
+                                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
                         ),
                     )
                 }
-            }
-            TestResultText(state.testStatus)
 
-            OutlinedButton(onClick = onServerSettings, enabled = state.hasSavedServer) {
-                Text(stringResource(R.string.server_settings_title))
-            }
-
-            GroupTitle(R.string.settings_group_defaults)
-            CategoryDropdown(
-                label = R.string.settings_default_movie,
-                categories = state.movieCategories,
-                selectedId = state.defaultMovieCategoryId,
-                onSelect = viewModel::onDefaultMovieCategory,
-            )
-            CategoryDropdown(
-                label = R.string.settings_default_tv,
-                categories = state.tvCategories,
-                selectedId = state.defaultTvCategoryId,
-                onSelect = viewModel::onDefaultTvCategory,
-            )
-            if (state.movieCategories.isEmpty() && state.tvCategories.isEmpty()) {
-                Text(
-                    stringResource(R.string.settings_defaults_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                GroupTitle(R.string.settings_group_defaults)
+                CategoryDropdown(
+                    label = R.string.settings_default_movie,
+                    categories = state.movieCategories,
+                    selectedId = state.defaultMovieCategoryId,
+                    onSelect = viewModel::onDefaultMovieCategory,
                 )
-            }
+                CategoryDropdown(
+                    label = R.string.settings_default_tv,
+                    categories = state.tvCategories,
+                    selectedId = state.defaultTvCategoryId,
+                    onSelect = viewModel::onDefaultTvCategory,
+                )
+                if (state.movieCategories.isEmpty() && state.tvCategories.isEmpty()) {
+                    Text(
+                        stringResource(R.string.settings_defaults_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
 
-            if (state.serverVersion != null) YtdlpSection(state, onUpdate = viewModel::updateYtdlp)
+                if (state.serverVersion != null) YtdlpSection(state, onUpdate = viewModel::updateYtdlp)
 
-            GroupTitle(R.string.settings_group_about)
-            AboutRow(stringResource(R.string.settings_app_version), BuildConfig.VERSION_NAME)
-            AboutRow(
-                stringResource(R.string.settings_server_version),
-                state.serverVersion ?: stringResource(R.string.settings_no_value),
-            )
-            val uriHandler = LocalUriHandler.current
-            val sourceUrl = stringResource(R.string.settings_source_code_url)
-            TextButton(
-                onClick = { uriHandler.openUri(sourceUrl) },
-                contentPadding = PaddingValues(0.dp),
-            ) {
-                Text(stringResource(R.string.settings_source_code), modifier = Modifier.fillMaxWidth())
+                GroupTitle(R.string.settings_group_about)
+                AboutRow(stringResource(R.string.settings_app_version), BuildConfig.VERSION_NAME)
+                AboutRow(
+                    stringResource(R.string.settings_server_version),
+                    state.serverVersion ?: stringResource(R.string.settings_no_value),
+                )
+                val uriHandler = LocalUriHandler.current
+                val sourceUrl = stringResource(R.string.settings_source_code_url)
+                TextButton(
+                    onClick = { uriHandler.openUri(sourceUrl) },
+                    contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    Text(stringResource(R.string.settings_source_code), modifier = Modifier.fillMaxWidth())
+                }
             }
         }
     }
@@ -173,12 +209,14 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel(), onServerSetti
 
 @Composable
 private fun AboutRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = MaterialTheme.typography.bodyLarge)
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
         Text(
             value,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
         )
     }
 }
@@ -197,7 +235,7 @@ private fun YtdlpSection(state: SettingsUiState, onUpdate: () -> Unit) {
     val running = update == YtdlpUpdateStatus.Running
     if (state.ytdlpManaged) {
         val updatingDesc = stringResource(R.string.settings_ytdlp_updating_desc)
-        OutlinedButton(onClick = onUpdate, enabled = !running) {
+        OutlinedButton(onClick = onUpdate, enabled = !running, modifier = Modifier.heightIn(min = 48.dp)) {
             if (running) {
                 CircularProgressIndicator(
                     modifier = Modifier
@@ -227,12 +265,13 @@ private fun YtdlpSection(state: SettingsUiState, onUpdate: () -> Unit) {
 }
 
 @Composable
-private fun GroupTitle(res: Int) {
+private fun GroupTitle(res: Int, divider: Boolean = true) {
+    if (divider) HorizontalDivider(modifier = Modifier.padding(top = 12.dp))
     Text(
         stringResource(res),
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 8.dp),
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
     )
 }
 

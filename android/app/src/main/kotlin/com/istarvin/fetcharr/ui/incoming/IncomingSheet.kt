@@ -3,8 +3,8 @@ package com.istarvin.fetcharr.ui.incoming
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -36,6 +36,7 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.istarvin.fetcharr.ui.common.screenGutter
 import com.istarvin.fetcharr.R
 import com.istarvin.fetcharr.data.network.ApiError
 import com.istarvin.fetcharr.incoming.IncomingSheet
@@ -66,14 +67,15 @@ fun IncomingSheetHost(
     ModalBottomSheet(
         onDismissRequest = viewModel::cancel,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetMaxWidth = 720.dp,
     ) {
-        Column(Modifier.fillMaxWidth().imePadding()) {
+        Column(Modifier.fillMaxWidth()) {
             Column(
                 Modifier
                     .weight(1f, fill = false)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                    .padding(horizontal = screenGutter(), vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
                 if (!state.serverConfigured) {
                     NoServerNotice(onOpenSettings)
@@ -90,22 +92,18 @@ fun IncomingSheetHost(
                 state.error?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
                     if (it == ApiError.Unauthorized.userMessage) {
-                        TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.queue_snackbar_settings)) }
+                        TextButton(onClick = onOpenSettings, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.queue_snackbar_settings)) }
                     }
                 }
             }
-            Row(
-                Modifier.fillMaxWidth().padding(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            FormFooter {
                 if (state.submitting) {
                     val sending = stringResource(R.string.a11y_sending)
                     CircularProgressIndicator(Modifier.size(24.dp).semantics { contentDescription = sending }, strokeWidth = 2.dp)
                 }
-                OutlinedButton(onClick = viewModel::cancel) { Text(stringResource(R.string.incoming_cancel)) }
+                OutlinedButton(onClick = viewModel::cancel, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.incoming_cancel)) }
                 if (state.serverConfigured) {
-                    Button(onClick = viewModel::download, enabled = state.canDownload) {
+                    Button(onClick = viewModel::download, enabled = state.canDownload, modifier = Modifier.heightIn(min = 48.dp)) {
                         Text(stringResource(R.string.incoming_download, state.selectedCount))
                     }
                 }
@@ -123,7 +121,7 @@ private fun NoServerNotice(onOpenSettings: () -> Unit) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Button(onClick = onOpenSettings) { Text(stringResource(R.string.incoming_open_settings)) }
+        Button(onClick = onOpenSettings, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.incoming_open_settings)) }
     }
 }
 
@@ -131,7 +129,9 @@ private fun NoServerNotice(onOpenSettings: () -> Unit) {
 private fun SheetContent(state: IncomingUiState, sheet: IncomingSheet, vm: IncomingViewModel) {
     val actions = ItemFormActions(vm::onTitle, vm::onYear, vm::onShow, vm::onSeason, vm::onEpisode, vm::onEpisodeTitle)
     Text(stringResource(R.string.incoming_title), style = MaterialTheme.typography.titleLarge)
-    CategoryChips(state.categories, state.categoryId, vm::selectCategory)
+    FormSection(stringResource(R.string.field_category)) {
+        CategoryChips(state.categories, state.categoryId, vm::selectCategory)
+    }
     if (state.receiving) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -150,7 +150,7 @@ private fun SheetContent(state: IncomingUiState, sheet: IncomingSheet, vm: Incom
 }
 
 @Composable
-private fun EpisodeChecklist(
+internal fun EpisodeChecklist(
     episodes: List<SeasonEpisode>,
     onToggle: (Int) -> Unit,
     onSetAll: (Boolean) -> Unit,
@@ -159,7 +159,7 @@ private fun EpisodeChecklist(
     val allSelected = selected == episodes.size
     Column {
         Row(
-            Modifier.fillMaxWidth().triStateToggleable(
+            Modifier.fillMaxWidth().heightIn(min = 56.dp).triStateToggleable(
                 state = when (selected) {
                     0 -> ToggleableState.Off
                     episodes.size -> ToggleableState.On
@@ -167,7 +167,7 @@ private fun EpisodeChecklist(
                 },
                 role = Role.Checkbox,
                 onClick = { onSetAll(!allSelected) },
-            ),
+            ).padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TriStateCheckbox(
@@ -178,23 +178,27 @@ private fun EpisodeChecklist(
                 },
                 onClick = null,
             )
-            Text(stringResource(R.string.incoming_select_all, selected, episodes.size), style = MaterialTheme.typography.titleSmall)
+            Text(
+                stringResource(R.string.incoming_select_all, selected, episodes.size),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f).padding(start = 12.dp),
+            )
         }
         HorizontalDivider()
         episodes.forEach { episode ->
             Row(
-                Modifier.fillMaxWidth().toggleable(
+                Modifier.fillMaxWidth().heightIn(min = 56.dp).toggleable(
                     value = episode.selected,
                     role = Role.Checkbox,
                     onValueChange = { onToggle(episode.episode) },
-                ),
+                ).padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Checkbox(checked = episode.selected, onCheckedChange = null)
                 Text(
                     "E%02d".format(Locale.ROOT, episode.episode),
                     style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.padding(end = 12.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp),
                 )
                 Text(episode.title.orEmpty(), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
             }
