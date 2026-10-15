@@ -1,0 +1,64 @@
+# Fetcharr server configuration.
+#
+# Point the server at this file with `--config <path>` or FETCHARR_CONFIG
+# (the Docker image uses FETCHARR_CONFIG=/config/config.yaml). The default is
+# ./config.yaml. Unknown keys are rejected, so typos fail at startup.
+#
+# Paths below are container paths (compose volumes: ./config:/config,
+# ./data:/data, /mnt/media:/media). For a bare-metal install use host paths
+# such as /var/lib/fetcharr and /srv/media/movies.
+
+server:
+  host: 0.0.0.0
+  port: 8080                # the Docker HEALTHCHECK probes 8080; keep it and remap with `ports:` instead
+  auth_token: ""            # empty = no auth; otherwise required as a Bearer token
+  log_level: info           # debug | info | warn | error
+
+# SQLite database, per-job work dirs and the managed yt-dlp binary live here.
+# Must exist and be writable by the user running the server.
+data_dir: /data
+
+downloads:
+  concurrency: 2            # simultaneous downloads (>= 1)
+  merge_format: mp4         # container used when yt-dlp merges separate video/audio streams
+  min_free_space: 5GB       # disk-space guard, e.g. 500MB, 5GB; 0 disables
+  extra_args: []            # extra yt-dlp arguments appended to every run, e.g. ["--limit-rate", "5M"]
+
+ytdlp:
+  binary: ""                # empty = server-managed binary in <data_dir>/bin (downloaded on first start)
+  auto_update: true         # managed binary only: check on startup and every 24h
+
+history:
+  retention_days: 0         # auto-delete finished jobs older than N days; 0 = keep forever
+
+# At least one category is required. Every path must already exist and be writable.
+# id: lowercase letters, digits and underscore. layout: movie | tv | flat.
+categories:
+  - id: movies
+    label: Movies           # optional, defaults to id
+    path: /media/movies
+    layout: movie
+  - id: tv
+    label: TV Shows
+    path: /media/tv
+    layout: tv
+  - id: asian_drama
+    label: Asian Drama
+    path: /media/asian_drama
+    layout: tv
+  - id: misc
+    label: Misc
+    path: /media/misc
+    layout: flat
+
+# Optional: media servers notified (library refresh) after each completed job.
+# Remove the whole section if you do not use it. Both entries need real credentials.
+media_servers:
+  - type: jellyfin
+    url: http://jellyfin:8096
+    api_key: "CHANGE-ME"
+    path_map: {}            # optional prefix rewrite from Fetcharr paths to the media server's, e.g. {"/media": "/data/media"}
+  - type: plex
+    url: http://plex:32400
+    token: "CHANGE-ME"
+    path_map: {}

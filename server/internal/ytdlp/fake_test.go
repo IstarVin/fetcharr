@@ -43,7 +43,7 @@ func fakeArgs(dir, url string) []string {
 func TestFakeVersionAndUpdate(t *testing.T) {
 	bin := fakeBinary(t)
 	for _, flag := range []string{"--version", "-U"} {
-		out, err := exec.Command(bin, flag).Output()
+		out, err := exec.CommandContext(t.Context(), bin, flag).Output()
 		if err != nil || len(bytes.TrimSpace(out)) == 0 {
 			t.Fatalf("%s: err=%v out=%q", flag, err, out)
 		}
@@ -53,7 +53,7 @@ func TestFakeVersionAndUpdate(t *testing.T) {
 func TestFakeDownload(t *testing.T) {
 	bin := fakeBinary(t)
 	dir := t.TempDir()
-	cmd := exec.Command(bin, fakeArgs(dir, "https://example.com/v")...)
+	cmd := exec.CommandContext(t.Context(), bin, fakeArgs(dir, "https://example.com/v")...)
 	cmd.Env = append(os.Environ(), "FAKE_YTDLP_DURATION=0.4")
 	out, err := cmd.Output()
 	if err != nil {
@@ -97,7 +97,7 @@ func TestFakeDownload(t *testing.T) {
 
 func TestFakeFailure(t *testing.T) {
 	bin := fakeBinary(t)
-	cmd := exec.Command(bin, fakeArgs(t.TempDir(), "https://example.com/fail")...)
+	cmd := exec.CommandContext(t.Context(), bin, fakeArgs(t.TempDir(), "https://example.com/fail")...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	err := cmd.Run()
@@ -143,7 +143,7 @@ func TestFakeSigtermLeavesPartAndResumes(t *testing.T) {
 	}
 	partial := st.Size()
 
-	cmd = exec.Command(bin, fakeArgs(dir, "https://example.com/v")...)
+	cmd = exec.CommandContext(ctx, bin, fakeArgs(dir, "https://example.com/v")...)
 	cmd.Env = append(os.Environ(), "FAKE_YTDLP_DURATION=0.2")
 	out, err := cmd.Output()
 	if err != nil {
