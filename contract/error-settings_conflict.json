@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "settings_conflict",
+    "message": "Settings changed; reload before saving."
+  }
+}

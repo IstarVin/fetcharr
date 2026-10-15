@@ -15,6 +15,7 @@ import (
 	"github.com/istarvin/fetcharr/server/internal/config"
 	"github.com/istarvin/fetcharr/server/internal/logsafe"
 	"github.com/istarvin/fetcharr/server/internal/service"
+	"github.com/istarvin/fetcharr/server/internal/settings"
 )
 
 // UpdateResult is the body of a successful POST /api/system/ytdlp/update.
@@ -41,8 +42,9 @@ func (unimplementedUpdater) Update(context.Context) (UpdateResult, error) {
 
 // Options configures New.
 type Options struct {
-	Config  *config.Config
-	Service *service.Service
+	Settings *settings.Manager
+	Config   *config.Config
+	Service  *service.Service
 	// Version is the server version reported by GET /api/info.
 	Version string
 	// Updater serves POST /api/system/ytdlp/update (default: always fails
@@ -61,13 +63,14 @@ type Options struct {
 }
 
 type server struct {
-	cfg     *config.Config
-	svc     *service.Service
-	version string
-	updater YtdlpUpdater
-	log     *slog.Logger
-	maxBody int64
-	ytdlp   *versionCache
+	settings *settings.Manager
+	cfg      *config.Config
+	svc      *service.Service
+	version  string
+	updater  YtdlpUpdater
+	log      *slog.Logger
+	maxBody  int64
+	ytdlp    *versionCache
 }
 
 // New returns the HTTP handler for the whole API (everything lives under
@@ -75,12 +78,13 @@ type server struct {
 // Bearer authentication, routing.
 func New(opts Options) http.Handler {
 	s := &server{
-		cfg:     opts.Config,
-		svc:     opts.Service,
-		version: opts.Version,
-		updater: opts.Updater,
-		log:     opts.Logger,
-		maxBody: opts.MaxBodyBytes,
+		settings: opts.Settings,
+		cfg:      opts.Config,
+		svc:      opts.Service,
+		version:  opts.Version,
+		updater:  opts.Updater,
+		log:      opts.Logger,
+		maxBody:  opts.MaxBodyBytes,
 	}
 	if s.updater == nil {
 		s.updater = unimplementedUpdater{}
@@ -99,6 +103,8 @@ func New(opts Options) http.Handler {
 		h            http.HandlerFunc
 	}
 	routes := []route{
+		{"GET", "/api/system/settings", s.handleGetSettings},
+		{"PUT", "/api/system/settings", s.handleSaveSettings},
 		{"GET", "/api/health", s.handleHealth},
 		{"GET", "/api/info", s.handleInfo},
 		{"POST", "/api/jobs", s.handleCreate},

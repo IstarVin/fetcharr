@@ -220,6 +220,7 @@ Server
   Server URL              http://192.168.1.50:8080
   API token               ••••••••   (optional)
   Test connection         → "Connected · v1.0.0 · 12 ms" or the error
+  Server settings         → live server configuration
 Defaults
   Default movie category  [movie/flat-layout categories]
   Default TV category     [tv-layout categories]
@@ -233,6 +234,10 @@ About
 - **Test connection** calls `GET /api/info` and reports one of: connected (with version and latency), "Can't reach server", "Wrong API token" (`401`), or "Not a Fetcharr server" (the response doesn't parse).
 - A URL entered without a scheme gets `http://` added. A trailing slash is removed.
 - **Update now** calls `POST /api/system/ytdlp/update` and shows the new version. On `409 ytdlp_busy` it shows "Downloads are running — try again when they finish".
+
+**Server settings** opens a separate editor for download concurrency, merge format, minimum free space (decimal GB), history retention, managed yt-dlp auto-update, categories, and Jellyfin/Plex connections with optional path mappings. Save applies the whole document through `PUT /api/system/settings`. Category IDs stay fixed after creation; users enter existing server/container destination paths, and Docker mounts are configured on the host. Saved credentials are never displayed; blank fields retain them and typed values replace them.
+
+The editor loads from the saved connection, keeps drafts and secrets in memory only, and discards them when that connection changes. Back and Reload prompt before discarding unsaved edits. Errors preserve the draft; stale revisions require a reload. Successful saves refresh categories and clear defaults that no longer match the available layouts. A server without `settings_supported` shows an upgrade message and receives no settings request. Connection settings, default categories, and the existing manual yt-dlp update remain available as before.
 
 ---
 

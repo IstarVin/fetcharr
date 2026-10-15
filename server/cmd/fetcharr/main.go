@@ -26,6 +26,7 @@ import (
 	"github.com/istarvin/fetcharr/server/internal/process"
 	"github.com/istarvin/fetcharr/server/internal/runner"
 	"github.com/istarvin/fetcharr/server/internal/service"
+	"github.com/istarvin/fetcharr/server/internal/settings"
 	"github.com/istarvin/fetcharr/server/internal/store"
 	"github.com/istarvin/fetcharr/server/internal/ws"
 	"github.com/istarvin/fetcharr/server/internal/ytdlpmgr"
@@ -53,7 +54,7 @@ func run(args []string) int {
 		return 2
 	}
 	path := config.ResolvePath(*cfgFlag)
-	cfg, err := config.Load(path)
+	cfg, err := config.LoadDeployment(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fetcharr: %v\n", logsafe.Err(err))
 		return 1
@@ -96,6 +97,10 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 		return fmt.Errorf("open database: %w", err)
 	}
 	defer func() { _ = st.Close() }()
+	settingsManager, err := settings.Open(ctx, cfg, st)
+	if err != nil {
+		return fmt.Errorf("load server settings: %w", err)
+	}
 
 	// Startup recovery (spec §4.4): jobs a crash left running go back to pending.
 	requeued, err := st.RequeueInterrupted(ctx)
@@ -110,14 +115,11 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 	defer bus.Close()
 	svc := service.New(st, cfg, service.WithPublisher(bus), service.WithLogger(log))
 	procOpts := process.Options{Config: cfg, Store: st, Publisher: bus, Logger: log}
-	var refresher *mediaserver.Refresher
-	if len(cfg.MediaServers) > 0 {
-		refresher = mediaserver.New(mediaserver.Options{Servers: cfg.MediaServers, Logger: log})
-		procOpts.OnCompleted = refresher.OnCompleted
-		// Safety net for early returns; the normal path closes it after the
-		// runner stopped, so the last completions are flushed.
-		defer closeRefresher(refresher)
-	}
+	refresher := mediaserver.New(mediaserver.Options{
+		CurrentServers: func() []config.MediaServer { return cfg.Current().MediaServers }, Logger: log,
+	})
+	procOpts.OnCompleted = refresher.OnCompleted
+	defer closeRefresher(refresher)
 	proc := process.New(procOpts)
 	rn := runner.New(runner.Options{Config: cfg, Store: st, Publisher: bus, Processor: proc, Logger: log})
 	svc.SetController(rn)
@@ -128,7 +130,8 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 	var ytdlpMgr *ytdlpmgr.Manager
 	if cfg.YtdlpManaged() {
 		ytdlpMgr = ytdlpmgr.New(ytdlpmgr.Options{
-			Binary: cfg.ManagedYtdlpPath(), Runner: rn, Logger: log, AutoUpdate: cfg.Ytdlp.AutoUpdate,
+			Binary: cfg.ManagedYtdlpPath(), Runner: rn, Logger: log, AutoUpdate: cfg.Current().Ytdlp.AutoUpdate,
+			CurrentAutoUpdate: func() bool { return cfg.Current().Ytdlp.AutoUpdate },
 		})
 		if err := ytdlpMgr.Ensure(ctx); err != nil {
 			return fmt.Errorf("managed yt-dlp: %w", err)
@@ -153,9 +156,23 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 		bg.Go(func() { ytdlpMgr.Run(bgCtx) })
 	}
 	pruner := history.New(history.Options{
-		Store: st, Publisher: bus, Logger: log, RetentionDays: cfg.History.RetentionDays,
+		Store: st, Publisher: bus, Logger: log, RetentionDays: cfg.Current().History.RetentionDays,
+		CurrentRetentionDays: func() int { return cfg.Current().History.RetentionDays },
 	})
 	bg.Go(func() { pruner.Run(bgCtx) })
+	lastRetention := cfg.Current().History.RetentionDays
+	lastAuto := cfg.Current().Ytdlp.AutoUpdate
+	settingsManager.Changed = func() {
+		rn.Wake()
+		current := cfg.Current()
+		if current.History.RetentionDays != lastRetention {
+			pruner.Wake()
+		}
+		if current.Ytdlp.AutoUpdate != lastAuto && ytdlpMgr != nil {
+			ytdlpMgr.Wake()
+		}
+		lastRetention, lastAuto = current.History.RetentionDays, current.Ytdlp.AutoUpdate
+	}
 
 	hub := ws.New(ws.Options{
 		Bus:    bus,
@@ -169,6 +186,7 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 	srv := &http.Server{
 		Handler: api.New(api.Options{
 			Config:    cfg,
+			Settings:  settingsManager,
 			Service:   svc,
 			Version:   version,
 			Logger:    log,

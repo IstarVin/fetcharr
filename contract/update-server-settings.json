@@ -1,0 +1,34 @@
+{
+  "revision": 1,
+  "downloads": {
+    "concurrency": 3,
+    "merge_format": "mp4",
+    "min_free_space": 5000000000
+  },
+  "history": {
+    "retention_days": 30
+  },
+  "ytdlp": {
+    "auto_update": false
+  },
+  "categories": [
+    {
+      "id": "movies",
+      "label": "Movies",
+      "path": "/media/movies",
+      "layout": "movie"
+    }
+  ],
+  "media_servers": [
+    {
+      "id": "38b5c036-004d-4f3b-891b-850ea3d72a94",
+      "type": "jellyfin",
+      "url": "http://jellyfin:8096",
+      "path_map": {
+        "/media": "/data/media"
+      },
+      "has_credential": true,
+      "credential": "example-replacement-key"
+    }
+  ]
+}

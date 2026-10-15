@@ -102,15 +102,18 @@ func (s *server) ytdlpBinary() string {
 }
 
 func (s *server) handleInfo(w http.ResponseWriter, r *http.Request) {
+	cfg := s.cfg.Current()
 	info := InfoDTO{
-		Version:      s.version,
-		YtdlpVersion: s.ytdlp.get(r.Context(), s.ytdlpBinary()),
-		YtdlpManaged: s.cfg.YtdlpManaged(),
-		Concurrency:  s.cfg.Downloads.Concurrency,
-		AuthRequired: s.cfg.AuthRequired(),
-		Categories:   make([]CategoryDTO, 0, len(s.cfg.Categories)),
+		SettingsSupported: s.settings != nil,
+		SetupRequired:     len(cfg.Categories) == 0,
+		Version:           s.version,
+		YtdlpVersion:      s.ytdlp.get(r.Context(), s.ytdlpBinary()),
+		YtdlpManaged:      s.cfg.YtdlpManaged(),
+		Concurrency:       cfg.Downloads.Concurrency,
+		AuthRequired:      s.cfg.AuthRequired(),
+		Categories:        make([]CategoryDTO, 0, len(cfg.Categories)),
 	}
-	for _, c := range s.cfg.Categories {
+	for _, c := range cfg.Categories {
 		info.Categories = append(info.Categories, CategoryDTO{
 			ID:        c.ID,
 			Label:     c.Label,

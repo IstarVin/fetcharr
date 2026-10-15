@@ -278,14 +278,22 @@ func TestDeleteFileIgnoredForFailedAndMissingFileIsFine(t *testing.T) {
 	}
 
 	gone := filepath.Join(f.root("movies"), "Gone (2000)", "Gone (2000).mp4")
-	done, _ := f.job(func(j *store.Job) { j.Status = jobs.StatusCompleted; j.FilePath = &gone })
+	done, _ := f.job(func(j *store.Job) {
+		j.Status = jobs.StatusCompleted
+		j.FilePath = &gone
+		j.DestinationRoot = f.root("movies")
+	})
 	if err := svc.Delete(context.Background(), done.ID, service.DeleteOptions{DeleteFile: true}); err != nil {
 		t.Fatalf("missing file: %v", err)
 	}
 
 	outside := filepath.Join(t.TempDir(), "x.mp4")
 	writeFile(t, outside, "x")
-	esc, _ := f.job(func(j *store.Job) { j.Status = jobs.StatusCompleted; j.FilePath = &outside })
+	esc, _ := f.job(func(j *store.Job) {
+		j.Status = jobs.StatusCompleted
+		j.FilePath = &outside
+		j.DestinationRoot = f.root("movies")
+	})
 	err := svc.Delete(context.Background(), esc.ID, service.DeleteOptions{DeleteFile: true})
 	if code, ok := service.CodeOf(err); !ok || code != service.CodeInvalidRequest {
 		t.Fatalf("outside root: %v", err)

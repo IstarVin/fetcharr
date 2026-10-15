@@ -71,7 +71,8 @@ type Job struct {
 	// Placing is true once file placement started; cancel is refused (D7).
 	Placing bool
 	// WorkDir is <data_dir>/work/<id>/, "" until assigned.
-	WorkDir string
+	WorkDir         string
+	DestinationRoot string // internal: immutable origin of library files
 
 	CreatedAt  time.Time
 	QueuedAt   time.Time

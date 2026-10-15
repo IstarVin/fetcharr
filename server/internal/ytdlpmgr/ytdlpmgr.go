@@ -63,7 +63,8 @@ type Options struct {
 	Logger *slog.Logger
 
 	// AutoUpdate enables the update at startup and every Interval in Run.
-	AutoUpdate bool
+	AutoUpdate        bool
+	CurrentAutoUpdate func() bool
 	// Interval is the auto-update period (default DefaultInterval).
 	Interval time.Duration
 
@@ -86,11 +87,13 @@ type Options struct {
 
 // Manager owns the managed yt-dlp binary. It implements api.YtdlpUpdater.
 type Manager struct {
-	binary   string
-	rn       Runner
-	log      *slog.Logger
-	auto     bool
-	interval time.Duration
+	binary      string
+	rn          Runner
+	log         *slog.Logger
+	auto        bool
+	currentAuto func() bool
+	wake        chan struct{}
+	interval    time.Duration
 
 	baseURL         string
 	client          *http.Client
@@ -111,7 +114,7 @@ var _ api.YtdlpUpdater = (*Manager)(nil)
 // New returns a Manager. It does nothing until Ensure or Run is called.
 func New(o Options) *Manager {
 	m := &Manager{
-		binary: o.Binary, rn: o.Runner, log: o.Logger, auto: o.AutoUpdate,
+		binary: o.Binary, rn: o.Runner, log: o.Logger, auto: o.AutoUpdate, currentAuto: o.CurrentAutoUpdate, wake: make(chan struct{}, 1),
 		interval: o.Interval, baseURL: strings.TrimRight(o.BaseURL, "/"),
 		client: o.HTTPClient, downloadTimeout: o.DownloadTimeout, updateTimeout: o.UpdateTimeout,
 	}
@@ -278,14 +281,14 @@ func (m *Manager) version(ctx context.Context) (string, error) {
 // until ctx is done. Failures are logged and the loop continues. Run returns
 // at once when auto-update is disabled.
 func (m *Manager) Run(ctx context.Context) {
-	if !m.auto {
+	if !m.auto && m.currentAuto == nil {
 		return
 	}
 	m.mu.Lock()
 	skip := m.downloaded
 	m.downloaded = false
 	m.mu.Unlock()
-	if !skip {
+	if !skip && m.autoEnabled() {
 		m.autoUpdate(ctx)
 	}
 	t := time.NewTicker(m.interval)
@@ -294,8 +297,14 @@ func (m *Manager) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-m.wake:
+			if m.autoEnabled() {
+				m.autoUpdate(ctx)
+			}
 		case <-t.C:
-			m.autoUpdate(ctx)
+			if m.autoEnabled() {
+				m.autoUpdate(ctx)
+			}
 		}
 	}
 }
@@ -305,6 +314,10 @@ func (m *Manager) Run(ctx context.Context) {
 // released on every path, including failure, panic and cancellation. Errors
 // are logged and returned.
 func (m *Manager) AutoUpdate(ctx context.Context) error {
+	return m.updateWhenIdle(ctx, false)
+}
+
+func (m *Manager) updateWhenIdle(ctx context.Context, automatic bool) error {
 	release := m.rn.Hold()
 	defer release()
 	if m.rn.Downloading() > 0 {
@@ -313,6 +326,9 @@ func (m *Manager) AutoUpdate(ctx context.Context) error {
 	if err := m.rn.WaitIdle(ctx); err != nil {
 		return err
 	}
+	if automatic && !m.autoEnabled() {
+		return nil
+	}
 	m.updMu.Lock()
 	defer m.updMu.Unlock()
 	_, err := m.update(ctx)
@@ -320,7 +336,7 @@ func (m *Manager) AutoUpdate(ctx context.Context) error {
 }
 
 func (m *Manager) autoUpdate(ctx context.Context) {
-	if err := m.AutoUpdate(ctx); err != nil && ctx.Err() == nil {
+	if err := m.updateWhenIdle(ctx, true); err != nil && ctx.Err() == nil {
 		m.log.Error("yt-dlp auto-update failed", "err", logsafe.Err(err))
 	}
 }
@@ -380,4 +396,18 @@ func excerpt(s string) string {
 		s = "..." + s[len(s)-maxOutputExcerp:]
 	}
 	return s
+}
+
+func (m *Manager) autoEnabled() bool {
+	if m.currentAuto != nil {
+		return m.currentAuto()
+	}
+	return m.auto
+}
+
+func (m *Manager) Wake() {
+	select {
+	case m.wake <- struct{}{}:
+	default:
+	}
 }

@@ -28,6 +28,8 @@ data class InfoDto(
     val concurrency: Int? = null,
     @SerialName("auth_required") val authRequired: Boolean = false,
     val categories: List<CategoryDto> = emptyList(),
+    @SerialName("settings_supported") val settingsSupported: Boolean = false,
+    @SerialName("setup_required") val setupRequired: Boolean = false,
 )
 
 /** `GET /api/health`. */

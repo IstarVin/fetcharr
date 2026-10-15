@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +17,36 @@ import (
 	"github.com/istarvin/fetcharr/server/internal/service"
 	"github.com/istarvin/fetcharr/server/internal/store"
 )
+
+func TestLiveRetentionCanBeEnabledAndDisabled(t *testing.T) {
+	st := openStore(t)
+	var days atomic.Int64
+	p := history.New(history.Options{Store: st, CurrentRetentionDays: func() int { return int(days.Load()) }, Now: func() time.Time { return now }})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { p.Run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	add(t, st, "old", jobs.StatusCompleted, 10, "")
+	days.Store(7)
+	p.Wake()
+	deadline := time.After(3 * time.Second)
+	for {
+		_, err := st.Get(t.Context(), "old")
+		if err == store.ErrNotFound {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("enabled pruner did not wake")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	days.Store(0)
+	add(t, st, "kept", jobs.StatusCompleted, 10, "")
+	if n, err := p.Prune(t.Context()); err != nil || n != 0 {
+		t.Fatalf("disabled pruning: %d, %v", n, err)
+	}
+}
 
 var now = time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 

@@ -8,14 +8,14 @@ Full behaviour and the HTTP/WebSocket API are specified in [`docs/fetcharr-serve
 
 ## Quick start (Docker)
 
-1. Create a config and the folders to mount:
+1. Create the deployment config and the folders to mount:
 
    ```sh
    mkdir -p config data
-   cp config.example.yaml config/config.yaml   # edit categories and token
+   cp config.minimal.yaml config/config.yaml   # optionally set server.auth_token
    ```
 
-   The category folders (`/media/movies`, ...) and `data_dir` (`/data`) must already exist inside the container and be writable by the container user.
+   `data_dir` (`/data`) and the media folders you will add in Android must already exist inside the container and be writable by the container user.
 
 2. Run it (the image runs as UID/GID 1000 by default; pass `--user` to match the owner of your media folders):
 
@@ -49,15 +49,25 @@ Full behaviour and the HTTP/WebSocket API are specified in [`docs/fetcharr-serve
 
 3. Check it: `curl http://localhost:8080/api/health`. The first start downloads yt-dlp into `/data/bin` and aborts if that download fails, so the container needs internet access on first start (or set `ytdlp.binary` to a binary you mount in).
 
+4. Connect Android using the server URL and optional token, then open **Settings → Server settings**. Add categories using container paths such as `/media/movies`. Configure download limits, history retention, automatic yt-dlp updates, and Jellyfin/Plex connections there. Until a category is added, the API remains available but cannot accept downloads.
+
 The image is Debian-based (glibc) so the standalone yt-dlp release binary runs without Python. It includes a `HEALTHCHECK` on `/api/health` at port 8080. If you change `server.port` in the config, keep it at 8080 inside the container and remap with `ports:` (or override the healthcheck).
 
 Build locally with `docker build -t fetcharr-server server/` (optional `--build-arg VERSION=1.2.3`, reported by `GET /api/info`).
 
 ## Configuration
 
-Copy [`config.example.yaml`](config.example.yaml) and edit it. The file is selected with `--config <path>`, `FETCHARR_CONFIG`, or defaults to `./config.yaml`. Unknown keys are rejected, and the server refuses to start with a clear error if a category path is missing or not writable, `data_dir` is not writable, or `ffmpeg`/`ffprobe` are missing. Details: [spec section 3](../docs/fetcharr-server.md#3-configuration).
+Start with [`config.minimal.yaml`](config.minimal.yaml). YAML owns listen host/port, authentication, log level, data directory, the optional custom yt-dlp executable, and arbitrary extra arguments. These deployment settings require a restart. The file is selected with `--config <path>`, `FETCHARR_CONFIG`, or defaults to `./config.yaml`; unknown keys are rejected.
+
+Routine settings are saved in `<data_dir>/fetcharr.db` and apply live. Lowering concurrency lets current work finish. New download attempts use the latest download settings. History retention removes records only; files remain. Category destinations must exist and be writable, and paths/layouts cannot change while queued, paused, downloading, or processing jobs reference them. Docker mounts and filesystem permissions are configured on the host.
+
+Existing full YAML files remain supported: their routine settings are imported into SQLite once, on the first successful startup after upgrading. Afterward, SQLite is authoritative for those fields, so editing the old YAML does not reset changes made in Android. You can reduce the YAML to the deployment fields after import. Keep and back up the data directory; the database also stores integration credentials with the same private file permissions as job headers. Integration credentials can be replaced in Android but are never returned by the API. The config mount can be read-only.
+
+The server validates deployment settings before opening the database and validates effective categories afterward. It refuses startup if effective category paths are missing or unwritable, `data_dir` is unwritable, or `ffmpeg`/`ffprobe` are missing. Zero categories is a valid setup state. Details: [spec section 3](../docs/fetcharr-server.md#3-configuration).
 
 Set `server.auth_token` if the server is reachable by anyone you do not trust; clients then send `Authorization: Bearer <token>`.
+
+Server settings use the same authentication as job operations. There is no separate administrator role. Older Android versions keep working with the server; newer Android versions show an upgrade message when connected to a server without settings support.
 
 ## Bare metal
 

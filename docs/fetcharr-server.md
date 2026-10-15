@@ -82,7 +82,9 @@ Pending jobs are dispatched in ascending `queued_at` order. `queued_at` is set w
 
 ## 3. Configuration
 
-The server reads one YAML file. Its path is given by `--config <path>` or `FETCHARR_CONFIG`, and defaults to `./config.yaml`.
+The server reads deployment settings from one YAML file. Its path is given by `--config <path>` or `FETCHARR_CONFIG`, and defaults to `./config.yaml`. Host/port, authentication, log level, data directory, `ytdlp.binary`, and `downloads.extra_args` remain deployment-owned and require a restart.
+
+The remaining settings are managed through Android or `/api/system/settings`, persisted in SQLite, and applied live. Existing YAML values are imported once when the database has no settings document; after that the database is authoritative for editable values. The full legacy example below remains valid for that initial import. New installations can use `server/config.minimal.yaml` and add categories in Android.
 
 ```yaml
 server:
@@ -139,7 +141,7 @@ media_servers:              # optional; notified after each completed job
 
 The server refuses to start, logging a clear error, when any of these checks fail:
 
-- There must be at least one category. Category `id`s must be unique and match `^[a-z0-9_]+$`, and `layout` must be `movie`, `tv` or `flat`.
+- Zero categories is a valid setup state; `/api/info` reports `setup_required: true`, and submissions are rejected until a category exists. Category `id`s must be unique and match `^[a-z0-9_]+$`, and `layout` must be `movie`, `tv` or `flat`.
 - Every category `path` must exist and be writable.
 - `data_dir` must be writable. Its subfolders are created if missing.
 - `ffmpeg` and `ffprobe` must be on `PATH`.
@@ -316,12 +318,39 @@ Returns server details and the category list. Clients use this for "Test connect
   "ytdlp_managed": true,
   "concurrency": 2,
   "auth_required": true,
+  "settings_supported": true,
+  "setup_required": false,
   "categories": [
     { "id": "movies", "label": "Movies", "layout": "movie", "path": "/media/movies", "free_bytes": 812345678901 },
     { "id": "tv", "label": "TV Shows", "layout": "tv", "path": "/media/tv", "free_bytes": 812345678901 }
   ]
 }
 ```
+
+#### `GET /api/system/settings` and `PUT /api/system/settings`
+
+These endpoints use the same Bearer authentication as job operations. GET returns only editable settings, in this shape:
+
+```json
+{
+  "revision": 1,
+  "downloads": {"concurrency": 2, "merge_format": "mp4", "min_free_space": 5000000000},
+  "history": {"retention_days": 0},
+  "ytdlp": {"auto_update": true},
+  "categories": [{"id": "movies", "label": "Movies", "path": "/media/movies", "layout": "movie"}],
+  "media_servers": [{"id": "38b5c036-004d-4f3b-891b-850ea3d72a94", "type": "jellyfin", "url": "http://jellyfin:8096", "path_map": {}, "has_credential": true}]
+}
+```
+
+PUT replaces the complete editable document and requires the revision returned by GET. Arrays must be present, including `[]` for an empty list. `min_free_space` is an integer byte count. Retention `0` keeps history forever; minimum space `0` disables the disk guard. Deployment fields and unknown keys are rejected with `400 invalid_request`. Success returns the normalized document with an incremented revision. A stale revision returns `409 settings_conflict`; the client must reload before saving again. Validation or database failures leave the previous settings active.
+
+Integration IDs are stable; clients assign a unique nonempty ID when adding a connection. `credential` is an optional write-only field: omit it to retain a saved credential for the same ID and type, or supply a nonempty replacement (the Jellyfin API key or Plex token). New connections require a credential. GET and successful PUT responses omit credentials and report `has_credential` instead. Removing a connection removes its stored credential. `path_map` rewrites absolute Fetcharr prefixes to media-server paths, including Windows destinations.
+
+Category IDs are fixed in Android after creation. Destination paths must be absolute server/container paths that already exist and are writable; saving never creates folders. Removing a category or changing its path/layout returns `409 category_busy` if pending, paused, downloading, or processing jobs reference it. This check is coordinated with submission and retry. Labels can change at any time. Historical jobs retain their original destination root for safe file deletion; unknown legacy roots cannot be guessed. Retry revalidates against the current category and records the current root.
+
+Live updates never kill existing downloads. Decreased concurrency takes effect as workers finish; increased concurrency wakes dispatch. Download arguments and free-space checks use a snapshot for each new attempt. Retention changes wake the pruner and remove records only. Auto-update can be toggled only for the managed binary; enabling it schedules an immediate safe check. Pending integration refreshes use the current connections at dispatch time. No filesystem browser or folder-creation API is provided.
+
+The optional `/api/info` capability fields default to false on older servers. `settings_supported` indicates this API exists; `setup_required` means the category list is empty. Existing job responses and WebSocket events retain their shape.
 
 #### `POST /api/jobs`
 Creates one job. Returns `201` with the Job object.

@@ -218,6 +218,28 @@ func TestJellyfinRefresh(t *testing.T) {
 	}
 }
 
+func TestPendingRefreshUsesCurrentConnectionsAtDispatch(t *testing.T) {
+	first, second := jellyfinFake(t), jellyfinFake(t)
+	cfg := config.Default()
+	cfg.MediaServers = []config.MediaServer{jellyfinCfg(first, nil)}
+	live := cfg.EnableRuntime()
+	r, _ := newRefresher(t, nil, func(o *Options) {
+		o.CurrentServers = func() []config.MediaServer { return cfg.Current().MediaServers }
+		o.Debounce = time.Hour
+	})
+	r.Queue("/media/movie")
+	next := cfg.Current().Clone()
+	next.MediaServers = []config.MediaServer{jellyfinCfg(second, map[string]string{"/media": "/new"})}
+	live.Publish(next)
+	r.Close(t.Context()) // flush pending work against the latest connections
+	if len(first.requests()) != 0 || len(second.requests()) != 1 {
+		t.Fatal("refresh used obsolete connections")
+	}
+	if !strings.Contains(second.requests()[0].Body, "/new/movie") {
+		t.Fatal("refresh did not use the new path map")
+	}
+}
+
 func TestPlexRefresh(t *testing.T) {
 	f := plexFake(t)
 	r, logs := newRefresher(t, []config.MediaServer{plexCfg(f, map[string]string{"/media": "/data"})}, nil)

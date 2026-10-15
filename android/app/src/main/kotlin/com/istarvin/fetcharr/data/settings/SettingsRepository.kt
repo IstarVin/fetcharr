@@ -60,6 +60,21 @@ class SettingsRepository @Inject constructor(
         dataStore.edit { it[CACHED_CATEGORIES] = encoded }
     }
 
+    /** Cache and reconcile defaults atomically, only if this is still the saved server. */
+    suspend fun reconcileServerCategories(connection: ServerConfig, categories: List<CategoryDto>) {
+        val encoded = json.encodeToString(CATEGORIES_SERIALIZER, categories)
+        dataStore.edit {
+            if (it[SERVER_URL] != connection.baseUrl || it[TOKEN].orEmpty() != connection.token.orEmpty()) return@edit
+            it[CACHED_CATEGORIES] = encoded
+            val movie = it[DEFAULT_MOVIE]
+            val tv = it[DEFAULT_TV]
+            if (categories.none { c -> c.id == movie && c.layout in listOf(CategoryDto.LAYOUT_MOVIE, CategoryDto.LAYOUT_FLAT) }) {
+                it.remove(DEFAULT_MOVIE)
+            }
+            if (categories.none { c -> c.id == tv && c.layout == CategoryDto.LAYOUT_TV }) it.remove(DEFAULT_TV)
+        }
+    }
+
     suspend fun setLastSeenFinishedAt(epochMs: Long) {
         dataStore.edit { it[LAST_SEEN] = epochMs }
     }

@@ -196,8 +196,6 @@ func TestParseValidationErrors(t *testing.T) {
 		yaml string
 		want string // substring of the error
 	}{
-		{"no categories", "data_dir: /d\n", "at least one category"},
-		{"empty categories", "categories: []\n", "at least one category"},
 		{"dup id", "categories:\n" + cat("a", "flat") + cat("a", "tv"), `duplicate id "a"`},
 		{"uppercase id", "categories:\n" + cat("Movies", "movie"), "must match"},
 		{"dash id", "categories:\n" + cat("a-b", "movie"), "must match"},
@@ -237,7 +235,7 @@ func TestParseReportsAllProblemsTogether(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	for _, s := range []string{"server.port", "concurrency", "at least one category"} {
+	for _, s := range []string{"server.port", "concurrency"} {
 		if !strings.Contains(err.Error(), s) {
 			t.Errorf("missing %q in %v", s, err)
 		}
@@ -245,9 +243,29 @@ func TestParseReportsAllProblemsTogether(t *testing.T) {
 }
 
 func TestParseEmptyDocument(t *testing.T) {
-	_, err := Parse(nil)
-	if err == nil || !strings.Contains(err.Error(), "at least one category") {
-		t.Errorf("err = %v", err)
+	for _, yaml := range []string{"", "categories: []\n", "data_dir: /d\n"} {
+		cfg, err := Parse([]byte(yaml))
+		if err != nil || len(cfg.Categories) != 0 {
+			t.Fatalf("minimal config: %v, %v", cfg, err)
+		}
+	}
+}
+
+func TestLoadDeploymentWithMinimalYAML(t *testing.T) {
+	bin := t.TempDir()
+	for _, name := range []string{"ffmpeg", "ffprobe"} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("data_dir: "+t.TempDir()+"\nserver: {auth_token: test-token}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadDeployment(path)
+	if err != nil || cfg.Server.AuthToken != "test-token" || len(cfg.Categories) != 0 {
+		t.Fatalf("minimal deployment: %v, %v", cfg, err)
 	}
 }
 

@@ -18,7 +18,7 @@ import (
 
 const jobColumns = `id, batch_id, category, url, headers, title, show_name, season, episode, year,
  subtitles, status, progress, file_path, error_code, error_message, warnings,
- overwrite, placing, work_dir, created_at, queued_at, started_at, finished_at`
+ overwrite, placing, work_dir, created_at, queued_at, started_at, finished_at, destination_root`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -35,7 +35,7 @@ func scanJob(r rowScanner) (*Job, error) {
 	)
 	err := r.Scan(&j.ID, &batchID, &j.Category, &j.URL, &headers, &title, &showName, &season, &episode, &year,
 		&subtitles, &status, &progress, &filePath, &errCode, &errMsg, &warnings,
-		&overwrite, &placing, &j.WorkDir, &created, &queued, &started, &finished)
+		&overwrite, &placing, &j.WorkDir, &created, &queued, &started, &finished, &j.DestinationRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -208,12 +208,12 @@ func insertJob(ctx context.Context, x execer, j *Job) error {
 	if err != nil {
 		return err
 	}
-	_, err = x.ExecContext(ctx, `INSERT INTO jobs (`+jobColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err = x.ExecContext(ctx, `INSERT INTO jobs (`+jobColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		j.ID, optStr(j.BatchID), j.Category, j.URL, string(headers), optStr(j.Title), optStr(j.ShowName),
 		optInt(j.Season), optInt(j.Episode), optInt(j.Year), string(subs), string(j.Status), prog,
 		optStr(j.FilePath), optStr(j.ErrorCode), optStr(j.ErrorMessage), string(warns),
 		b2i(j.Overwrite), b2i(j.Placing), j.WorkDir,
-		timefmt.Format(j.CreatedAt), timefmt.Format(j.QueuedAt), optTime(j.StartedAt), optTime(j.FinishedAt))
+		timefmt.Format(j.CreatedAt), timefmt.Format(j.QueuedAt), optTime(j.StartedAt), optTime(j.FinishedAt), j.DestinationRoot)
 	if err != nil {
 		return wrapConstraint(ctx, x, err, j.URL)
 	}
@@ -417,18 +417,19 @@ func Set[T any](v T) Opt[T] { return Opt[T]{Set: true, Value: v} }
 // Update is a partial update of a job: only fields with Set == true are
 // written. Nullable columns use pointer values: Set[*string](nil) writes NULL.
 type Update struct {
-	Status       Opt[jobs.Status]
-	Progress     Opt[*Progress]
-	FilePath     Opt[*string]
-	ErrorCode    Opt[*string]
-	ErrorMessage Opt[*string]
-	Warnings     Opt[[]string]
-	Overwrite    Opt[bool]
-	Placing      Opt[bool]
-	WorkDir      Opt[string]
-	QueuedAt     Opt[time.Time]
-	StartedAt    Opt[*time.Time]
-	FinishedAt   Opt[*time.Time]
+	Status          Opt[jobs.Status]
+	Progress        Opt[*Progress]
+	FilePath        Opt[*string]
+	ErrorCode       Opt[*string]
+	ErrorMessage    Opt[*string]
+	Warnings        Opt[[]string]
+	Overwrite       Opt[bool]
+	Placing         Opt[bool]
+	WorkDir         Opt[string]
+	DestinationRoot Opt[string]
+	QueuedAt        Opt[time.Time]
+	StartedAt       Opt[*time.Time]
+	FinishedAt      Opt[*time.Time]
 }
 
 // Update applies u to the job and returns the updated row. It returns
@@ -525,6 +526,9 @@ func (s *Store) update(ctx context.Context, id string, g UpdateGuard, u Update) 
 	}
 	if u.WorkDir.Set {
 		add("work_dir", u.WorkDir.Value)
+	}
+	if u.DestinationRoot.Set {
+		add("destination_root", u.DestinationRoot.Value)
 	}
 	if u.QueuedAt.Set {
 		add("queued_at", timefmt.Format(u.QueuedAt.Value))

@@ -4,6 +4,8 @@ Wire-format fixtures shared by the server and Android tests. Any change here is 
 
 | File | Represents | Spec |
 | --- | --- | --- |
+| `server-settings.json`, `update-server-settings.json` | `GET`/`PUT /api/system/settings` (credentials are write-only) | server §6.3 |
+| `error-settings_conflict.json`, `error-category_busy.json` | Settings conflict envelopes | server §6.3 |
 | `info.json` | `GET /api/info` | server §6.3 |
 | `job-<status>.json` (pending, downloading, processing, paused, completed, failed, cancelled) | One Job object per status | server §2.4, §6.2 |
 | `jobs-list.json` | `GET /api/jobs` (all 7 jobs, newest `created_at` first) | server §6.3 |
@@ -28,3 +30,5 @@ Ids are shared across fixtures: `create-job-movie` -> `job-processing`, `create-
 - WebSocket `snapshot` and `GET /jobs` list jobs `created_at` descending.
 - A subtitle with no `lang` becomes `und` on the server; only a missing subtitle `url` is invalid in an intent.
 - Intent rules that can't be expressed as decoded JSON (wrong action/scheme, missing `payload`, bad Base64, bad JSON) are raw-input tests; see `intent/README.md`.
+
+Settings responses include a revision, editable fields, and credential-presence flags only. PUT echoes that revision and may include a replacement `credential`; deployment fields and job destination-root snapshots are never part of this contract. `min_free_space` is an integer byte count. The `/api/info` settings capability flags are optional for older servers and default to false in clients.

@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +21,37 @@ import (
 	"github.com/istarvin/fetcharr/server/internal/jobs"
 	"github.com/istarvin/fetcharr/server/internal/ytdlpmgr"
 )
+
+func TestAutoUpdateCanBeEnabledAndDisabledWhileRunning(t *testing.T) {
+	w := newWrapper(t)
+	g := newRig(t, w.path, nil)
+	var enabled atomic.Bool
+	started := make(chan struct{})
+	var once sync.Once
+	m := newUpdater(t, g, w, func(o *ytdlpmgr.Options) {
+		o.AutoUpdate = false
+		o.CurrentAutoUpdate = func() bool {
+			value := enabled.Load()
+			once.Do(func() { close(started) })
+			return value
+		}
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { m.Run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	<-started
+	enabled.Store(true)
+	m.Wake()
+	eventually(t, "live update", func() bool { return len(w.lines(t)) >= 2 })
+	enabled.Store(false)
+	m.Wake()
+	cancel()
+	<-done
+	if got := w.lines(t); len(got) != 2 {
+		t.Fatalf("disabled manager ran another update: %v", got)
+	}
+}
 
 func newUpdater(t *testing.T, g *rig, w *wrapper, mod func(*ytdlpmgr.Options)) *ytdlpmgr.Manager {
 	t.Helper()

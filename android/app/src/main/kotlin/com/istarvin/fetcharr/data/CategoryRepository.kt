@@ -44,6 +44,13 @@ class CategoryRepository @Inject constructor(
     /** Like [refresh], but against [config], for example values entered but not saved yet. */
     suspend fun refresh(config: ServerConfig): ApiResult<InfoDto> = fetchAndCache { apiFactory.create(config) }
 
+    /** Accept a response only for the current connection, never a stale editor request. */
+    suspend fun acceptServerInfo(connection: ServerConfig, info: InfoDto) {
+        if (settings.config.value != connection) return
+        settings.reconcileServerCategories(connection, info.categories)
+        if (settings.config.value == connection) _info.value = info
+    }
+
     private suspend fun fetchAndCache(api: () -> FetcharrApi?): ApiResult<InfoDto> {
         val resolved = try {
             api()

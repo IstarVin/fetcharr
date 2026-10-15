@@ -1,4 +1,8 @@
 # Fetcharr server configuration.
+# This full example also serves as a one-time import for an existing install.
+# After the first successful start, Android-managed values come from SQLite;
+# editing them here does not overwrite saved settings. For a new install use
+# config.minimal.yaml, then Settings > Server settings in Android.
 #
 # Point the server at this file with `--config <path>` or FETCHARR_CONFIG
 # (the Docker image uses FETCHARR_CONFIG=/config/config.yaml). The default is
@@ -31,7 +35,7 @@ ytdlp:
 history:
   retention_days: 0         # auto-delete finished jobs older than N days; 0 = keep forever
 
-# At least one category is required. Every path must already exist and be writable.
+# Categories may be omitted for setup through Android. Paths must exist and be writable.
 # id: lowercase letters, digits and underscore. layout: movie | tv | flat.
 categories:
   - id: movies

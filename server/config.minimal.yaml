@@ -1,0 +1,16 @@
+# Deployment settings. Routine settings are managed in Android under
+# Settings > Server settings and stored in <data_dir>/fetcharr.db.
+server:
+  host: 0.0.0.0
+  port: 8080
+  auth_token: ""            # optional Bearer token; enter the same token in Android
+  log_level: info
+
+# Must already exist and be writable. Keep this directory across upgrades.
+data_dir: /data
+
+# Optional deployment-only overrides:
+# ytdlp:
+#   binary: /usr/local/bin/yt-dlp   # omit to use the managed binary
+# downloads:
+#   extra_args: ["--limit-rate", "5M"]

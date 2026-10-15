@@ -11,7 +11,11 @@ import (
 // precheck runs the checks of spec §4.1. It returns an empty code when the
 // job may start.
 func (r *Runner) precheck(j *store.Job, cat config.Category) (code, msg string) {
-	if need := int64(r.cfg.Downloads.MinFreeSpace); need > 0 {
+	return r.precheckWithConfig(j, cat, r.cfg.Current())
+}
+
+func (r *Runner) precheckWithConfig(j *store.Job, cat config.Category, cfg *config.Config) (code, msg string) {
+	if need := int64(cfg.Downloads.MinFreeSpace); need > 0 {
 		free, err := r.freeBytes(cat.Path)
 		switch {
 		case err != nil:

@@ -117,6 +117,8 @@ func duplicateErr(err error, url string) error {
 // Create validates req and creates one pending job (spec §6.3
 // POST /api/jobs). Errors: invalid_request, duplicate.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*store.Job, error) {
+	unlock := s.cfg.ReadSettings()
+	defer unlock()
 	cat, err := s.category(req.Category)
 	if err != nil {
 		return nil, err
@@ -141,14 +143,15 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*store.Job, er
 
 	id := store.NewID()
 	j := &store.Job{
-		ID:        id,
-		Category:  cat.ID,
-		URL:       req.URL,
-		Headers:   mergeHeaders(nil, req.Headers),
-		Title:     optString(req.Title),
-		Subtitles: subs,
-		Status:    jobs.StatusPending,
-		WorkDir:   s.cfg.JobWorkDir(id),
+		ID:              id,
+		Category:        cat.ID,
+		DestinationRoot: cat.Path,
+		URL:             req.URL,
+		Headers:         mergeHeaders(nil, req.Headers),
+		Title:           optString(req.Title),
+		Subtitles:       subs,
+		Status:          jobs.StatusPending,
+		WorkDir:         s.cfg.JobWorkDir(id),
 	}
 	switch cat.Layout {
 	case naming.LayoutMovie:
@@ -176,6 +179,8 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*store.Job, er
 // episodes whose URL is already active are skipped and reported. Errors:
 // invalid_request, duplicate (every episode skipped).
 func (s *Service) CreateBatch(ctx context.Context, req BatchRequest) (*BatchResult, error) {
+	unlock := s.cfg.ReadSettings()
+	defer unlock()
 	cat, err := s.category(req.Category)
 	if err != nil {
 		return nil, err
@@ -214,19 +219,20 @@ func (s *Service) CreateBatch(ctx context.Context, req BatchRequest) (*BatchResu
 		}
 		id := store.NewID()
 		items = append(items, item{ep: *e.Episode, job: &store.Job{
-			ID:        id,
-			BatchID:   store.Ptr(batchID),
-			Category:  cat.ID,
-			URL:       e.URL,
-			Headers:   mergeHeaders(req.Headers, e.Headers),
-			Title:     optString(e.Title),
-			ShowName:  optString(req.ShowName),
-			Season:    req.Season,
-			Episode:   store.Ptr(*e.Episode),
-			Year:      req.Year,
-			Subtitles: subs,
-			Status:    jobs.StatusPending,
-			WorkDir:   s.cfg.JobWorkDir(id),
+			ID:              id,
+			BatchID:         store.Ptr(batchID),
+			Category:        cat.ID,
+			DestinationRoot: cat.Path,
+			URL:             e.URL,
+			Headers:         mergeHeaders(req.Headers, e.Headers),
+			Title:           optString(e.Title),
+			ShowName:        optString(req.ShowName),
+			Season:          req.Season,
+			Episode:         store.Ptr(*e.Episode),
+			Year:            req.Year,
+			Subtitles:       subs,
+			Status:          jobs.StatusPending,
+			WorkDir:         s.cfg.JobWorkDir(id),
 		}})
 	}
 	// Queue order follows ascending episode number (spec §2.5).
@@ -334,6 +340,8 @@ func (s *Service) BatchAction(ctx context.Context, batchID string, ev jobs.Event
 // compare-and-set write guarded by the status that was read. A lost race
 // re-reads and tries again.
 func (s *Service) apply(ctx context.Context, id string, ev jobs.Event, opts RetryOptions) (*store.Job, error) {
+	unlock := s.cfg.ReadSettings()
+	defer unlock()
 	for range maxCASAttempts {
 		cur, err := s.store.Get(ctx, id)
 		if errors.Is(err, store.ErrNotFound) {
@@ -353,7 +361,25 @@ func (s *Service) apply(ctx context.Context, id string, ev jobs.Event, opts Retr
 		if ev == jobs.EventCancel && cur.Status == jobs.StatusProcessing {
 			guard.Placing = store.Ptr(false)
 		}
-		j, err := s.store.UpdateGuarded(ctx, id, guard, s.updateFor(ev, to, opts))
+		update := s.updateFor(ev, to, opts)
+		if ev == jobs.EventRetry {
+			cat, err := s.category(cur.Category)
+			if err != nil {
+				return nil, err
+			}
+			meta := naming.Meta{Year: cur.Year, Season: cur.Season, Episode: cur.Episode}
+			if cur.Title != nil {
+				meta.Title = *cur.Title
+			}
+			if cur.ShowName != nil {
+				meta.ShowName = *cur.ShowName
+			}
+			if err := naming.Validate(cat.Layout, meta); err != nil {
+				return nil, wrapValidation("", err)
+			}
+			update.DestinationRoot = store.Set(cat.Path)
+		}
+		j, err := s.store.UpdateGuarded(ctx, id, guard, update)
 		switch {
 		case err == nil:
 			s.afterAction(ev, cur.Status, j)
@@ -456,13 +482,12 @@ func (s *Service) Delete(ctx context.Context, id string, opts DeleteOptions) err
 // deleteFiles removes the library files of a completed job (spec §6.3). A file
 // that is already gone is not an error.
 func (s *Service) deleteFiles(j *store.Job) error {
-	cat, ok := s.cfg.Category(j.Category)
-	if !ok {
-		return invalid("category '%s' no longer exists; cannot delete the file", j.Category)
+	if j.DestinationRoot == "" {
+		return invalid("original destination of job '%s' is unknown; cannot delete the file", j.ID)
 	}
-	if _, err := library.RemoveFiles(cat.Path, *j.FilePath); err != nil {
+	if _, err := library.RemoveFiles(j.DestinationRoot, *j.FilePath); err != nil {
 		if errors.Is(err, library.ErrOutsideRoot) {
-			return newErr(CodeInvalidRequest, err, "the file is outside category '%s'; not deleted", cat.ID)
+			return newErr(CodeInvalidRequest, err, "the file is outside its original category '%s'; not deleted", j.Category)
 		}
 		return fmt.Errorf("delete files of job %s: %w", j.ID, err)
 	}

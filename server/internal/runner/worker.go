@@ -38,7 +38,8 @@ func (r *Runner) work(ctx context.Context, e *entry, j *store.Job) {
 
 func (w *run) execute() {
 	r, j := w.r, w.job
-	cat, ok := r.cfg.Category(j.Category)
+	cfg := r.cfg.Current()
+	cat, ok := cfg.Category(j.Category)
 	if !ok {
 		w.fail(CodeDownloadFailed, fmt.Sprintf("category '%s' no longer exists", j.Category))
 		return
@@ -46,7 +47,7 @@ func (w *run) execute() {
 	if w.ctx.Err() != nil {
 		return // cancelled or shut down before the claim
 	}
-	if code, msg := r.precheck(j, cat); code != "" {
+	if code, msg := r.precheckWithConfig(j, cat, cfg); code != "" {
 		w.fail(code, msg)
 		return
 	}
@@ -71,8 +72,8 @@ func (w *run) execute() {
 		URL:         j.URL,
 		Headers:     j.Headers,
 		WorkDir:     workDir,
-		MergeFormat: r.cfg.Downloads.MergeFormat,
-		ExtraArgs:   r.cfg.Downloads.ExtraArgs,
+		MergeFormat: cfg.Downloads.MergeFormat,
+		ExtraArgs:   cfg.Downloads.ExtraArgs,
 	}), ytdlp.Options{
 		Dir:        workDir,
 		Secrets:    ytdlp.HeaderValues(j.Headers),

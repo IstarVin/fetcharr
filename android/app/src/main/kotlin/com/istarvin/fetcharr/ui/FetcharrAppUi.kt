@@ -43,6 +43,8 @@ import com.istarvin.fetcharr.ui.incoming.IncomingSheetHost
 import com.istarvin.fetcharr.ui.incoming.IncomingViewModel
 import com.istarvin.fetcharr.ui.queue.QueueScreen
 import com.istarvin.fetcharr.ui.settings.SettingsScreen
+import com.istarvin.fetcharr.ui.settings.ServerSettingsScreen
+import com.istarvin.fetcharr.ui.navigation.ServerSettingsRoute
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
@@ -153,7 +155,12 @@ fun FetcharrAppUi(openTargets: Flow<OpenTarget> = emptyFlow()) {
                     )
                 }
                 composable<HistoryRoute> { HistoryScreen(onOpenSettings = { openSettings() }) }
-                composable<SettingsRoute> { SettingsScreen() }
+                composable<SettingsRoute> {
+                    SettingsScreen(onServerSettings = { navController.navigate(ServerSettingsRoute) })
+                }
+                composable<ServerSettingsRoute> {
+                    ServerSettingsScreen(onBack = { navController.popBackStack() })
+                }
                 composable<AddRoute> {
                     AddScreen(onBack = { navController.popBackStack() }, onOpenSettings = { openSettings() })
                 }

@@ -44,6 +44,7 @@ sealed interface YtdlpUpdateStatus {
 }
 
 data class SettingsUiState(
+    val hasSavedServer: Boolean = false,
     /** False until the saved values have been read into the form. */
     val loaded: Boolean = false,
     val url: String = "",
@@ -86,6 +87,7 @@ class SettingsViewModel @Inject constructor(
 
     val uiState: StateFlow<SettingsUiState> = combine(form, settings.settings, categories.info, ytdlpUpdate) { f, s, info, update ->
         SettingsUiState(
+            hasSavedServer = s.serverUrl.isNotBlank(),
             loaded = f.loaded,
             url = f.url,
             token = f.token,

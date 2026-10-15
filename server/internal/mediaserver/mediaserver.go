@@ -37,8 +37,9 @@ const (
 type Options struct {
 	// Servers are the media_servers config entries. Entries of an unknown
 	// type are skipped with a warning.
-	Servers []config.MediaServer
-	Logger  *slog.Logger
+	Servers        []config.MediaServer
+	CurrentServers func() []config.MediaServer
+	Logger         *slog.Logger
 	// Debounce is the per-folder quiet period (default DefaultDebounce).
 	Debounce time.Duration
 	// MaxWait caps how long repeated completions can postpone a folder's
@@ -64,11 +65,13 @@ type client interface {
 // Refresher debounces folder refreshes and sends them to every configured
 // media server. Create it with New; it is safe for concurrent use.
 type Refresher struct {
-	log      *slog.Logger
-	clients  []client
-	debounce time.Duration
-	maxWait  time.Duration
-	timeout  time.Duration
+	log            *slog.Logger
+	clients        []client
+	currentServers func() []config.MediaServer
+	httpClient     *http.Client
+	debounce       time.Duration
+	maxWait        time.Duration
+	timeout        time.Duration
 
 	baseCtx context.Context
 	cancel  context.CancelFunc
@@ -88,7 +91,7 @@ type entry struct {
 // nothing.
 func New(o Options) *Refresher {
 	r := &Refresher{
-		log: o.Logger, debounce: o.Debounce, maxWait: o.MaxWait, timeout: o.Timeout,
+		log: o.Logger, debounce: o.Debounce, maxWait: o.MaxWait, timeout: o.Timeout, currentServers: o.CurrentServers,
 		pending: make(map[string]*entry),
 	}
 	if r.log == nil {
@@ -108,23 +111,36 @@ func New(o Options) *Refresher {
 	if hc == nil {
 		hc = &http.Client{}
 	}
-	for _, s := range o.Servers {
-		base := strings.TrimRight(s.URL, "/")
-		switch s.Type {
-		case config.MediaServerJellyfin:
-			r.clients = append(r.clients, &jellyfin{base: base, key: s.APIKey, paths: newPathMap(s.PathMap), hc: hc})
-		case config.MediaServerPlex:
-			r.clients = append(r.clients, &plex{base: base, token: s.Token, paths: newPathMap(s.PathMap), hc: hc})
-		default:
-			r.log.Warn("ignoring media server of unknown type", "type", s.Type)
-		}
-	}
+	r.httpClient = hc
+	r.clients = r.makeClients(o.Servers)
 	r.baseCtx, r.cancel = context.WithCancel(context.Background())
 	return r
 }
 
+func (r *Refresher) makeClients(servers []config.MediaServer) []client {
+	clients := []client{}
+	hc := r.httpClient
+	for _, s := range servers {
+		base := strings.TrimRight(s.URL, "/")
+		switch s.Type {
+		case config.MediaServerJellyfin:
+			clients = append(clients, &jellyfin{base: base, key: s.APIKey, paths: newPathMap(s.PathMap), hc: hc})
+		case config.MediaServerPlex:
+			clients = append(clients, &plex{base: base, token: s.Token, paths: newPathMap(s.PathMap), hc: hc})
+		default:
+			r.log.Warn("ignoring media server of unknown type", "type", s.Type)
+		}
+	}
+	return clients
+}
+
 // Enabled reports whether at least one media server is configured.
-func (r *Refresher) Enabled() bool { return len(r.clients) > 0 }
+func (r *Refresher) Enabled() bool {
+	if r.currentServers != nil {
+		return len(r.currentServers()) > 0
+	}
+	return len(r.clients) > 0
+}
 
 // OnCompleted has the signature of process.Options.OnCompleted. It queues
 // the folder; the job is not used (and never logged).
@@ -134,7 +150,7 @@ func (r *Refresher) OnCompleted(_ *store.Job, folder string) { r.Queue(folder) }
 // same folder within the debounce window coalesce into one refresh; different
 // folders are independent. It never blocks, and is a no-op after Close.
 func (r *Refresher) Queue(folder string) {
-	if folder == "" || len(r.clients) == 0 {
+	if folder == "" || !r.Enabled() {
 		return
 	}
 	folder = filepath.Clean(folder)
@@ -172,7 +188,11 @@ func (r *Refresher) fire(folder string, e *entry) {
 // send refreshes folder on every server, in parallel, and logs failures.
 func (r *Refresher) send(folder string) {
 	var wg sync.WaitGroup
-	for _, c := range r.clients {
+	clients := r.clients
+	if r.currentServers != nil {
+		clients = r.makeClients(r.currentServers())
+	}
+	for _, c := range clients {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

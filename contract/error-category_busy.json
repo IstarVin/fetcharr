@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "category_busy",
+    "message": "Category has active jobs; finish or cancel them before changing its destination."
+  }
+}

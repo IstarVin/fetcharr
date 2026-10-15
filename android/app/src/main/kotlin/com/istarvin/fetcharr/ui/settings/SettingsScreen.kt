@@ -58,7 +58,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
+fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel(), onServerSettings: () -> Unit = {}) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbar = LocalSnackbarHostState.current
     val scope = rememberCoroutineScope()
@@ -125,6 +125,10 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                 }
             }
             TestResultText(state.testStatus)
+
+            OutlinedButton(onClick = onServerSettings, enabled = state.hasSavedServer) {
+                Text(stringResource(R.string.server_settings_title))
+            }
 
             GroupTitle(R.string.settings_group_defaults)
             CategoryDropdown(

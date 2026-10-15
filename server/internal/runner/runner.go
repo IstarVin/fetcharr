@@ -82,13 +82,14 @@ type Runner struct {
 	proc Processor
 	log  *slog.Logger
 
-	binary        string
-	concurrency   int
-	poll          time.Duration
-	progressEvery time.Duration
-	killGrace     time.Duration
-	freeBytes     func(string) (uint64, error)
-	now           func() time.Time
+	binary          string
+	concurrency     int
+	liveConcurrency bool
+	poll            time.Duration
+	progressEvery   time.Duration
+	killGrace       time.Duration
+	freeBytes       func(string) (uint64, error)
+	now             func() time.Time
 
 	wake      chan struct{}
 	quit      chan struct{} // closed by Shutdown
@@ -115,23 +116,24 @@ func (nopPub) Publish(service.Change) {}
 // New returns a Runner. It starts nothing: call Start.
 func New(o Options) *Runner {
 	r := &Runner{
-		cfg:           o.Config,
-		st:            o.Store,
-		pub:           o.Publisher,
-		proc:          o.Processor,
-		log:           o.Logger,
-		binary:        o.Binary,
-		concurrency:   o.Concurrency,
-		poll:          o.PollInterval,
-		progressEvery: o.ProgressInterval,
-		killGrace:     o.KillGrace,
-		freeBytes:     o.FreeBytes,
-		now:           o.Now,
-		wake:          make(chan struct{}, 1),
-		quit:          make(chan struct{}),
-		loopDone:      make(chan struct{}),
-		busy:          make(map[string]*entry),
-		idle:          make(chan struct{}),
+		cfg:             o.Config,
+		st:              o.Store,
+		pub:             o.Publisher,
+		proc:            o.Processor,
+		log:             o.Logger,
+		binary:          o.Binary,
+		concurrency:     o.Concurrency,
+		liveConcurrency: o.Concurrency <= 0,
+		poll:            o.PollInterval,
+		progressEvery:   o.ProgressInterval,
+		killGrace:       o.KillGrace,
+		freeBytes:       o.FreeBytes,
+		now:             o.Now,
+		wake:            make(chan struct{}, 1),
+		quit:            make(chan struct{}),
+		loopDone:        make(chan struct{}),
+		busy:            make(map[string]*entry),
+		idle:            make(chan struct{}),
 	}
 	close(r.idle)
 	if r.pub == nil {
@@ -386,7 +388,7 @@ const (
 // are free.
 func (r *Runner) fill() {
 	r.mu.Lock()
-	free := r.concurrency - r.workers
+	free := r.maxWorkers() - r.workers
 	limit := free + len(r.busy)
 	can := r.holds == 0 && !r.closing && free > 0
 	r.mu.Unlock()
@@ -415,7 +417,7 @@ func (r *Runner) fill() {
 func (r *Runner) reserve(id string) (context.Context, *entry, reservation) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.holds > 0 || r.closing || r.workers >= r.concurrency {
+	if r.holds > 0 || r.closing || r.workers >= r.maxWorkers() {
 		return nil, nil, noSlot
 	}
 	if _, busy := r.busy[id]; busy {
@@ -489,4 +491,13 @@ func (r *Runner) wipeWorkDir(id string) {
 // validID guards the work directory path derived from a job id.
 func validID(id string) bool {
 	return id != "" && id != "." && id != ".." && filepath.Base(id) == id
+}
+
+// maxWorkers is evaluated for every reservation so a live decrease never kills
+// existing work, and an increase is visible as soon as the dispatcher wakes.
+func (r *Runner) maxWorkers() int {
+	if r.liveConcurrency {
+		return max(r.cfg.Current().Downloads.Concurrency, 1)
+	}
+	return r.concurrency
 }

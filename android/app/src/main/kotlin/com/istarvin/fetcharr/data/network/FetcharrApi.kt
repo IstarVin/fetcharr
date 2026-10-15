@@ -15,6 +15,8 @@ import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.PUT
+import com.istarvin.fetcharr.data.network.dto.ServerSettingsDto
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -23,6 +25,12 @@ import retrofit2.http.Query
  * All methods throw on non-2xx (`retrofit2.HttpException`) and on I/O errors; wrap calls in [safeApiCall].
  */
 interface FetcharrApi {
+    @GET("system/settings")
+    suspend fun serverSettings(): ServerSettingsDto
+
+    @PUT("system/settings")
+    suspend fun saveServerSettings(@Body settings: ServerSettingsDto): ServerSettingsDto
+
     @GET("health")
     suspend fun health(): HealthDto
 

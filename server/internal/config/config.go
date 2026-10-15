@@ -24,6 +24,7 @@ import (
 
 // Config mirrors the YAML file of spec §3.
 type Config struct {
+	runtime      *Runtime
 	Server       Server        `yaml:"server"`
 	DataDir      string        `yaml:"data_dir"`
 	Downloads    Downloads     `yaml:"downloads"`
@@ -62,10 +63,10 @@ type History struct {
 
 // Category is one destination folder plus layout rule (spec §2.1).
 type Category struct {
-	ID     string        `yaml:"id"`
-	Label  string        `yaml:"label"` // defaults to ID
-	Path   string        `yaml:"path"`
-	Layout naming.Layout `yaml:"layout"`
+	ID     string        `yaml:"id" json:"id"`
+	Label  string        `yaml:"label" json:"label"` // defaults to ID
+	Path   string        `yaml:"path" json:"path"`
+	Layout naming.Layout `yaml:"layout" json:"layout"`
 }
 
 // Media server types.
@@ -98,8 +99,8 @@ func ResolvePath(flagValue string) string {
 	return DefaultConfigPath
 }
 
-// Default returns a Config holding the defaults of spec §3 (it has no
-// categories, so it does not validate).
+// Default returns a Config holding the defaults of spec §3, ready for
+// first-run category setup through the app.
 func Default() *Config {
 	return &Config{
 		Server:    Server{Host: "0.0.0.0", Port: 8080, LogLevel: "info"},
@@ -175,6 +176,10 @@ func (c *Config) MakeAbsolute() error {
 // Parse decodes YAML, applies defaults and runs the checks that need no
 // filesystem access. Unknown keys are an error so typos do not go unnoticed.
 func Parse(data []byte) (*Config, error) {
+	return parse(data, true)
+}
+
+func parse(data []byte, validate bool) (*Config, error) {
 	cfg := Default()
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
@@ -182,8 +187,10 @@ func Parse(data []byte) (*Config, error) {
 		return nil, fmt.Errorf("parse YAML: %w", err)
 	}
 	cfg.applyDefaults()
-	if err := cfg.Validate(); err != nil {
-		return nil, err
+	if validate {
+		if err := cfg.Validate(); err != nil {
+			return nil, err
+		}
 	}
 	return cfg, nil
 }
@@ -230,9 +237,6 @@ func (c *Config) Validate() error {
 		add("history.retention_days: %d must not be negative", c.History.RetentionDays)
 	}
 
-	if len(c.Categories) == 0 {
-		add("categories: at least one category is required")
-	}
 	seen := map[string]bool{}
 	for i, cat := range c.Categories {
 		where := fmt.Sprintf("categories[%d]", i)
@@ -372,7 +376,7 @@ func (c *Config) JobWorkDir(jobID string) string { return filepath.Join(c.WorkDi
 
 // Category returns the category with the given id.
 func (c *Config) Category(id string) (Category, bool) {
-	for _, cat := range c.Categories {
+	for _, cat := range c.Current().Categories {
 		if cat.ID == id {
 			return cat, true
 		}

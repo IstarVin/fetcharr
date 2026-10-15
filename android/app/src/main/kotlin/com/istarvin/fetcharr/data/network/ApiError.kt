@@ -13,6 +13,10 @@ sealed interface ApiError {
     /** The text to show the user (snackbar or inline). */
     val userMessage: String
 
+    data class SettingsConflict(override val userMessage: String) : ApiError
+
+    data class CategoryBusy(override val userMessage: String) : ApiError
+
     /** I/O error, DNS failure or timeout (10 s connect, 30 s read). */
     data object Unreachable : ApiError {
         override val userMessage = "Can't reach server"
@@ -87,6 +91,8 @@ object ApiErrorMapper {
         val envelope = parseEnvelope(json, body)?.error
         val message = envelope?.message
         when (envelope?.code) {
+            "settings_conflict" -> return ApiError.SettingsConflict(message.orEmpty())
+            "category_busy" -> return ApiError.CategoryBusy(message.orEmpty())
             "unauthorized" -> return ApiError.Unauthorized
             "invalid_request" -> return ApiError.BadRequest("invalid_request", message.orEmpty())
             "not_found" -> return ApiError.NotFound(message.orEmpty())
