@@ -21,8 +21,6 @@ const (
 	codeInternal        = "internal"
 	codeInvalidRequest  = string(service.CodeInvalidRequest)
 	codeNotFound        = string(service.CodeNotFound)
-	codeInvalidState    = string(service.CodeInvalidState)
-	codeDuplicate       = string(service.CodeDuplicate)
 	maxBodyBytesDefault = 4 << 20
 )
 
