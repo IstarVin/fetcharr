@@ -119,6 +119,16 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel(), onServerSetti
                 SectionLabel(stringResource(R.string.settings_group_server))
                 AppCard {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        val version = state.serverVersion
+                        if (state.hasSavedServer && version != null) {
+                            val ok = MaterialTheme.statusColors
+                            Pill(
+                                stringResource(R.string.settings_connected, if (version.firstOrNull()?.isDigit() == true) "v$version" else version),
+                                icon = Icons.Outlined.CheckCircle,
+                                container = ok.successContainer,
+                                content = ok.onSuccessContainer,
+                            )
+                        }
                         OutlinedTextField(
                             value = state.url,
                             onValueChange = viewModel::onUrlChange,

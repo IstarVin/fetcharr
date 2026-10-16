@@ -154,7 +154,15 @@ private fun SheetContent(state: IncomingUiState, sheet: IncomingSheet, vm: Incom
     val actions = ItemFormActions(vm::onTitle, vm::onYear, vm::onShow, vm::onSeason, vm::onEpisode, vm::onEpisodeTitle)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         IconTile(Icons.Outlined.Download)
-        Text(stringResource(R.string.incoming_title), style = MaterialTheme.typography.headlineSmall)
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(R.string.incoming_title), style = MaterialTheme.typography.headlineSmall)
+            // Where the link came from, right under the title, so the form below is clearly about it.
+            if (!state.isSeasonMode) {
+                state.sourceLine?.let {
+                    Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                }
+            }
+        }
     }
     FormSection(stringResource(R.string.field_category), Icons.Outlined.Folder) {
         CategoryChips(state.categories, state.categoryId, vm::selectCategory)
@@ -169,9 +177,6 @@ private fun SheetContent(state: IncomingUiState, sheet: IncomingSheet, vm: Incom
         SeasonFormFields(state.form, actions)
     } else {
         state.layout?.let { ItemFormFields(it, state.form, actions) }
-        state.sourceLine?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
     }
 }
 

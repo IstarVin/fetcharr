@@ -13,7 +13,8 @@
     <string name="queue_setup_body">Add your Fetcharr server URL to start downloading.</string>
     <string name="queue_setup_action">Open Settings</string>
     <string name="queue_empty_title">Nothing downloading</string>
-    <string name="queue_empty_body">New downloads will show up here.</string>
+    <string name="queue_empty_body">Share a link from your browser or any app, or tap Add download. Progress shows up here.</string>
+    <string name="queue_waiting">Waiting for a free slot</string>
 
     <!-- History -->
     <string name="history_empty_title">No finished downloads</string>
@@ -42,8 +43,16 @@
     <string name="history_details">Details</string>
     <string name="history_path_copied">Path copied</string>
     <string name="history_cd_warning">Completed with warnings</string>
-    <string name="history_row_actions">Show actions</string>
+    <string name="history_row_actions">Show details</string>
     <string name="history_cd_loading_more">Loading more</string>
+    <string name="history_completed">Completed</string>
+    <string name="history_filter_all">All</string>
+    <string name="history_filter_completed">Completed</string>
+    <string name="history_filter_failed">Failed</string>
+    <string name="history_filter_empty">Nothing here. Switch the filter to see other downloads.</string>
+    <string name="history_detail_error">What went wrong</string>
+    <string name="history_detail_warnings">Warnings</string>
+    <string name="history_detail_file">Saved to</string>
 
     <string name="queue_add">Add download</string>
     <string name="queue_unavailable_title">Waiting for the server</string>
@@ -57,6 +66,7 @@
     <string name="queue_cd_pause">Pause %1$s</string>
     <string name="queue_cd_resume">Resume %1$s</string>
     <string name="queue_cd_cancel">Cancel %1$s</string>
+    <string name="queue_cancel_download">Cancel download</string>
     <string name="queue_cd_progress">%1$d percent</string>
     <string name="queue_cd_finishing">Finishing</string>
     <string name="queue_cd_banner">Connection: %1$s</string>
@@ -108,6 +118,21 @@
     <string name="add_title">Add download</string>
     <string name="add_url">URL</string>
     <string name="add_url_invalid">Enter an http:// or https:// address</string>
+    <string name="add_details">Details</string>
+    <string name="add_paste">Paste link</string>
+    <string name="add_clear">Clear link</string>
+    <string name="add_advanced">Advanced</string>
+    <string name="add_advanced_hint">Request headers and subtitle files</string>
+    <string name="add_advanced_expand">Show advanced options</string>
+    <string name="add_advanced_collapse">Hide advanced options</string>
+    <plurals name="add_headers_count">
+        <item quantity="one">%1$d header</item>
+        <item quantity="other">%1$d headers</item>
+    </plurals>
+    <plurals name="add_subtitles_count">
+        <item quantity="one">%1$d subtitle</item>
+        <item quantity="other">%1$d subtitles</item>
+    </plurals>
     <string name="add_headers">Headers</string>
     <string name="add_header_name">Name</string>
     <string name="add_header_value">Value</string>
@@ -132,6 +157,7 @@
     <string name="settings_save">Save</string>
     <string name="settings_saved">Settings saved</string>
     <string name="settings_test">Test connection</string>
+    <string name="settings_connected">Connected · %1$s</string>
     <string name="settings_testing">Testing…</string>
     <string name="settings_test_connected">Connected · v%1$s · %2$d ms</string>
     <string name="settings_test_unreachable">Can\'t reach server</string>

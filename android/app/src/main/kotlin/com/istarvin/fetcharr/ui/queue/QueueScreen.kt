@@ -50,7 +50,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MediumTopAppBar
@@ -85,6 +85,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -205,11 +206,11 @@ internal fun QueueContent(
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
                                 if (state.sections.isEmpty()) {
-                                    item(key = "empty") { EmptyQueue(state, onAdd) }
+                                    item(key = "empty") { EmptyQueue(state) }
                                 } else {
                                     for (section in state.sections) {
                                         item(key = "header:${section.kind.name}") {
-                                            SectionHeader(section.kind, section.items.sumOf { it.jobCount }, Modifier.animateItem())
+                                            SectionHeader(section.kind, section.items.sumOf { it.jobCount }, section.speedLabel, Modifier.animateItem())
                                         }
                                         for (item in section.items) {
                                             when (item) {
@@ -321,7 +322,7 @@ private fun SetupState(onOpenSettings: () -> Unit) {
 }
 
 @Composable
-private fun LazyItemScope.EmptyQueue(state: QueueUiState, onAdd: () -> Unit) {
+private fun LazyItemScope.EmptyQueue(state: QueueUiState) {
     Column(
         modifier = Modifier.fillParentMaxSize(),
         verticalArrangement = Arrangement.Center,
@@ -332,12 +333,6 @@ private fun LazyItemScope.EmptyQueue(state: QueueUiState, onAdd: () -> Unit) {
                 icon = Icons.Outlined.Download,
                 title = stringResource(R.string.queue_empty_title),
                 body = stringResource(R.string.queue_empty_body),
-                actions = {
-                    FilledTonalButton(onClick = onAdd) {
-                        Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text(stringResource(R.string.queue_add), Modifier.padding(start = 8.dp))
-                    }
-                },
             )
             state.connecting -> LoadingBlock()
             else -> EmptyState(
@@ -361,7 +356,7 @@ private fun CenteredColumn(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun SectionHeader(kind: QueueSectionKind, count: Int, modifier: Modifier = Modifier) {
+private fun SectionHeader(kind: QueueSectionKind, count: Int, speedLabel: String?, modifier: Modifier = Modifier) {
     val label = stringResource(
         when (kind) {
             QueueSectionKind.Active -> R.string.queue_section_active
@@ -371,7 +366,7 @@ private fun SectionHeader(kind: QueueSectionKind, count: Int, modifier: Modifier
     )
     val accent = statusAccent(kind.status).accent
     Row(
-        modifier.padding(start = 4.dp, top = 8.dp),
+        modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -383,6 +378,15 @@ private fun SectionHeader(kind: QueueSectionKind, count: Int, modifier: Modifier
             modifier = Modifier.semantics { heading() },
         )
         Text(count.toString(), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (speedLabel != null) {
+            Text(
+                speedLabel,
+                style = MaterialTheme.typography.labelLarge,
+                color = accent,
+                textAlign = TextAlign.End,
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 
@@ -429,7 +433,6 @@ private fun JobCard(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun JobDetails(
     job: JobCardModel,
@@ -439,116 +442,68 @@ private fun JobDetails(
     showCategory: Boolean = true,
 ) {
     val accent = statusAccent(job.status)
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val colors = MaterialTheme.colorScheme
+    val meta = listOfNotNull(
+        job.categoryLabel.takeIf { showCategory },
+        stringResource(R.string.queue_waiting).takeIf { job.status == JobStatus.PENDING },
+    ).joinToString(" · ")
+    Column(Modifier.padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
-            IconTile(layoutIcon(job.layout), container = accent.container, content = accent.onContainer)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            IconTile(layoutIcon(job.layout), Modifier.padding(top = 4.dp), container = accent.container, content = accent.onContainer, size = 40.dp)
+            Column(Modifier.weight(1f).padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(job.heading, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 job.secondary?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                if (meta.isNotEmpty()) {
+                    Text(meta, style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
+            Row(verticalAlignment = Alignment.CenterVertically) { JobActionButtons(job, onPause, onResume, onCancel) }
         }
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            itemVerticalAlignment = Alignment.CenterVertically,
-        ) {
-            StatusBadge(job, accent)
-            if (showCategory) Pill(job.categoryLabel, icon = Icons.Outlined.Folder)
-        }
-        if (job.showsProgressBar) ProgressRow(job.progress, job.indeterminate, job.percentLabel, accent.accent)
-        StatsRow(job)
-        if (job.actions.isNotEmpty()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                for (action in job.actions) {
-                    when (action) {
-                        JobAction.Pause -> ActionButton(R.string.queue_action_pause, R.string.queue_cd_pause, job.heading, Icons.Outlined.Pause, onClick = onPause)
-                        JobAction.Resume -> ActionButton(R.string.queue_action_resume, R.string.queue_cd_resume, job.heading, Icons.Outlined.PlayArrow, tonal = true, onClick = onResume)
-                        JobAction.Cancel -> ActionButton(R.string.queue_action_cancel, R.string.queue_cd_cancel, job.heading, Icons.Outlined.Close, destructive = true, onClick = onCancel)
-                    }
-                }
+        val line = job.stats ?: job.statusLabel.takeIf { job.status == JobStatus.PROCESSING }
+        if (job.showsProgressBar || line != null) {
+            Column(Modifier.padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (job.showsProgressBar) ProgressRow(job.progress, job.indeterminate, job.percentLabel, accent.accent)
+                line?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant) }
             }
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/** Pause or Resume as one tap; Cancel sits behind the overflow so a stray touch cannot stop a download. */
 @Composable
-private fun StatsRow(job: JobCardModel) {
-    val hasParts = job.speed != null || job.eta != null || job.size != null
-    if (hasParts) {
-        FlowRow(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            job.speed?.let { Stat(Icons.Outlined.Speed, it) }
-            job.eta?.let { Stat(Icons.Outlined.Timer, it) }
-            job.size?.let { Stat(Icons.Outlined.Storage, it) }
-        }
-    } else {
-        job.stats?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun JobActionButtons(job: JobCardModel, onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit) {
+    var menuOpen by remember { mutableStateOf(false) }
+    if (JobAction.Pause in job.actions) {
+        IconButton(onClick = onPause) {
+            Icon(Icons.Outlined.Pause, contentDescription = stringResource(R.string.queue_cd_pause, job.heading))
         }
     }
-}
-
-@Composable
-private fun Stat(icon: ImageVector, text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
-        Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (JobAction.Resume in job.actions) {
+        FilledTonalIconButton(onClick = onResume) {
+            Icon(Icons.Outlined.PlayArrow, contentDescription = stringResource(R.string.queue_cd_resume, job.heading))
+        }
     }
-}
-
-@Composable
-private fun StatusBadge(job: JobCardModel, accent: StatusAccent) {
-    Pill(job.statusLabel, icon = accent.icon, container = accent.container, content = accent.onContainer)
-}
-
-@Composable
-private fun ActionButton(
-    label: Int,
-    description: Int,
-    name: String,
-    icon: ImageVector,
-    tonal: Boolean = false,
-    destructive: Boolean = false,
-    onClick: () -> Unit,
-) {
-    val cd = stringResource(description, name)
-    val content: @Composable () -> Unit = {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-        Text(stringResource(label), Modifier.padding(start = 6.dp))
-    }
-    val semantics = Modifier.semantics { contentDescription = cd }
-    when {
-        tonal -> FilledTonalButton(onClick = onClick, modifier = semantics, content = { content() })
-        destructive -> TextButton(
-            onClick = onClick,
-            modifier = semantics,
-            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
-            content = { content() },
-        )
-        else -> TextButton(onClick = onClick, modifier = semantics, content = { content() })
+    if (JobAction.Cancel in job.actions) {
+        Box {
+            IconButton(onClick = { menuOpen = true }) {
+                Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.queue_batch_menu, job.heading))
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.queue_cancel_download), color = MaterialTheme.colorScheme.error) },
+                    leadingIcon = { Icon(Icons.Outlined.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                    onClick = { menuOpen = false; onCancel() },
+                )
+            }
+        }
     }
 }
 
 /** Determinate bars animate between updates; an unknown [progress] with [indeterminate] shows the moving bar. */
 @Composable
-private fun ProgressRow(progress: Float?, indeterminate: Boolean, percentLabel: String?, color: Color) {
+private fun ProgressRow(progress: Float?, indeterminate: Boolean, percentLabel: String?, color: Color, modifier: Modifier = Modifier) {
     val description = if (indeterminate || progress == null) {
         stringResource(R.string.queue_cd_finishing)
     } else {
@@ -557,7 +512,7 @@ private fun ProgressRow(progress: Float?, indeterminate: Boolean, percentLabel: 
     val barModifier = Modifier.height(8.dp).clip(CircleShape)
     val track = MaterialTheme.colorScheme.surfaceContainerHighest
     Row(
-        Modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = description },
+        modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = description },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -600,7 +555,7 @@ private fun BatchGroupCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            IconTile(Icons.Outlined.Layers, container = accent.container, content = accent.onContainer)
+            IconTile(Icons.Outlined.Layers, container = accent.container, content = accent.onContainer, size = 40.dp)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(group.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(

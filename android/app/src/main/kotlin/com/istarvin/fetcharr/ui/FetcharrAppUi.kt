@@ -11,7 +11,10 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
@@ -42,6 +45,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.istarvin.fetcharr.R
 import com.istarvin.fetcharr.ui.add.AddScreen
 import com.istarvin.fetcharr.ui.history.HistoryScreen
@@ -70,6 +74,17 @@ val LocalSnackbarHostState = staticCompositionLocalOf<SnackbarHostState> {
     error("LocalSnackbarHostState is only available inside FetcharrAppUi")
 }
 
+/** The tab icon; the Queue tab carries a badge with the number of downloads running or waiting. */
+@Composable
+private fun TabIcon(tab: Tab, selected: Boolean, badge: Int) {
+    val icon: @Composable () -> Unit = { Icon(if (selected) tab.selectedIcon else tab.icon, contentDescription = null) }
+    if (badge > 0 && tab.routeClass == QueueRoute::class) {
+        BadgedBox(badge = { Badge(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary) { Text(if (badge > 99) "99+" else badge.toString()) } }) { icon() }
+    } else {
+        icon()
+    }
+}
+
 private data class Tab(val route: Any, val routeClass: KClass<*>, val labelRes: Int, val icon: ImageVector, val selectedIcon: ImageVector)
 
 private val tabs = listOf(
@@ -92,6 +107,7 @@ fun FetcharrAppUi(openTargets: Flow<OpenTarget> = emptyFlow()) {
         if (!onSettingsDestination) recoveringIncomingRequest = false
     }
     val incomingViewModel: IncomingViewModel = hiltViewModel()
+    val queueCount by hiltViewModel<ShellViewModel>().queueCount.collectAsStateWithLifecycle()
     val openSettings = {
         navController.navigate(SettingsRoute) {
             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
@@ -156,7 +172,7 @@ fun FetcharrAppUi(openTargets: Flow<OpenTarget> = emptyFlow()) {
                                 NavigationBarItem(
                                     selected = selected,
                                     onClick = { selectTab(tab) },
-                                    icon = { Icon(if (selected) tab.selectedIcon else tab.icon, contentDescription = null) },
+                                    icon = { TabIcon(tab, selected, queueCount) },
                                     label = { Text(label) },
                                 )
                             }
@@ -172,7 +188,7 @@ fun FetcharrAppUi(openTargets: Flow<OpenTarget> = emptyFlow()) {
                                 NavigationRailItem(
                                     selected = selected,
                                     onClick = { selectTab(tab) },
-                                    icon = { Icon(if (selected) tab.selectedIcon else tab.icon, contentDescription = null) },
+                                    icon = { TabIcon(tab, selected, queueCount) },
                                     label = { Text(stringResource(tab.labelRes)) },
                                 )
                             }

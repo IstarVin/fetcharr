@@ -72,6 +72,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.Color
+import com.istarvin.fetcharr.ui.common.screenGutter
+import com.istarvin.fetcharr.ui.theme.MonoStyle
+import java.text.DateFormat
+import java.util.Date
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -221,6 +236,20 @@ internal fun HistoryContent(
     onClear: () -> Unit,
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    var filter by rememberSaveable { mutableStateOf(HistoryFilter.All) }
+    var openRowId by rememberSaveable { mutableStateOf<String?>(null) }
+    val openRow = openRowId?.let { id -> state.groups.firstNotNullOfOrNull { g -> g.items.firstOrNull { it.id == id } } }
+    // The row can vanish under the sheet (deleted, retried, cleared): close it rather than show stale details.
+    LaunchedEffect(openRow == null, state.historyLoaded) {
+        if (openRow == null && state.historyLoaded) openRowId = null
+    }
+    val visibleGroups = remember(state.groups, filter) {
+        if (filter == HistoryFilter.All) {
+            state.groups
+        } else {
+            state.groups.map { g -> g.copy(items = g.items.filter { filter.accepts(it.status) }) }.filter { it.items.isNotEmpty() }
+        }
+    }
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
@@ -286,10 +315,28 @@ internal fun HistoryContent(
                                     !state.historyLoaded -> item(key = "loading") { LoadingState() }
                                     state.isEmpty -> item(key = "empty") { EmptyHistory() }
                                     else -> {
-                                        for (group in state.groups) {
+                                        item(key = "filters") { FilterBar(filter) { filter = it } }
+                                        if (visibleGroups.isEmpty()) {
+                                            item(key = "filter-empty") {
+                                                Text(
+                                                    stringResource(R.string.history_filter_empty),
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    textAlign = TextAlign.Center,
+                                                    modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                                                )
+                                            }
+                                        }
+                                        for (group in visibleGroups) {
                                             stickyHeader(key = "header:${group.key}") { DayHeader(group.label) }
                                             items(group.items, key = { it.id }) { row ->
-                                                HistoryRow(row, row.id in state.preparingPlayback, onAction = { onAction(it, row.id) }, onDeleteSwiped = { onDeleteSwiped(row.id) })
+                                                HistoryRow(
+                                                    row,
+                                                    row.id in state.preparingPlayback,
+                                                    onOpen = { openRowId = row.id },
+                                                    onAction = { onAction(it, row.id) },
+                                                    onDeleteSwiped = { onDeleteSwiped(row.id) },
+                                                )
                                             }
                                         }
                                         if (state.loadingMore) {
@@ -309,6 +356,18 @@ internal fun HistoryContent(
             }
         }
     }
+
+    if (openRow != null) {
+        HistoryDetailSheet(
+            row = openRow,
+            preparingPlayback = openRow.id in state.preparingPlayback,
+            onAction = { action ->
+                openRowId = null
+                onAction(action, openRow.id)
+            },
+            onDismiss = { openRowId = null },
+        )
+    }
 }
 
 @Composable
@@ -323,10 +382,15 @@ private fun DayHeader(label: String) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LazyItemScope.HistoryRow(row: HistoryRowModel, preparingPlayback: Boolean, onAction: (HistoryAction) -> Unit, onDeleteSwiped: () -> Unit) {
-    var menuOpen by remember { mutableStateOf(false) }
+private fun LazyItemScope.HistoryRow(
+    row: HistoryRowModel,
+    preparingPlayback: Boolean,
+    onOpen: () -> Unit,
+    onAction: (HistoryAction) -> Unit,
+    onDeleteSwiped: () -> Unit,
+) {
     // Never actually dismisses: the swipe only asks for confirmation, then the row snaps back.
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
@@ -343,6 +407,11 @@ private fun LazyItemScope.HistoryRow(row: HistoryRowModel, preparingPlayback: Bo
         else -> Triple(Icons.Outlined.Cancel, colors.surfaceContainerHighest, colors.onSurfaceVariant)
     }
     val shape = MaterialTheme.shapes.large
+    val time = remember(row.finishedAt) { DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(row.finishedAt)) }
+    val outcome = when (row.status) {
+        JobStatus.COMPLETED -> row.sizeLabel ?: stringResource(R.string.history_completed)
+        else -> row.statusLine
+    }
 
     SwipeToDismissBox(
         state = dismissState,
@@ -364,77 +433,182 @@ private fun LazyItemScope.HistoryRow(row: HistoryRowModel, preparingPlayback: Bo
         },
     ) {
         Surface(color = colors.surfaceContainerLow, shape = shape) {
-            Box {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .combinedClickable(
-                            onClickLabel = stringResource(R.string.history_row_actions),
-                            onLongClickLabel = stringResource(R.string.history_row_actions),
-                            role = Role.Button,
-                            onClick = { menuOpen = true },
-                            onLongClick = { menuOpen = true },
-                        )
-                        .semantics(mergeDescendants = true) {
-                            customActions = row.actions.map { action ->
-                                CustomAccessibilityAction(actionLabels.getValue(action)) { onAction(action); true }
-                            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClickLabel = stringResource(R.string.history_row_actions), role = Role.Button, onClick = onOpen)
+                    .semantics(mergeDescendants = true) {
+                        customActions = row.actions.map { action ->
+                            CustomAccessibilityAction(actionLabels.getValue(action)) { onAction(action); true }
                         }
-                        .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    IconTile(tileIcon, container = tileContainer, content = tileContent)
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(row.heading, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                IconTile(tileIcon, container = tileContainer, content = tileContent, size = 40.dp)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(row.heading, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            row.statusLine,
+                            outcome,
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (row.status == JobStatus.FAILED) colors.error else colors.onSurfaceVariant,
-                            maxLines = if (row.status == JobStatus.COMPLETED) 1 else 2,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
                         )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Pill(row.categoryLabel, icon = Icons.Outlined.Folder)
-                            if (row.hasWarnings) {
-                                Pill(
-                                    stringResource(R.string.history_cd_warning),
-                                    icon = Icons.Outlined.Warning,
-                                    container = status.warningContainer,
-                                    content = status.onWarningContainer,
-                                )
-                            }
+                        if (row.hasWarnings) {
+                            Icon(
+                                Icons.Outlined.Warning,
+                                contentDescription = stringResource(R.string.history_cd_warning),
+                                tint = status.warning,
+                                modifier = Modifier.size(16.dp),
+                            )
                         }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (HistoryAction.Play in row.actions) {
-                            FilledTonalIconButton(onClick = { onAction(HistoryAction.Play) }, enabled = !preparingPlayback) {
-                                if (preparingPlayback) {
-                                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                                } else {
-                                    Icon(Icons.Outlined.PlayArrow, contentDescription = stringResource(R.string.history_play))
-                                }
-                            }
-                        }
-                        IconButton(onClick = { menuOpen = true }) {
-                            Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.history_row_actions))
-                        }
-                    }
+                    Text(
+                        "${row.categoryLabel} · $time",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    for (action in row.actions) {
-                        DropdownMenuItem(
-                            enabled = action != HistoryAction.Play || !preparingPlayback,
-                            text = { Text(actionLabels.getValue(action)) },
-                            leadingIcon = { Icon(action.icon, contentDescription = null) },
-                            onClick = { menuOpen = false; onAction(action) },
-                        )
+                when {
+                    HistoryAction.Play in row.actions -> FilledTonalIconButton(onClick = { onAction(HistoryAction.Play) }, enabled = !preparingPlayback) {
+                        if (preparingPlayback) {
+                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Outlined.PlayArrow, contentDescription = stringResource(R.string.history_play))
+                        }
+                    }
+                    HistoryAction.Retry in row.actions -> IconButton(onClick = { onAction(HistoryAction.Retry) }) {
+                        Icon(Icons.Outlined.Replay, contentDescription = stringResource(R.string.history_retry))
                     }
                 }
             }
+        }
+    }
+}
+
+/** Everything the row has no room for: the full name, the file, the server's error text, and every action. */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun HistoryDetailSheet(
+    row: HistoryRowModel,
+    preparingPlayback: Boolean,
+    onAction: (HistoryAction) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val status = MaterialTheme.statusColors
+    val finished = remember(row.finishedAt) {
+        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(row.finishedAt))
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetMaxWidth = 720.dp) {
+        SelectionContainer {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = screenGutter()).padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(row.heading, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+                    Text(
+                        listOfNotNull(row.categoryLabel, row.sizeLabel, finished).joinToString(" · "),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant,
+                    )
+                }
+                when (row.status) {
+                    JobStatus.FAILED -> DetailBlock(
+                        stringResource(R.string.history_detail_error),
+                        row.errorMessage ?: row.statusLine,
+                        colors.errorContainer,
+                        colors.onErrorContainer,
+                    )
+                    JobStatus.CANCELLED -> Text(row.statusLine, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                    else -> Unit
+                }
+                if (row.hasWarnings) {
+                    DetailBlock(
+                        stringResource(R.string.history_detail_warnings),
+                        row.warnings.joinToString("\n"),
+                        status.warningContainer,
+                        status.onWarningContainer,
+                    )
+                }
+                row.filePath?.let { path ->
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(stringResource(R.string.history_detail_file), style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
+                        Text(path, style = MonoStyle, color = colors.onSurface)
+                    }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (HistoryAction.Play in row.actions) {
+                        Button(onClick = { onAction(HistoryAction.Play) }, enabled = !preparingPlayback, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Text(stringResource(R.string.history_play), Modifier.padding(start = 8.dp))
+                        }
+                    }
+                    if (HistoryAction.Retry in row.actions) {
+                        Button(onClick = { onAction(HistoryAction.Retry) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Icon(Icons.Outlined.Replay, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Text(stringResource(R.string.history_retry), Modifier.padding(start = 8.dp))
+                        }
+                    }
+                    if (HistoryAction.CopyPath in row.actions) {
+                        OutlinedButton(onClick = { onAction(HistoryAction.CopyPath) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Text(stringResource(R.string.history_copy_path), Modifier.padding(start = 8.dp))
+                        }
+                    }
+                    TextButton(
+                        onClick = { onAction(HistoryAction.Delete) },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                        colors = ButtonDefaults.textButtonColors(contentColor = colors.error),
+                    ) {
+                        Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text(stringResource(R.string.history_delete), Modifier.padding(start = 8.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailBlock(label: String, text: String, container: Color, content: Color) {
+    Surface(color = container, contentColor = content, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(label, style = MaterialTheme.typography.labelLarge)
+            Text(text, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+private enum class HistoryFilter(val labelRes: Int) {
+    All(R.string.history_filter_all),
+    Completed(R.string.history_filter_completed),
+    Failed(R.string.history_filter_failed),
+    ;
+
+    fun accepts(status: JobStatus): Boolean = when (this) {
+        All -> true
+        Completed -> status == JobStatus.COMPLETED
+        Failed -> status == JobStatus.FAILED || status == JobStatus.CANCELLED
+    }
+}
+
+@Composable
+private fun FilterBar(selected: HistoryFilter, onSelect: (HistoryFilter) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (filter in HistoryFilter.entries) {
+            FilterChip(
+                selected = filter == selected,
+                onClick = { onSelect(filter) },
+                label = { Text(stringResource(filter.labelRes)) },
+            )
         }
     }
 }

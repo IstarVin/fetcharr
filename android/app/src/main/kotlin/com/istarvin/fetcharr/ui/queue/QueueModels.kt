@@ -69,7 +69,8 @@ data class BatchGroup(
     val percentLabel: String? get() = progress?.let(::percentOf)
 }
 
-data class QueueSection(val kind: QueueSectionKind, val items: List<QueueItem>)
+/** [speedLabel] is the combined live speed of the section (`6.4 MiB/s`); only the Active section has one. */
+data class QueueSection(val kind: QueueSectionKind, val items: List<QueueItem>, val speedLabel: String? = null)
 
 data class QueueBanner(val text: String, val connecting: Boolean)
 
@@ -87,7 +88,13 @@ fun buildQueueSections(jobs: List<JobDto>, categories: List<CategoryDto>): List<
         QueueSectionKind.Queued to queued,
         QueueSectionKind.Paused to paused,
     ).filter { it.second.isNotEmpty() }
-        .map { (kind, list) -> QueueSection(kind, groupItems(kind, list, ::card)) }
+        .map { (kind, list) -> QueueSection(kind, groupItems(kind, list, ::card), if (kind == QueueSectionKind.Active) combinedSpeed(list) else null) }
+}
+
+/** Sum of the live speeds of downloading jobs; null when nothing reports one. */
+private fun combinedSpeed(jobs: List<JobDto>): String? {
+    val total = jobs.filter { it.status == JobStatus.DOWNLOADING }.sumOf { it.progress?.speedBps?.takeIf { bps -> bps > 0 } ?: 0L }
+    return if (total > 0) Formatters.speed(total) else null
 }
 
 private fun groupItems(kind: QueueSectionKind, jobs: List<JobDto>, card: (JobDto) -> JobCardModel): List<QueueItem> {

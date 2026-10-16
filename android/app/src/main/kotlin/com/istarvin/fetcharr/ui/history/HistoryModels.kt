@@ -4,6 +4,7 @@ import com.istarvin.fetcharr.data.network.dto.CategoryDto
 import com.istarvin.fetcharr.data.network.dto.JobDto
 import com.istarvin.fetcharr.data.network.dto.JobStatus
 import com.istarvin.fetcharr.ui.common.heading
+import com.istarvin.fetcharr.util.Formatters
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -34,6 +35,8 @@ data class HistoryRowModel(
     /** The server's full error text, behind "Details" for failed jobs. */
     val errorMessage: String?,
     val actions: List<HistoryAction>,
+    /** `1.4 GiB` for a completed job whose size the server reported. */
+    val sizeLabel: String? = null,
 ) {
     /** Text for the Details dialog: the error message (failed) or the warnings (completed), else null. */
     val detailsText: String?
@@ -102,6 +105,11 @@ fun JobDto.toHistoryRow(categoryLabel: String, layout: String?): HistoryRowModel
         errorCode = errorCode,
         errorMessage = message,
         actions = actions,
+        sizeLabel = if (status == JobStatus.COMPLETED) {
+            Formatters.bytes(progress?.totalBytes?.takeIf { it > 0 } ?: progress?.downloadedBytes?.takeIf { it > 0 })
+        } else {
+            null
+        },
     )
 }
 

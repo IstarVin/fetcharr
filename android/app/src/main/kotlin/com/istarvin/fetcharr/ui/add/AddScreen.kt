@@ -40,6 +40,26 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.res.pluralStringResource
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -126,6 +146,8 @@ internal fun AddContent(
     onRefreshCategories: () -> Unit = {},
     onOpenServerSettings: () -> Unit = onOpenSettings,
 ) {
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
     Scaffold(
         topBar = {
             TopAppBar(
@@ -186,7 +208,7 @@ internal fun AddContent(
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = screenGutter(), vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
                 if (!state.serverConfigured) {
                     EmptyState(
@@ -202,24 +224,28 @@ internal fun AddContent(
                     )
                     return@Column
                 }
-                AppCard {
-                    Column(Modifier.padding(16.dp)) {
-                        OutlinedTextField(
-                            value = state.url,
-                            onValueChange = onUrl,
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text(stringResource(R.string.add_url)) },
-                            leadingIcon = { Icon(Icons.Outlined.Link, contentDescription = null) },
-                            singleLine = true,
-                            isError = state.urlInvalid,
-                            supportingText = if (state.urlInvalid) {
-                                { Text(stringResource(R.string.add_url_invalid)) }
-                            } else null,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                        )
-                    }
-                }
-                SectionCard {
+                OutlinedTextField(
+                    value = state.url,
+                    onValueChange = onUrl,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.add_url)) },
+                    leadingIcon = { Icon(Icons.Outlined.Link, contentDescription = null) },
+                    trailingIcon = {
+                        if (state.url.isEmpty()) {
+                            IconButton(onClick = {
+                                scope.launch { clipboard.getClipEntry()?.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString()?.trim()?.let(onUrl) }
+                            }) { Icon(Icons.Outlined.ContentPaste, contentDescription = stringResource(R.string.add_paste)) }
+                        } else {
+                            IconButton(onClick = { onUrl("") }) { Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.add_clear)) }
+                        }
+                    },
+                    singleLine = true,
+                    isError = state.urlInvalid,
+                    supportingText = if (state.urlInvalid) {
+                        { Text(stringResource(R.string.add_url_invalid)) }
+                    } else null,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                )
                 FormSection(stringResource(R.string.field_category), Icons.Outlined.Folder) {
                     when {
                         state.categoriesLoading && state.categories.isEmpty() -> {
@@ -253,9 +279,17 @@ internal fun AddContent(
                         else -> CategoryChips(state.categories, state.categoryId, onSelectCategory)
                     }
                 }
+                state.layout?.let { layout ->
+                    FormSection(stringResource(R.string.add_details), Icons.Outlined.Edit) { ItemFormFields(layout, state.form, actions) }
                 }
-                state.layout?.let { layout -> SectionCard { ItemFormFields(layout, state.form, actions) } }
-                SectionCard {
+                val hasAdvanced = state.headers.isNotEmpty() || state.subtitles.isNotEmpty()
+                var advancedOpen by rememberSaveable { mutableStateOf(hasAdvanced) }
+                AdvancedSection(
+                    expanded = advancedOpen,
+                    onToggle = { advancedOpen = !advancedOpen },
+                    headerCount = state.headers.size,
+                    subtitleCount = state.subtitles.size,
+                ) {
                 FormSection(stringResource(R.string.add_headers), Icons.Outlined.Code) {
                     state.headers.forEach { row ->
                         ResponsiveFormRow(
@@ -290,8 +324,7 @@ internal fun AddContent(
                         Text(stringResource(R.string.add_header_add), modifier = Modifier.padding(start = 8.dp))
                     }
                 }
-                }
-                SectionCard {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 FormSection(stringResource(R.string.add_subtitles), Icons.Outlined.Subtitles) {
                     state.subtitles.forEach { row ->
                         ResponsiveFormRow(
@@ -337,8 +370,47 @@ internal fun AddContent(
     }
 }
 
-/** A card around one group of related fields. */
+/** Headers and subtitles are rarely needed: one quiet row until the user asks for them. */
 @Composable
-private fun SectionCard(content: @Composable () -> Unit) {
-    AppCard { Column(Modifier.padding(16.dp)) { content() } }
+private fun AdvancedSection(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    headerCount: Int,
+    subtitleCount: Int,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val chevron by animateFloatAsState(if (expanded) 180f else 0f, label = "advanced")
+    val summary = listOfNotNull(
+        headerCount.takeIf { it > 0 }?.let { pluralStringResource(R.plurals.add_headers_count, it, it) },
+        subtitleCount.takeIf { it > 0 }?.let { pluralStringResource(R.plurals.add_subtitles_count, it, it) },
+    ).joinToString(" · ").ifEmpty { stringResource(R.string.add_advanced_hint) }
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = Color.Transparent,
+        border = BorderStroke(1.dp, colors.outlineVariant),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClickLabel = stringResource(if (expanded) R.string.add_advanced_collapse else R.string.add_advanced_expand), onClick = onToggle)
+                    .heightIn(min = 64.dp)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Icon(Icons.Outlined.Tune, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.add_advanced), style = MaterialTheme.typography.titleSmall)
+                    Text(summary, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                }
+                Icon(Icons.Outlined.ExpandMore, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.rotate(chevron))
+            }
+            AnimatedVisibility(visible = expanded) {
+                Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp), content = content)
+            }
+        }
+    }
 }
