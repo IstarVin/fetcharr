@@ -18,22 +18,30 @@ import (
 )
 
 var (
-	ErrConflict     = errors.New("settings changed; reload before saving")
+	// ErrConflict rejects saves based on an outdated revision.
+	ErrConflict = errors.New("settings changed; reload before saving")
+	// ErrCategoryBusy prevents changing a destination used by active jobs.
 	ErrCategoryBusy = errors.New("category has active jobs")
 )
 
+// ValidationError describes an invalid settings document.
 type ValidationError struct{ Message string }
 
 func (e *ValidationError) Error() string { return e.Message }
 
+// Downloads contains limits and output preferences for new attempts.
 type Downloads struct {
 	Concurrency  int    `json:"concurrency"`
 	MergeFormat  string `json:"merge_format"`
 	MinFreeSpace int64  `json:"min_free_space"` // bytes
 }
+
+// History configures retention of finished job records.
 type History struct {
 	RetentionDays int `json:"retention_days"`
 }
+
+// Ytdlp configures automatic updates of the managed executable.
 type Ytdlp struct {
 	AutoUpdate bool `json:"auto_update"`
 }
@@ -45,8 +53,9 @@ func absoluteRemotePath(path string) bool {
 	return len(path) >= 3 && ((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z')) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')
 }
 
-// Credential is write-only over HTTP; the database stores it in its private
-// document. HasCredential lets an editor leave an existing secret unchanged.
+// Integration describes a media server connection. Credential is write-only
+// over HTTP; the database stores it in its private document. HasCredential
+// lets an editor leave an existing secret unchanged.
 type Integration struct {
 	ID            string            `json:"id"`
 	Type          string            `json:"type"`
@@ -66,6 +75,7 @@ type Document struct {
 	MediaServers []Integration     `json:"media_servers"`
 }
 
+// Manager validates, persists and publishes live settings atomically.
 type Manager struct {
 	mu      sync.Mutex
 	cfg     *config.Config
@@ -189,12 +199,14 @@ func public(d Document) Document {
 	return out
 }
 
+// Get returns a private copy of the current document with credentials removed.
 func (m *Manager) Get() Document {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return public(m.doc)
 }
 
+// Save validates and commits a document if its revision is still current.
 func (m *Manager) Save(ctx context.Context, d Document) (Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

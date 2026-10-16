@@ -2,6 +2,7 @@ package history_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -32,7 +33,7 @@ func TestLiveRetentionCanBeEnabledAndDisabled(t *testing.T) {
 	deadline := time.After(3 * time.Second)
 	for {
 		_, err := st.Get(t.Context(), "old")
-		if err == store.ErrNotFound {
+		if errors.Is(err, store.ErrNotFound) {
 			break
 		}
 		select {

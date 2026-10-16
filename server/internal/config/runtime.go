@@ -16,6 +16,7 @@ type Runtime struct {
 	value atomic.Pointer[Config]
 }
 
+// Clone returns an independent configuration without runtime publication state.
 func (c *Config) Clone() *Config {
 	v := *c
 	v.runtime = nil
@@ -39,6 +40,7 @@ func (c *Config) EnableRuntime() *Runtime {
 // Publish takes ownership of a private copy, so callers cannot mutate readers.
 func (r *Runtime) Publish(c *Config) { r.value.Store(c.Clone()) }
 
+// Current returns the latest immutable runtime snapshot, or the startup config.
 func (c *Config) Current() *Config {
 	if c.runtime != nil {
 		return c.runtime.value.Load()
@@ -46,6 +48,8 @@ func (c *Config) Current() *Config {
 	return c
 }
 
+// ReadSettings prevents category edits during a job submission or retry.
+// The caller must invoke the returned unlock function.
 func (c *Config) ReadSettings() func() {
 	if c.runtime == nil {
 		return func() {}

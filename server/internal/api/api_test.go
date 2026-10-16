@@ -74,6 +74,10 @@ func TestUnknownRouteAndMethodUseEnvelope(t *testing.T) {
 		t.Errorf("405: allow=%q body %s", r.Header.Get("Allow"), r.Raw)
 	}
 	e.want(e.request("GET", "/api/jobs/x/pause", nil), 405)
+	r = e.want(e.request("POST", "/api/system/settings", nil), 405)
+	if got := r.Header.Get("Allow"); got != "GET, HEAD, PUT" {
+		t.Errorf("settings Allow = %q, want GET, HEAD, PUT", got)
+	}
 }
 
 func TestHeadersNeverInAnyResponse(t *testing.T) {

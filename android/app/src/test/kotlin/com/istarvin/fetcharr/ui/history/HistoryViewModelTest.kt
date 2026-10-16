@@ -114,7 +114,7 @@ class HistoryViewModelTest {
         val provider = FetcharrApiProvider(factory, settings)
         val store = ActiveJobsStore()
         val history = HistoryRepository(provider, settings, store, ioScope)
-        vm = HistoryViewModel(settings, history, JobActions(provider, store), CategoryRepository(provider, factory, settings))
+        vm = HistoryViewModel(settings, history, JobActions(provider, store), CategoryRepository(factory, settings, ioScope))
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.state.collect { } }
         // DataStore emits from a real thread: wait for the state instead of running the test scheduler by hand.
         vm.state.first { it.historyLoaded && it.groups.sumOf { g -> g.items.size } == jobs.size }

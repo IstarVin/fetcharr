@@ -35,7 +35,7 @@ internal class VmTestEnv(tmpDir: File) {
         FetcharrJson,
         scope,
     )
-    val categoryRepository = CategoryRepository(FetcharrApiProvider(factory, settings), factory, settings)
+    val categoryRepository = CategoryRepository(factory, settings, scope)
     val submit = SubmitUseCase(FetcharrApiProvider(factory, settings))
     val hub = IncomingHub(IncomingCoordinator(scope), IntentRouter())
 

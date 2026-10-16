@@ -42,6 +42,11 @@ class SettingsRepository @Inject constructor(
     /** Saves both server fields in one write. Blank [url] clears the server. */
     suspend fun setServer(url: String, token: String) {
         dataStore.edit {
+            if (it[SERVER_URL].orEmpty() != url) {
+                it.remove(CACHED_CATEGORIES)
+                it.remove(DEFAULT_MOVIE)
+                it.remove(DEFAULT_TV)
+            }
             it[SERVER_URL] = url
             it[TOKEN] = token
         }

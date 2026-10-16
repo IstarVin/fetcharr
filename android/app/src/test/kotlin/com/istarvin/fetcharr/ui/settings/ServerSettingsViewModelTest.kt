@@ -4,7 +4,6 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import com.istarvin.fetcharr.data.CategoryRepository
 import com.istarvin.fetcharr.data.ServerSettingsRepository
 import com.istarvin.fetcharr.data.network.FetcharrApiFactory
-import com.istarvin.fetcharr.data.network.FetcharrApiProvider
 import com.istarvin.fetcharr.data.network.FetcharrJson
 import com.istarvin.fetcharr.data.network.dto.DownloadSettingsDto
 import com.istarvin.fetcharr.data.network.dto.HistorySettingsDto
@@ -63,7 +62,7 @@ class ServerSettingsViewModelTest {
     }
 
     private fun newVm() = ServerSettingsViewModel(
-        settings, ServerSettingsRepository(factory), CategoryRepository(FetcharrApiProvider(factory, settings), factory, settings),
+        settings, ServerSettingsRepository(factory), CategoryRepository(factory, settings, scope),
     )
 
     private fun response(body: String, code: Int = 200) = MockResponse().setResponseCode(code).setBody(body)

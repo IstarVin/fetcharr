@@ -86,6 +86,25 @@ class SettingsRepositoryTest {
     }
 
     @Test
+    fun changingServerClearsCategoriesAndDefaults() = await {
+        repo.setServer("http://one", "tok")
+        repo.setCachedCategories(listOf(CategoryDto("movies", "Movies", "movie")))
+        repo.setDefaultMovieCategoryId("movies")
+        repo.setDefaultTvCategoryId("tv")
+
+        // Rotating the token keeps the same server's offline choices.
+        repo.setServer("http://one", "new-token")
+        assertEquals("movies", repo.settings.first().defaultMovieCategoryId)
+        assertEquals(1, repo.settings.first().cachedCategories.size)
+
+        repo.setServer("http://two", "tok")
+        val saved = repo.settings.first()
+        assertEquals(emptyList<CategoryDto>(), saved.cachedCategories)
+        assertNull(saved.defaultMovieCategoryId)
+        assertNull(saved.defaultTvCategoryId)
+    }
+
+    @Test
     fun initLastSeenOnlyWhenAbsent() = await {
         repo.initLastSeenIfAbsent(100)
         assertEquals(100L, repo.settings.first().lastSeenFinishedAt)

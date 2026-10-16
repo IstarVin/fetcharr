@@ -62,13 +62,14 @@ func New(o Options) *Pruner {
 	return p
 }
 
-// Enabled reports whether retention is configured.
 func (p *Pruner) retentionDays() int {
 	if p.currentDays != nil {
 		return p.currentDays()
 	}
 	return p.days
 }
+
+// Enabled reports whether retention is configured.
 func (p *Pruner) Enabled() bool { return p.retentionDays() > 0 }
 
 // Prune deletes the expired jobs, publishes job_removed with their ids and
@@ -119,6 +120,7 @@ func (p *Pruner) pruneLogged(ctx context.Context) {
 	}
 }
 
+// Wake requests an immediate pruning pass after a settings change.
 func (p *Pruner) Wake() {
 	select {
 	case p.wake <- struct{}{}:

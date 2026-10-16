@@ -15,7 +15,22 @@ env:
   IMAGE: ghcr.io/istarvin/fetcharr-server
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - run: go vet ./...
+      - run: go test -race ./...
+
   image:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +47,13 @@ jobs:
 
       - name: Version from tag
         id: ver
-        run: echo "version=${GITHUB_REF_NAME#server-v}" >> "$GITHUB_OUTPUT"
+        run: |
+          VERSION="${GITHUB_REF_NAME#server-v}"
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Expected a server-vX.Y.Z release tag (optionally with a prerelease suffix)" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - id: meta
         uses: docker/metadata-action@v5
@@ -45,7 +66,7 @@ jobs:
             type=semver,pattern={{version}},value=${{ steps.ver.outputs.version }}
             type=semver,pattern={{major}}.{{minor}},value=${{ steps.ver.outputs.version }}
             type=semver,pattern={{major}},value=${{ steps.ver.outputs.version }}
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=raw,value=latest,enable=${{ !contains(steps.ver.outputs.version, '-') }}
 
       - uses: docker/build-push-action@v6
         with:

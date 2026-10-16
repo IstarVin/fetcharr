@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/istarvin/fetcharr/server/internal/config"
@@ -99,6 +100,8 @@ type Processor struct {
 	killGrace        time.Duration
 	rename           func(string, string) error
 	now              func() time.Time
+	targetMu         sync.Mutex
+	targets          map[string]*targetLock
 
 	// afterSetPlacing, when set, runs right after SetPlacing succeeded and
 	// before the first file moves (tests hold the placement here).
@@ -184,9 +187,18 @@ func (p *Processor) Process(ctx context.Context, job *store.Job, mediaFile strin
 		return processingFailed("cannot resolve the library path: %v", err)
 	}
 	// Containment first: a folder that escapes the root must not be listed.
-	if _, _, err := library.ResolveDir(target.Root, target.Dir); err != nil {
+	_, resolvedDir, err := library.ResolveDir(target.Root, target.Dir)
+	if err != nil {
 		return processingFailed("%v", err)
 	}
+	// Different URLs (or containers) can name the same library item. Keep the
+	// existence check and placement together so only an explicit overwrite
+	// can replace a file placed by another worker.
+	unlock, err := p.lockTarget(ctx, filepath.Join(resolvedDir, target.Base))
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if !job.Overwrite {
 		existing, err := library.ExistingMedia(target)
 		if err != nil {

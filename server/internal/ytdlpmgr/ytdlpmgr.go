@@ -405,6 +405,7 @@ func (m *Manager) autoEnabled() bool {
 	return m.auto
 }
 
+// Wake rechecks automatic update settings without waiting for the interval.
 func (m *Manager) Wake() {
 	select {
 	case m.wake <- struct{}{}:

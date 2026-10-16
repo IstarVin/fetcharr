@@ -63,13 +63,16 @@ class SettingsViewModelTest {
 
     private fun newVm(): SettingsViewModel {
         val provider = FetcharrApiProvider(factory, settings)
-        val categories = CategoryRepository(provider, factory, settings)
+        val categories = CategoryRepository(factory, settings, scope)
         return SettingsViewModel(settings, categories, SystemRepository(provider), ConnectionTester(factory))
     }
 
     /** Saves the mock server as the configured one and builds a VM that has loaded `/api/info` (managed yt-dlp). */
     private fun vmWithSavedServer(infoBody: String = infoJson()): SettingsViewModel {
-        await { settings.setServer("http://$hostPort", "tok") }
+        await {
+            settings.setServer("http://$hostPort", "tok")
+            settings.config.first { it != null }
+        }
         server.enqueue(MockResponse().setResponseCode(200).setBody(infoBody))
         val v = newVm()
         await { v.uiState.first { it.serverVersion != null } }
@@ -171,7 +174,7 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun connectedUsesEnteredValuesAndCachesCategories() {
+    fun connectedUsesEnteredValuesWithoutCachingAnUnsavedServer() {
         server.enqueue(MockResponse().setResponseCode(200).setBody(infoJson()))
         server.enqueue(MockResponse().setResponseCode(200).setBody(infoJson()))
 
@@ -186,12 +189,9 @@ class SettingsViewModelTest {
         await {
             assertEquals("http://$hostPort", vm.uiState.value.url)
             assertEquals("", settings.settings.first().serverUrl)
-            val cached = settings.settings.first { it.cachedCategories.isNotEmpty() }.cachedCategories
-            assertEquals(listOf("movies", "tv", "misc"), cached.map { it.id })
-            // Movie dropdown: movie + flat; TV dropdown: tv.
-            val state = vm.uiState.first { it.movieCategories.isNotEmpty() }
-            assertEquals(listOf("movies", "misc"), state.movieCategories.map { it.id })
-            assertEquals(listOf("tv"), state.tvCategories.map { it.id })
+            assertTrue(settings.settings.first().cachedCategories.isEmpty())
+            assertTrue(vm.uiState.value.movieCategories.isEmpty())
+            assertTrue(vm.uiState.value.tvCategories.isEmpty())
         }
     }
 

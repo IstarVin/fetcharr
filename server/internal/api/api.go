@@ -134,7 +134,7 @@ func New(opts Options) http.Handler {
 	// "GET /api/jobs/{id}"). Probe the mux to tell 405 from 404.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		var allow []string
-		for _, m := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+		for _, m := range []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodDelete} {
 			probe := r.Clone(r.Context())
 			probe.Method = m
 			if _, pattern := mux.Handler(probe); pattern != "" && pattern != "/" {

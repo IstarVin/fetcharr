@@ -203,8 +203,9 @@ func (p *Processor) fetchSubtitle(ctx context.Context, job *store.Job, rawURL st
 		if len(via) >= 10 {
 			return errors.New("stopped after 10 redirects")
 		}
-		if next.URL.Host != via[0].URL.Host {
-			// The headers (cookies, tokens) belong to the original host.
+		if next.URL.Host != via[0].URL.Host || next.URL.Scheme != via[0].URL.Scheme {
+			// Cookies and tokens belong to the original origin. A redirect
+			// from HTTPS to HTTP must not expose them even on the same host.
 			for name := range job.Headers {
 				next.Header.Del(name)
 			}

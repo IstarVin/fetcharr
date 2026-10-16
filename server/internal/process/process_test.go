@@ -30,6 +30,88 @@ func failureCode(t *testing.T, err error) string {
 	return f.Code
 }
 
+func TestConcurrentJobsCannotOverwriteTheSameTarget(t *testing.T) {
+	f := newFixture(t, nil)
+	first, media1 := f.job()
+	second, media2 := f.job()
+	// Different containers still represent the same library item.
+	mediaMKV := strings.TrimSuffix(media2, ".mp4") + ".mkv"
+	if err := os.Rename(media2, mediaMKV); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, media1, "first-video")
+	writeFile(t, mediaMKV, "second-video")
+	placing := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int32
+	f.proc.afterSetPlacing = func() {
+		if calls.Add(1) == 1 {
+			close(placing)
+			<-release
+		}
+	}
+	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+	go func() { firstDone <- f.proc.Process(t.Context(), first, media1) }()
+	select {
+	case <-placing:
+	case <-time.After(waitTimeout):
+		close(release)
+		t.Fatal("first job never reached placement")
+	}
+	go func() { secondDone <- f.proc.Process(t.Context(), second, mediaMKV) }()
+	// The second job must wait, then repeat the existence check after the
+	// first one has placed its media, rather than blindly renaming over it.
+	select {
+	case err := <-secondDone:
+		close(release)
+		<-firstDone
+		t.Fatalf("second job finished during the first placement: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+	if code := failureCode(t, <-secondDone); code != runner.CodeAlreadyExists {
+		t.Fatalf("second job failed with %s, want already_exists", code)
+	}
+	if got := readFile(t, *f.get(first.ID).FilePath); got != "first-video" {
+		t.Fatalf("first media replaced: %q", got)
+	}
+	if !exists(mediaMKV) {
+		t.Fatal("second job's media was moved despite the conflict")
+	}
+}
+
+func TestWaitingForTargetCanBeCancelled(t *testing.T) {
+	f := newFixture(t, nil)
+	j, media := f.job()
+	target, err := f.proc.targetFor("movies", "Dune", 2024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := f.proc.lockTarget(t.Context(), filepath.Join(target.Dir, target.Base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- f.proc.Process(ctx, j, media) }()
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("got %v, want cancellation", err)
+		}
+	case <-time.After(waitTimeout):
+		t.Fatal("cancelled job remained blocked by placement")
+	}
+	if f.get(j.ID).Placing || !exists(media) {
+		t.Fatal("cancelled waiter started placing")
+	}
+}
+
 func TestCompleteWithSRTPassthrough(t *testing.T) {
 	srv := newSubServer(t, map[string]route{"/en.srt": {body: srtSample}})
 	var gotDir atomic.Value

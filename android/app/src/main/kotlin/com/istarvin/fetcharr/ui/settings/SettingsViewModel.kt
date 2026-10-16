@@ -149,7 +149,7 @@ class SettingsViewModel @Inject constructor(
 
     /**
      * Tests the currently entered (normalized) values, saved or not. On success the server's
-     * categories are cached too.
+     * categories are cached too when the tested connection is the saved server.
      */
     fun testConnection() {
         val current = form.value

@@ -70,6 +70,7 @@ Every REST call and the WebSocket send `Authorization: Bearer <token>` when a to
 - **Active jobs** are held in memory as one list. That list is replaced by each WebSocket `snapshot` and updated by `job_added`, `job_updated` and `job_removed`. Every screen reads from this list.
 - **History** comes from REST, `GET /api/jobs?status=completed,failed,cancelled`, paged 50 at a time. When a `job_updated` event moves a job into a finished status, it is added to the top of history if history is loaded.
 - **Categories** come from `GET /api/info`. They are fetched on every successful connection and cached in DataStore, so pickers still work when the server is unreachable.
+  The cache and default category choices belong to the saved server and are cleared when its URL changes. Testing an unsaved connection does not replace that cache; replies from a previous connection are ignored.
 - **Last seen time**: the newest `finished_at` the app has processed, stored in DataStore. It is used to catch up on missed results (§6).
 
 ### 3.3 WebSocket lifecycle

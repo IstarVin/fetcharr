@@ -100,7 +100,7 @@ class QueueViewModelTest {
             settings.config.first { it != null }
         }
         val provider = FetcharrApiProvider(factory, settings)
-        categories = CategoryRepository(provider, factory, settings)
+        categories = CategoryRepository(factory, settings, ioScope)
         actions = JobActions(provider, store)
         sync = SyncManager(connector, settings, store, { }, FetcharrJson, backgroundScope)
         vm = QueueViewModel(settings, store, categories, sync, actions)

@@ -3,6 +3,7 @@ package process
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,42 @@ import (
 	"github.com/istarvin/fetcharr/server/internal/runner"
 	"github.com/istarvin/fetcharr/server/internal/store"
 )
+
+type redirectTransport func(*http.Request) (*http.Response, error)
+
+func (f redirectTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestSubtitleRedirectDoesNotLeakHeadersOnHTTPSDowngrade(t *testing.T) {
+	var redirected bool
+	client := &http.Client{Transport: redirectTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Scheme == "https" {
+			return &http.Response{
+				StatusCode: http.StatusFound,
+				Header:     http.Header{"Location": {"http://example.com/final.srt"}},
+				Body:       io.NopCloser(strings.NewReader("")),
+				Request:    r,
+			}, nil
+		}
+		redirected = true
+		for _, name := range []string{"Authorization", "Cookie", "X-Test-Token"} {
+			if r.Header.Get(name) != "" {
+				t.Errorf("%s leaked on HTTPS downgrade", name)
+			}
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK, Header: make(http.Header),
+			Body: io.NopCloser(strings.NewReader(srtSample)), Request: r,
+		}, nil
+	})}
+	f := newFixture(t, func(o *Options) { o.HTTPClient = client })
+	j := &store.Job{Headers: map[string]string{
+		"Authorization": "Bearer secret", "Cookie": "session=secret", "X-Test-Token": "secret",
+	}}
+	data, reason, err := f.proc.fetchSubtitle(context.Background(), j, "https://example.com/redirect")
+	if err != nil || reason != "" || string(data) != srtSample || !redirected {
+		t.Fatalf("subtitle redirect: %q, %s, %v (redirected=%v)", data, reason, err, redirected)
+	}
+}
 
 func mode(t *testing.T, p string) os.FileMode {
 	t.Helper()
