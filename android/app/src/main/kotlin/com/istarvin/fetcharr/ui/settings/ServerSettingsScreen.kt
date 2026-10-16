@@ -295,11 +295,11 @@ private fun ErrorNotice(message: String) {
     }
 }
 
-/** The expand/collapse affordance shared by the category and integration editors. */
+/** The expand/collapse indicator shared by the clickable category and integration cards. */
 @Composable
-private fun ExpandToggle(expanded: Boolean, onClick: () -> Unit) {
+private fun ExpandIndicator(expanded: Boolean) {
     val rotation by animateFloatAsState(if (expanded) 180f else 0f, label = "expand")
-    IconButton(onClick = onClick) {
+    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
         Icon(
             Icons.Outlined.ExpandMore,
             contentDescription = stringResource(if (expanded) R.string.server_settings_collapse else R.string.server_settings_edit),
@@ -318,7 +318,7 @@ private fun CategoryEditor(c: CategoryDraft, index: Int, state: ServerSettingsUi
         "tv" -> Icons.Outlined.Tv
         else -> Icons.Outlined.Folder
     }
-    AppCard {
+    AppCard(onClick = { expanded = !expanded }) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconTile(icon)
@@ -326,7 +326,7 @@ private fun CategoryEditor(c: CategoryDraft, index: Int, state: ServerSettingsUi
                     Text(c.label.ifBlank { c.id }.ifBlank { stringResource(R.string.server_settings_new_category) }, style = MaterialTheme.typography.titleMedium)
                     if (c.path.isNotBlank()) Text(c.path, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                ExpandToggle(expanded || hasErrors) { expanded = !expanded }
+                ExpandIndicator(expanded || hasErrors)
             }
             if (expanded || hasErrors) {
                 SettingField(R.string.server_settings_category_id, c.id, { change(c.copy(id = it)) }, !state.saving && !c.existing,
@@ -348,7 +348,7 @@ private fun IntegrationEditor(s: IntegrationDraft, index: Int, state: ServerSett
     var expanded by remember { mutableStateOf(!s.existing) }
     val errors = state.fieldErrors
     val hasErrors = errors.keys.any { it.startsWith("integration.$index.") }
-    AppCard {
+    AppCard(onClick = { expanded = !expanded }) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconTile(
@@ -360,7 +360,7 @@ private fun IntegrationEditor(s: IntegrationDraft, index: Int, state: ServerSett
                     Text(stringResource(if (s.type == "plex") R.string.server_settings_plex else R.string.server_settings_jellyfin), style = MaterialTheme.typography.titleMedium)
                     if (s.url.isNotBlank()) Text(s.url, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                ExpandToggle(expanded || hasErrors) { expanded = !expanded }
+                ExpandIndicator(expanded || hasErrors)
             }
             if (expanded || hasErrors) {
                 ChoiceField(R.string.server_settings_type, s.type, listOf("jellyfin" to R.string.server_settings_jellyfin,
