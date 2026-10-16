@@ -35,6 +35,12 @@ data class JobCardModel(
     /** `3.1 MiB/s · 1:52 left · 463 MiB / 720 MiB` without the parts the server did not send. */
     val stats: String?,
     val actions: List<JobAction>,
+    /** The category's layout (`movie`, `tv`, `flat`), used to pick the card icon. */
+    val layout: String? = null,
+    /** The pieces of [stats], for rendering as separate chips. Null when not reported. */
+    val speed: String? = null,
+    val eta: String? = null,
+    val size: String? = null,
 ) {
     val showsProgressBar: Boolean get() = indeterminate || progress != null
 }
@@ -137,6 +143,7 @@ internal fun percentOf(fraction: Float): String = "${percentInt(fraction)}%"
 private fun JobDto.toCard(categoryLabel: String, layout: String?): JobCardModel {
     val indeterminate = status == JobStatus.PROCESSING
     val fraction = if (indeterminate || status == JobStatus.PENDING) null else jobFraction(this)
+    val liveStats = statParts()
     return JobCardModel(
         id = id,
         batchId = batchId,
@@ -158,10 +165,16 @@ private fun JobDto.toCard(categoryLabel: String, layout: String?): JobCardModel 
         percentLabel = fraction?.let(::percentOf),
         stats = statsLine(),
         actions = actionsFor(status),
+        layout = layout,
+        speed = liveStats?.speed,
+        eta = liveStats?.eta,
+        size = liveStats?.size,
     )
 }
 
-private fun JobDto.statsLine(): String? {
+private data class StatParts(val speed: String?, val eta: String?, val size: String?)
+
+private fun JobDto.statParts(): StatParts? {
     if (status != JobStatus.DOWNLOADING && status != JobStatus.PAUSED) return null
     val p = progress ?: return null
     val live = status == JobStatus.DOWNLOADING
@@ -170,7 +183,12 @@ private fun JobDto.statsLine(): String? {
     val done = Formatters.bytes(p.downloadedBytes)
     val total = Formatters.bytes(p.totalBytes)
     val size = if (done != null && total != null) "$done / $total" else done
-    return listOfNotNull(speed, eta, size).takeIf { it.isNotEmpty() }?.joinToString(" · ")
+    return StatParts(speed, eta, size)
+}
+
+private fun JobDto.statsLine(): String? {
+    val parts = statParts() ?: return null
+    return listOfNotNull(parts.speed, parts.eta, parts.size).takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }
 
 fun actionsFor(status: JobStatus): List<JobAction> = when (status) {

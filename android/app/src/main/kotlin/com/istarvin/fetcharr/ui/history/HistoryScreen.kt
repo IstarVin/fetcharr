@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.items
@@ -30,6 +31,9 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Info
@@ -44,6 +48,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -54,7 +61,7 @@ import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
@@ -67,6 +74,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -87,8 +96,13 @@ import com.istarvin.fetcharr.R
 import com.istarvin.fetcharr.data.network.ApiError
 import com.istarvin.fetcharr.data.network.dto.JobStatus
 import com.istarvin.fetcharr.ui.LocalSnackbarHostState
+import com.istarvin.fetcharr.ui.common.EmptyState
+import com.istarvin.fetcharr.ui.common.IconTile
+import com.istarvin.fetcharr.ui.common.LoadingBlock
+import com.istarvin.fetcharr.ui.common.Pill
 import com.istarvin.fetcharr.ui.common.ScreenFrame
 import com.istarvin.fetcharr.ui.theme.FetcharrTheme
+import com.istarvin.fetcharr.ui.theme.statusColors
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
@@ -206,10 +220,17 @@ internal fun HistoryContent(
     onDeleteSwiped: (String) -> Unit,
     onClear: () -> Unit,
 ) {
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            TopAppBar(
+            MediumTopAppBar(
                 title = { Text(stringResource(R.string.nav_history)) },
+                scrollBehavior = scrollBehavior,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                ),
                 actions = {
                     if (state.hasServer) {
                         var menuOpen by remember { mutableStateOf(false) }
@@ -220,6 +241,7 @@ internal fun HistoryContent(
                             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.history_clear)) },
+                                    leadingIcon = { Icon(Icons.Outlined.DeleteSweep, contentDescription = null) },
                                     enabled = state.groups.isNotEmpty(),
                                     onClick = { menuOpen = false; onClear() },
                                 )
@@ -234,7 +256,7 @@ internal fun HistoryContent(
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val gutter = if (maxWidth >= 600.dp) 24.dp else 16.dp
                 when {
-                    !state.loaded -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) { LoadingFeedback() }
+                    !state.loaded -> LoadingBlock(Modifier.fillMaxSize().wrapContentSize(Alignment.Center))
                     !state.hasServer -> SetupState(onOpenSettings)
                     else -> {
                         val listState = rememberLazyListState()
@@ -256,6 +278,7 @@ internal fun HistoryContent(
                                 state = listState,
                                 modifier = Modifier.fillMaxSize(),
                                 contentPadding = PaddingValues(start = gutter, end = gutter, bottom = 24.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
                                 when {
                                     !state.historyLoaded && state.error != null ->
@@ -293,9 +316,9 @@ private fun DayHeader(label: String) {
     Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
         Text(
             label,
-            style = MaterialTheme.typography.titleSmall,
+            style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(top = 24.dp, bottom = 8.dp).semantics { heading() },
+            modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 8.dp).semantics { heading() },
         )
     }
 }
@@ -312,27 +335,35 @@ private fun LazyItemScope.HistoryRow(row: HistoryRowModel, preparingPlayback: Bo
         },
     )
     val actionLabels = row.actions.associateWith { stringResource(it.labelRes) }
+    val colors = MaterialTheme.colorScheme
+    val status = MaterialTheme.statusColors
+    val (tileIcon, tileContainer, tileContent) = when (row.status) {
+        JobStatus.COMPLETED -> Triple(Icons.Outlined.CheckCircle, status.successContainer, status.onSuccessContainer)
+        JobStatus.FAILED -> Triple(Icons.Outlined.ErrorOutline, colors.errorContainer, colors.onErrorContainer)
+        else -> Triple(Icons.Outlined.Cancel, colors.surfaceContainerHighest, colors.onSurfaceVariant)
+    }
+    val shape = MaterialTheme.shapes.large
 
     SwipeToDismissBox(
         state = dismissState,
         enableDismissFromStartToEnd = false,
-        modifier = Modifier.animateItem(),
+        modifier = Modifier.animateItem().clip(shape),
         backgroundContent = {
             if (dismissState.dismissDirection != SwipeToDismissBoxValue.Settled) {
                 Box(
-                    Modifier.fillMaxSize().background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 20.dp),
+                    Modifier.fillMaxSize().background(colors.errorContainer).padding(horizontal = 24.dp),
                     contentAlignment = Alignment.CenterEnd,
                 ) {
                     Icon(
                         Icons.Outlined.Delete,
                         contentDescription = stringResource(R.string.history_delete),
-                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                        tint = colors.onErrorContainer,
                     )
                 }
             }
         },
     ) {
-        Surface(color = MaterialTheme.colorScheme.surface) {
+        Surface(color = colors.surfaceContainerLow, shape = shape) {
             Box {
                 Row(
                     Modifier
@@ -349,58 +380,48 @@ private fun LazyItemScope.HistoryRow(row: HistoryRowModel, preparingPlayback: Bo
                                 CustomAccessibilityAction(actionLabels.getValue(action)) { onAction(action); true }
                             }
                         }
-                        .padding(vertical = 12.dp),
+                        .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Icon(
-                        imageVector = when (row.status) {
-                            JobStatus.COMPLETED -> Icons.Outlined.CheckCircle
-                            JobStatus.FAILED -> Icons.Outlined.ErrorOutline
-                            else -> Icons.Outlined.Cancel
-                        },
-                        contentDescription = null,
-                        tint = if (row.status == JobStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(row.heading, style = MaterialTheme.typography.titleMedium)
+                    IconTile(tileIcon, container = tileContainer, content = tileContent)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(row.heading, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(
                             row.statusLine,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (row.status == JobStatus.FAILED) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            maxLines = 2,
+                            color = if (row.status == JobStatus.FAILED) colors.error else colors.onSurfaceVariant,
+                            maxLines = if (row.status == JobStatus.COMPLETED) 1 else 2,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        Text(
-                            row.categoryLabel,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                        )
-                    }
-                    if (row.hasWarnings) {
-                        Icon(
-                            Icons.Outlined.Warning,
-                            contentDescription = stringResource(R.string.history_cd_warning),
-                            tint = MaterialTheme.colorScheme.tertiary,
-                        )
-                    }
-                    if (HistoryAction.Play in row.actions) {
-                        IconButton(onClick = { onAction(HistoryAction.Play) }, enabled = !preparingPlayback) {
-                            if (preparingPlayback) {
-                                CircularProgressIndicator(Modifier.size(24.dp))
-                            } else {
-                                Icon(Icons.Outlined.PlayArrow, contentDescription = stringResource(R.string.history_play))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Pill(row.categoryLabel, icon = Icons.Outlined.Folder)
+                            if (row.hasWarnings) {
+                                Pill(
+                                    stringResource(R.string.history_cd_warning),
+                                    icon = Icons.Outlined.Warning,
+                                    container = status.warningContainer,
+                                    content = status.onWarningContainer,
+                                )
                             }
                         }
                     }
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.history_row_actions))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (HistoryAction.Play in row.actions) {
+                            FilledTonalIconButton(onClick = { onAction(HistoryAction.Play) }, enabled = !preparingPlayback) {
+                                if (preparingPlayback) {
+                                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(Icons.Outlined.PlayArrow, contentDescription = stringResource(R.string.history_play))
+                                }
+                            }
+                        }
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.history_row_actions))
+                        }
                     }
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -482,61 +503,57 @@ private fun ConfirmDialog(title: Int, body: String, confirm: Int, onConfirm: () 
 
 @Composable
 private fun SetupState(onOpenSettings: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        StateText(Icons.Outlined.CloudOff, stringResource(R.string.queue_setup_title), stringResource(R.string.queue_setup_body))
-        Button(onClick = onOpenSettings) { Text(stringResource(R.string.queue_setup_action)) }
-    }
+    EmptyState(
+        icon = Icons.Outlined.CloudOff,
+        title = stringResource(R.string.queue_setup_title),
+        body = stringResource(R.string.queue_setup_body),
+        modifier = Modifier.fillMaxSize().wrapContentSize(Alignment.Center),
+        actions = { Button(onClick = onOpenSettings) { Text(stringResource(R.string.queue_setup_action)) } },
+    )
 }
 
 @Composable
 private fun LazyItemScope.EmptyHistory() {
     CenteredItem {
-        StateText(Icons.Outlined.History, stringResource(R.string.history_empty_title), stringResource(R.string.history_empty_body))
+        EmptyState(
+            icon = Icons.Outlined.History,
+            title = stringResource(R.string.history_empty_title),
+            body = stringResource(R.string.history_empty_body),
+        )
     }
 }
 
 @Composable
 private fun LazyItemScope.LoadingState() {
-    CenteredItem { LoadingFeedback() }
+    CenteredItem { LoadingBlock() }
 }
 
 @Composable
 private fun LazyItemScope.ErrorState(message: String, onRetry: () -> Unit) {
     CenteredItem {
-        StateText(Icons.Outlined.ErrorOutline, stringResource(R.string.history_error_title), message)
-        TextButton(onClick = onRetry) { Text(stringResource(R.string.history_error_retry)) }
+        EmptyState(
+            icon = Icons.Outlined.ErrorOutline,
+            title = stringResource(R.string.history_error_title),
+            body = message,
+            tint = MaterialTheme.colorScheme.error,
+            container = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
+            actions = {
+                FilledTonalButton(onClick = onRetry) {
+                    Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text(stringResource(R.string.history_error_retry), Modifier.padding(start = 8.dp))
+                }
+            },
+        )
     }
 }
 
 @Composable
 private fun LazyItemScope.CenteredItem(content: @Composable () -> Unit) {
     Column(
-        modifier = Modifier.fillParentMaxSize().padding(horizontal = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+        modifier = Modifier.fillParentMaxSize(),
+        verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) { content() }
-}
-
-@Composable
-private fun StateText(icon: ImageVector, title: String, body: String) {
-    Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-    Text(title, style = MaterialTheme.typography.titleMedium)
-    Text(
-        body,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        textAlign = TextAlign.Center,
-    )
-}
-
-@Composable
-private fun LoadingFeedback() {
-    CircularProgressIndicator(Modifier.size(32.dp))
-    Text(stringResource(R.string.a11y_loading), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable

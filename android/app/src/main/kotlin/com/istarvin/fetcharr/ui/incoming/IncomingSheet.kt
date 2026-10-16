@@ -13,7 +13,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.selection.triStateToggleable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,6 +43,8 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.istarvin.fetcharr.ui.common.EmptyState
+import com.istarvin.fetcharr.ui.common.IconTile
 import com.istarvin.fetcharr.ui.common.screenGutter
 import com.istarvin.fetcharr.R
 import com.istarvin.fetcharr.data.network.ApiError
@@ -119,10 +126,11 @@ fun IncomingSheetHost(
                     val sending = stringResource(R.string.a11y_sending)
                     CircularProgressIndicator(Modifier.size(24.dp).semantics { contentDescription = sending }, strokeWidth = 2.dp)
                 }
-                OutlinedButton(onClick = viewModel::cancel, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.incoming_cancel)) }
+                TextButton(onClick = viewModel::cancel, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.incoming_cancel)) }
                 if (state.serverConfigured) {
                     Button(onClick = viewModel::download, enabled = state.canDownload, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Text(stringResource(R.string.incoming_download, state.selectedCount))
+                        Icon(Icons.Outlined.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text(stringResource(R.string.incoming_download, state.selectedCount), Modifier.padding(start = 8.dp))
                     }
                 }
             }
@@ -132,22 +140,23 @@ fun IncomingSheetHost(
 
 @Composable
 private fun NoServerNotice(onOpenSettings: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(R.string.incoming_no_server_title), style = MaterialTheme.typography.titleMedium)
-        Text(
-            stringResource(R.string.incoming_no_server_body),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Button(onClick = onOpenSettings, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.incoming_open_settings)) }
-    }
+    EmptyState(
+        icon = Icons.Outlined.CloudOff,
+        title = stringResource(R.string.incoming_no_server_title),
+        body = stringResource(R.string.incoming_no_server_body),
+        modifier = Modifier.fillMaxWidth(),
+        actions = { Button(onClick = onOpenSettings, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.incoming_open_settings)) } },
+    )
 }
 
 @Composable
 private fun SheetContent(state: IncomingUiState, sheet: IncomingSheet, vm: IncomingViewModel) {
     val actions = ItemFormActions(vm::onTitle, vm::onYear, vm::onShow, vm::onSeason, vm::onEpisode, vm::onEpisodeTitle)
-    Text(stringResource(R.string.incoming_title), style = MaterialTheme.typography.titleLarge)
-    FormSection(stringResource(R.string.field_category)) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        IconTile(Icons.Outlined.Download)
+        Text(stringResource(R.string.incoming_title), style = MaterialTheme.typography.headlineSmall)
+    }
+    FormSection(stringResource(R.string.field_category), Icons.Outlined.Folder) {
         CategoryChips(state.categories, state.categoryId, vm::selectCategory)
     }
     if (state.receiving) {
@@ -217,6 +226,7 @@ internal fun LazyListScope.episodeChecklist(
             Text(
                 "E%02d".format(Locale.ROOT, episode.episode),
                 style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
             Text(episode.title.orEmpty(), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))

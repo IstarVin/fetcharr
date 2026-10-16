@@ -143,6 +143,7 @@
     <string name="settings_default_none">None</string>
     <string name="settings_defaults_hint">Test the connection to load your server\'s categories.</string>
     <string name="settings_group_about">About</string>
+    <string name="settings_server_settings_summary">Downloads, categories and media servers</string>
     <string name="a11y_loading">Loading</string>
     <string name="a11y_sending">Sending download request</string>
     <string name="settings_group_ytdlp">yt-dlp</string>

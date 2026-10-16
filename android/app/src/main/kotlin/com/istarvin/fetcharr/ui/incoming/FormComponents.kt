@@ -10,9 +10,19 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Movie
+import androidx.compose.material.icons.outlined.Title
+import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
@@ -21,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -65,14 +76,28 @@ fun CategoryChips(
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         categories.forEach { category ->
+            val selected = category.id == selectedId
             FilterChip(
                 modifier = Modifier.heightIn(min = 48.dp),
-                selected = category.id == selectedId,
+                selected = selected,
                 onClick = { onSelect(category.id) },
                 label = { Text(category.label) },
+                leadingIcon = {
+                    Icon(
+                        if (selected) Icons.Outlined.Check else layoutIcon(category.layout),
+                        contentDescription = null,
+                        modifier = Modifier.size(FilterChipDefaults.IconSize),
+                    )
+                },
             )
         }
     }
+}
+
+fun layoutIcon(layout: String?): ImageVector = when (layout) {
+    CategoryOption.LAYOUT_MOVIE -> Icons.Outlined.Movie
+    CategoryOption.LAYOUT_TV -> Icons.Outlined.Tv
+    else -> Icons.Outlined.Folder
 }
 
 @Composable
@@ -83,12 +108,14 @@ private fun TextField(
     modifier: Modifier = Modifier,
     numeric: Boolean = false,
     isError: Boolean = false,
+    icon: ImageVector? = null,
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
         modifier = modifier,
         label = { Text(stringResource(labelRes)) },
+        leadingIcon = icon?.let { { Icon(it, contentDescription = null) } },
         singleLine = true,
         isError = isError,
         keyboardOptions = KeyboardOptions(keyboardType = if (numeric) KeyboardType.Number else KeyboardType.Text),
@@ -101,19 +128,19 @@ fun ItemFormFields(layout: String, form: ItemForm, actions: ItemFormActions, mod
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         when (layout) {
             CategoryOption.LAYOUT_MOVIE -> {
-                TextField(form.title, actions.onTitle, R.string.field_title, Modifier.fillMaxWidth())
-                TextField(form.year, actions.onYear, R.string.field_year, Modifier.fillMaxWidth(), numeric = true, isError = !form.yearValid)
+                TextField(form.title, actions.onTitle, R.string.field_title, Modifier.fillMaxWidth(), icon = Icons.Outlined.Title)
+                TextField(form.year, actions.onYear, R.string.field_year, Modifier.fillMaxWidth(), numeric = true, isError = !form.yearValid, icon = Icons.Outlined.CalendarMonth)
             }
             CategoryOption.LAYOUT_TV -> {
-                TextField(form.show, actions.onShow, R.string.field_show, Modifier.fillMaxWidth())
+                TextField(form.show, actions.onShow, R.string.field_show, Modifier.fillMaxWidth(), icon = Icons.Outlined.Tv)
                 ResponsiveFormRow(
                     first = { TextField(form.season, actions.onSeason, R.string.field_season, it, numeric = true) },
                     second = { TextField(form.episode, actions.onEpisode, R.string.field_episode, it, numeric = true) },
                 )
-                TextField(form.episodeTitle, actions.onEpisodeTitle, R.string.field_episode_title, Modifier.fillMaxWidth())
-                TextField(form.year, actions.onYear, R.string.field_year, Modifier.fillMaxWidth(), numeric = true, isError = !form.yearValid)
+                TextField(form.episodeTitle, actions.onEpisodeTitle, R.string.field_episode_title, Modifier.fillMaxWidth(), icon = Icons.Outlined.Title)
+                TextField(form.year, actions.onYear, R.string.field_year, Modifier.fillMaxWidth(), numeric = true, isError = !form.yearValid, icon = Icons.Outlined.CalendarMonth)
             }
-            else -> TextField(form.title, actions.onTitle, R.string.field_title, Modifier.fillMaxWidth())
+            else -> TextField(form.title, actions.onTitle, R.string.field_title, Modifier.fillMaxWidth(), icon = Icons.Outlined.Title)
         }
     }
 }
@@ -122,19 +149,27 @@ fun ItemFormFields(layout: String, form: ItemForm, actions: ItemFormActions, mod
 @Composable
 fun SeasonFormFields(form: ItemForm, actions: ItemFormActions, modifier: Modifier = Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        TextField(form.show, actions.onShow, R.string.field_show, Modifier.fillMaxWidth())
+        TextField(form.show, actions.onShow, R.string.field_show, Modifier.fillMaxWidth(), icon = Icons.Outlined.Tv)
         ResponsiveFormRow(
             first = { TextField(form.season, actions.onSeason, R.string.field_season, it, numeric = true) },
-            second = { TextField(form.year, actions.onYear, R.string.field_year, it, numeric = true, isError = !form.yearValid) },
+            second = { TextField(form.year, actions.onYear, R.string.field_year, it, numeric = true, isError = !form.yearValid, icon = Icons.Outlined.CalendarMonth) },
         )
     }
 }
 
 /** Related fields stay together while sections have room to breathe. */
 @Composable
-fun FormSection(title: String, content: @Composable () -> Unit) {
+fun FormSection(title: String, icon: ImageVector? = null, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (icon != null) Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.semantics { heading() },
+            )
+        }
         content()
     }
 }

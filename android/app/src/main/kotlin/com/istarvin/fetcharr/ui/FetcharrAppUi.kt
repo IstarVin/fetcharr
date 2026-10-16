@@ -5,6 +5,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Settings
@@ -67,12 +70,12 @@ val LocalSnackbarHostState = staticCompositionLocalOf<SnackbarHostState> {
     error("LocalSnackbarHostState is only available inside FetcharrAppUi")
 }
 
-private data class Tab(val route: Any, val routeClass: KClass<*>, val labelRes: Int, val icon: ImageVector)
+private data class Tab(val route: Any, val routeClass: KClass<*>, val labelRes: Int, val icon: ImageVector, val selectedIcon: ImageVector)
 
 private val tabs = listOf(
-    Tab(QueueRoute, QueueRoute::class, R.string.nav_queue, Icons.Outlined.Download),
-    Tab(HistoryRoute, HistoryRoute::class, R.string.nav_history, Icons.Outlined.History),
-    Tab(SettingsRoute, SettingsRoute::class, R.string.nav_settings, Icons.Outlined.Settings),
+    Tab(QueueRoute, QueueRoute::class, R.string.nav_queue, Icons.Outlined.Download, Icons.Filled.Download),
+    Tab(HistoryRoute, HistoryRoute::class, R.string.nav_history, Icons.Outlined.History, Icons.Filled.History),
+    Tab(SettingsRoute, SettingsRoute::class, R.string.nav_settings, Icons.Outlined.Settings, Icons.Filled.Settings),
 )
 
 @Composable
@@ -149,10 +152,11 @@ fun FetcharrAppUi(openTargets: Flow<OpenTarget> = emptyFlow()) {
                         NavigationBar {
                             tabs.forEach { tab ->
                                 val label = stringResource(tab.labelRes)
+                                val selected = destination?.hierarchy?.any { it.hasRoute(tab.routeClass) } == true
                                 NavigationBarItem(
-                                    selected = destination?.hierarchy?.any { it.hasRoute(tab.routeClass) } == true,
+                                    selected = selected,
                                     onClick = { selectTab(tab) },
-                                    icon = { Icon(tab.icon, contentDescription = null) },
+                                    icon = { Icon(if (selected) tab.selectedIcon else tab.icon, contentDescription = null) },
                                     label = { Text(label) },
                                 )
                             }
@@ -164,10 +168,11 @@ fun FetcharrAppUi(openTargets: Flow<OpenTarget> = emptyFlow()) {
                     if (showNavigation && useRail) {
                         NavigationRail {
                             tabs.forEach { tab ->
+                                val selected = destination?.hierarchy?.any { it.hasRoute(tab.routeClass) } == true
                                 NavigationRailItem(
-                                    selected = destination?.hierarchy?.any { it.hasRoute(tab.routeClass) } == true,
+                                    selected = selected,
                                     onClick = { selectTab(tab) },
-                                    icon = { Icon(tab.icon, contentDescription = null) },
+                                    icon = { Icon(if (selected) tab.selectedIcon else tab.icon, contentDescription = null) },
                                     label = { Text(stringResource(tab.labelRes)) },
                                 )
                             }

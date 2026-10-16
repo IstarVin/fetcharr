@@ -2,6 +2,7 @@ package com.istarvin.fetcharr.ui.queue
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,30 +14,46 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Download
-import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.HourglassEmpty
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Movie
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PauseCircle
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.Tv
+import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -44,7 +61,7 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -55,7 +72,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -64,7 +85,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -72,8 +93,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.istarvin.fetcharr.R
 import com.istarvin.fetcharr.data.network.dto.JobStatus
 import com.istarvin.fetcharr.ui.LocalSnackbarHostState
+import com.istarvin.fetcharr.ui.common.AppCard
+import com.istarvin.fetcharr.ui.common.EmptyState
+import com.istarvin.fetcharr.ui.common.IconTile
+import com.istarvin.fetcharr.ui.common.LoadingBlock
+import com.istarvin.fetcharr.ui.common.Pill
 import com.istarvin.fetcharr.ui.common.ScreenFrame
 import com.istarvin.fetcharr.ui.theme.FetcharrTheme
+import com.istarvin.fetcharr.ui.theme.statusColors
 import kotlinx.coroutines.launch
 
 @Composable
@@ -132,11 +159,28 @@ internal fun QueueContent(
     onRequestCancelAll: (BatchGroup) -> Unit,
 ) {
     var expandedBatchIds by rememberSaveable { mutableStateOf(listOf<String>()) }
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val listState = rememberLazyListState()
     Scaffold(
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.nav_queue)) }) },
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        topBar = {
+            MediumTopAppBar(
+                title = { Text(stringResource(R.string.nav_queue)) },
+                scrollBehavior = scrollBehavior,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                ),
+            )
+        },
         floatingActionButton = {
-            FloatingActionButton(onClick = onAdd) {
-                Icon(Icons.Outlined.Add, contentDescription = stringResource(R.string.queue_add))
+            if (state.hasServer) {
+                ExtendedFloatingActionButton(
+                    onClick = onAdd,
+                    expanded = !listState.canScrollBackward,
+                    icon = { Icon(Icons.Outlined.Add, contentDescription = null) },
+                    text = { Text(stringResource(R.string.queue_add)) },
+                )
             }
         },
     ) { padding ->
@@ -146,7 +190,7 @@ internal fun QueueContent(
                 Column(Modifier.fillMaxSize()) {
                     state.banner?.let { ConnectionBanner(it) }
                     when {
-                        !state.loaded -> CenteredColumn { LoadingFeedback() }
+                        !state.loaded -> CenteredColumn { LoadingBlock() }
                         !state.hasServer -> SetupState(onOpenSettings)
                         else -> PullToRefreshBox(
                             isRefreshing = state.isRefreshing,
@@ -154,16 +198,19 @@ internal fun QueueContent(
                             modifier = Modifier.fillMaxSize(),
                         ) {
                             LazyColumn(
+                                state = listState,
                                 modifier = Modifier.fillMaxSize(),
                                 // Room below the last card for the FAB.
-                                contentPadding = PaddingValues(start = gutter, end = gutter, top = 12.dp, bottom = 96.dp),
+                                contentPadding = PaddingValues(start = gutter, end = gutter, top = 4.dp, bottom = 104.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
                                 if (state.sections.isEmpty()) {
-                                    item(key = "empty") { EmptyQueue(state) }
+                                    item(key = "empty") { EmptyQueue(state, onAdd) }
                                 } else {
                                     for (section in state.sections) {
-                                        item(key = "header:${section.kind.name}") { SectionHeader(section.kind) }
+                                        item(key = "header:${section.kind.name}") {
+                                            SectionHeader(section.kind, section.items.sumOf { it.jobCount }, Modifier.animateItem())
+                                        }
                                         for (item in section.items) {
                                             when (item) {
                                                 is JobItem -> item(key = item.key, contentType = "job") {
@@ -172,6 +219,7 @@ internal fun QueueContent(
                                                         onPause = { onPause(item.job.id) },
                                                         onResume = { onResume(item.job.id) },
                                                         onCancel = { onRequestCancel(item.job) },
+                                                        modifier = Modifier.animateItem(),
                                                     )
                                                 }
                                                 is BatchGroup -> {
@@ -190,13 +238,14 @@ internal fun QueueContent(
                                                             onPauseAll = { onPauseAll(item.batchId) },
                                                             onResumeAll = { onResumeAll(item.batchId) },
                                                             onCancelAll = { onRequestCancelAll(item) },
+                                                            modifier = Modifier.animateItem(),
                                                         )
                                                     }
                                                     if (expanded) {
                                                         items(item.jobs, key = { "${item.key}:job:${it.id}" }, contentType = { "batch-job" }) { job ->
-                                                            Card(
-                                                                modifier = Modifier.fillMaxWidth().padding(start = 12.dp),
-                                                                shape = RoundedCornerShape(16.dp),
+                                                            AppCard(
+                                                                modifier = Modifier.fillMaxWidth().padding(start = 16.dp).animateItem(),
+                                                                color = MaterialTheme.colorScheme.surfaceContainer,
                                                             ) {
                                                                 JobDetails(
                                                                     job = job,
@@ -222,17 +271,22 @@ internal fun QueueContent(
     }
 }
 
+private val QueueItem.jobCount: Int
+    get() = when (this) {
+        is JobItem -> 1
+        is BatchGroup -> jobs.size
+    }
+
 @Composable
 private fun ConnectionBanner(banner: QueueBanner) {
     val description = stringResource(R.string.queue_cd_banner, banner.text)
+    val colors = MaterialTheme.colorScheme
     Surface(
-        color = if (banner.connecting) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
-        contentColor = if (banner.connecting) {
-            MaterialTheme.colorScheme.onSecondaryContainer
-        } else {
-            MaterialTheme.colorScheme.onErrorContainer
-        },
+        color = if (banner.connecting) colors.secondaryContainer else colors.errorContainer,
+        contentColor = if (banner.connecting) colors.onSecondaryContainer else colors.onErrorContainer,
+        shape = MaterialTheme.shapes.medium,
         modifier = Modifier
+            .padding(horizontal = 16.dp, vertical = 4.dp)
             .fillMaxWidth()
             .clearAndSetSemantics {
                 contentDescription = description
@@ -240,11 +294,15 @@ private fun ConnectionBanner(banner: QueueBanner) {
             },
     ) {
         Row(
-            Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (banner.connecting) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            if (banner.connecting) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(Icons.Outlined.WifiOff, contentDescription = null, modifier = Modifier.size(18.dp))
+            }
             Text(banner.text, style = MaterialTheme.typography.labelLarge)
         }
     }
@@ -253,24 +311,42 @@ private fun ConnectionBanner(banner: QueueBanner) {
 @Composable
 private fun SetupState(onOpenSettings: () -> Unit) {
     CenteredColumn {
-        EmptyState(Icons.Outlined.CloudOff, R.string.queue_setup_title, R.string.queue_setup_body)
-        Button(onClick = onOpenSettings) { Text(stringResource(R.string.queue_setup_action)) }
+        EmptyState(
+            icon = Icons.Outlined.CloudOff,
+            title = stringResource(R.string.queue_setup_title),
+            body = stringResource(R.string.queue_setup_body),
+            actions = { Button(onClick = onOpenSettings) { Text(stringResource(R.string.queue_setup_action)) } },
+        )
     }
 }
 
 @Composable
-private fun LazyItemScope.EmptyQueue(state: QueueUiState) {
+private fun LazyItemScope.EmptyQueue(state: QueueUiState, onAdd: () -> Unit) {
     Column(
-        modifier = Modifier.fillParentMaxSize().padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+        modifier = Modifier.fillParentMaxSize(),
+        verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         when {
-            state.hasSnapshot -> EmptyState(Icons.Outlined.Download, R.string.queue_empty_title, R.string.queue_empty_body)
-            state.connecting -> {
-                LoadingFeedback()
-            }
-            else -> EmptyState(Icons.Outlined.HourglassEmpty, R.string.queue_unavailable_title, R.string.queue_unavailable_body)
+            state.hasSnapshot -> EmptyState(
+                icon = Icons.Outlined.Download,
+                title = stringResource(R.string.queue_empty_title),
+                body = stringResource(R.string.queue_empty_body),
+                actions = {
+                    FilledTonalButton(onClick = onAdd) {
+                        Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text(stringResource(R.string.queue_add), Modifier.padding(start = 8.dp))
+                    }
+                },
+            )
+            state.connecting -> LoadingBlock()
+            else -> EmptyState(
+                icon = Icons.Outlined.HourglassEmpty,
+                title = stringResource(R.string.queue_unavailable_title),
+                body = stringResource(R.string.queue_unavailable_body),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                container = MaterialTheme.colorScheme.surfaceContainerHighest,
+            )
         }
     }
 }
@@ -278,26 +354,14 @@ private fun LazyItemScope.EmptyQueue(state: QueueUiState) {
 @Composable
 private fun CenteredColumn(content: @Composable () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) { content() }
 }
 
 @Composable
-private fun EmptyState(icon: ImageVector, title: Int, body: Int) {
-    Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-    Text(stringResource(title), style = MaterialTheme.typography.titleMedium)
-    Text(
-        stringResource(body),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        textAlign = TextAlign.Center,
-    )
-}
-
-@Composable
-private fun SectionHeader(kind: QueueSectionKind) {
+private fun SectionHeader(kind: QueueSectionKind, count: Int, modifier: Modifier = Modifier) {
     val label = stringResource(
         when (kind) {
             QueueSectionKind.Active -> R.string.queue_section_active
@@ -305,12 +369,51 @@ private fun SectionHeader(kind: QueueSectionKind) {
             QueueSectionKind.Paused -> R.string.queue_section_paused
         },
     )
-    Text(
-        label,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 8.dp).semantics { heading() },
-    )
+    val accent = statusAccent(kind.status).accent
+    Row(
+        modifier.padding(start = 4.dp, top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(accent))
+        Text(
+            label,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.semantics { heading() },
+        )
+        Text(count.toString(), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+private val QueueSectionKind.status: JobStatus
+    get() = when (this) {
+        QueueSectionKind.Active -> JobStatus.DOWNLOADING
+        QueueSectionKind.Queued -> JobStatus.PENDING
+        QueueSectionKind.Paused -> JobStatus.PAUSED
+    }
+
+/** How a job in one state is tinted and which glyph says what it is doing. */
+private data class StatusAccent(val accent: Color, val container: Color, val onContainer: Color, val icon: ImageVector)
+
+@Composable
+private fun statusAccent(status: JobStatus): StatusAccent {
+    val c = MaterialTheme.colorScheme
+    val s = MaterialTheme.statusColors
+    return when (status) {
+        JobStatus.DOWNLOADING -> StatusAccent(c.primary, c.primaryContainer, c.onPrimaryContainer, Icons.Outlined.Download)
+        JobStatus.PROCESSING -> StatusAccent(c.tertiary, c.tertiaryContainer, c.onTertiaryContainer, Icons.Outlined.Autorenew)
+        JobStatus.PAUSED -> StatusAccent(s.warning, s.warningContainer, s.onWarningContainer, Icons.Outlined.PauseCircle)
+        JobStatus.PENDING -> StatusAccent(c.outline, c.surfaceContainerHighest, c.onSurfaceVariant, Icons.Outlined.Schedule)
+        JobStatus.COMPLETED -> StatusAccent(s.success, s.successContainer, s.onSuccessContainer, Icons.Outlined.Download)
+        JobStatus.FAILED, JobStatus.CANCELLED -> StatusAccent(c.error, c.errorContainer, c.onErrorContainer, Icons.Outlined.Close)
+    }
+}
+
+private fun layoutIcon(layout: String?): ImageVector = when (layout) {
+    "movie" -> Icons.Outlined.Movie
+    "tv" -> Icons.Outlined.Tv
+    else -> Icons.Outlined.Folder
 }
 
 @Composable
@@ -319,8 +422,9 @@ private fun JobCard(
     onPause: () -> Unit,
     onResume: () -> Unit,
     onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+    AppCard(modifier = modifier.fillMaxWidth()) {
         JobDetails(job, onPause, onResume, onCancel)
     }
 }
@@ -334,36 +438,45 @@ private fun JobDetails(
     onCancel: () -> Unit,
     showCategory: Boolean = true,
 ) {
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(job.heading, style = MaterialTheme.typography.titleMedium)
-        job.secondary?.let {
-            Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val accent = statusAccent(job.status)
+    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
+            IconTile(layoutIcon(job.layout), container = accent.container, content = accent.onContainer)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(job.heading, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                job.secondary?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
-            if (showCategory) {
-                Text(job.categoryLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            StatusBadge(job)
+            StatusBadge(job, accent)
+            if (showCategory) Pill(job.categoryLabel, icon = Icons.Outlined.Folder)
         }
-        if (job.showsProgressBar) ProgressRow(job.progress, job.indeterminate, job.percentLabel)
-        job.stats?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        if (job.showsProgressBar) ProgressRow(job.progress, job.indeterminate, job.percentLabel, accent.accent)
+        StatsRow(job)
         if (job.actions.isNotEmpty()) {
-            FlowRow(
+            Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 for (action in job.actions) {
                     when (action) {
-                        JobAction.Pause -> ActionButton(R.string.queue_action_pause, R.string.queue_cd_pause, job.heading, onPause)
-                        JobAction.Resume -> ActionButton(R.string.queue_action_resume, R.string.queue_cd_resume, job.heading, onResume)
-                        JobAction.Cancel -> ActionButton(R.string.queue_action_cancel, R.string.queue_cd_cancel, job.heading, onCancel)
+                        JobAction.Pause -> ActionButton(R.string.queue_action_pause, R.string.queue_cd_pause, job.heading, Icons.Outlined.Pause, onClick = onPause)
+                        JobAction.Resume -> ActionButton(R.string.queue_action_resume, R.string.queue_cd_resume, job.heading, Icons.Outlined.PlayArrow, tonal = true, onClick = onResume)
+                        JobAction.Cancel -> ActionButton(R.string.queue_action_cancel, R.string.queue_cd_cancel, job.heading, Icons.Outlined.Close, destructive = true, onClick = onCancel)
                     }
                 }
             }
@@ -371,51 +484,95 @@ private fun JobDetails(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun StatusBadge(job: JobCardModel) {
-    val active = job.status == JobStatus.DOWNLOADING || job.status == JobStatus.PROCESSING
-    Surface(
-        color = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-        contentColor = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-        shape = RoundedCornerShape(8.dp),
-    ) {
-        Text(job.statusLabel, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+private fun StatsRow(job: JobCardModel) {
+    val hasParts = job.speed != null || job.eta != null || job.size != null
+    if (hasParts) {
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            job.speed?.let { Stat(Icons.Outlined.Speed, it) }
+            job.eta?.let { Stat(Icons.Outlined.Timer, it) }
+            job.size?.let { Stat(Icons.Outlined.Storage, it) }
+        }
+    } else {
+        job.stats?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
 @Composable
-private fun LoadingFeedback() {
-    CircularProgressIndicator(Modifier.size(32.dp))
-    Text(stringResource(R.string.a11y_loading), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun Stat(icon: ImageVector, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+        Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }
 
 @Composable
-private fun ActionButton(label: Int, description: Int, name: String, onClick: () -> Unit) {
+private fun StatusBadge(job: JobCardModel, accent: StatusAccent) {
+    Pill(job.statusLabel, icon = accent.icon, container = accent.container, content = accent.onContainer)
+}
+
+@Composable
+private fun ActionButton(
+    label: Int,
+    description: Int,
+    name: String,
+    icon: ImageVector,
+    tonal: Boolean = false,
+    destructive: Boolean = false,
+    onClick: () -> Unit,
+) {
     val cd = stringResource(description, name)
-    TextButton(onClick = onClick, modifier = Modifier.semantics { contentDescription = cd }) {
-        Text(stringResource(label))
+    val content: @Composable () -> Unit = {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        Text(stringResource(label), Modifier.padding(start = 6.dp))
+    }
+    val semantics = Modifier.semantics { contentDescription = cd }
+    when {
+        tonal -> FilledTonalButton(onClick = onClick, modifier = semantics, content = { content() })
+        destructive -> TextButton(
+            onClick = onClick,
+            modifier = semantics,
+            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            content = { content() },
+        )
+        else -> TextButton(onClick = onClick, modifier = semantics, content = { content() })
     }
 }
 
 /** Determinate bars animate between updates; an unknown [progress] with [indeterminate] shows the moving bar. */
 @Composable
-private fun ProgressRow(progress: Float?, indeterminate: Boolean, percentLabel: String?) {
+private fun ProgressRow(progress: Float?, indeterminate: Boolean, percentLabel: String?, color: Color) {
     val description = if (indeterminate || progress == null) {
         stringResource(R.string.queue_cd_finishing)
     } else {
         stringResource(R.string.queue_cd_progress, percentInt(progress))
     }
+    val barModifier = Modifier.height(8.dp).clip(CircleShape)
+    val track = MaterialTheme.colorScheme.surfaceContainerHighest
     Row(
         Modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = description },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (indeterminate || progress == null) {
-            LinearProgressIndicator(Modifier.weight(1f))
+            LinearProgressIndicator(barModifier.weight(1f), color = color, trackColor = track)
         } else {
             val animated by animateFloatAsState(progress, animationSpec = tween(durationMillis = 500), label = "progress")
-            LinearProgressIndicator(progress = { animated }, modifier = Modifier.weight(1f))
-            percentLabel?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
+            LinearProgressIndicator(
+                progress = { animated },
+                modifier = barModifier.weight(1f),
+                color = color,
+                trackColor = track,
+                drawStopIndicator = {},
+            )
+            percentLabel?.let { Text(it, style = MaterialTheme.typography.labelLarge, color = color) }
         }
     }
 }
@@ -428,54 +585,61 @@ private fun BatchGroupCard(
     onPauseAll: () -> Unit,
     onResumeAll: () -> Unit,
     onCancelAll: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val toggleLabel = stringResource(if (expanded) R.string.queue_batch_collapse else R.string.queue_batch_expand, group.title)
     val canPause = group.jobs.any { JobAction.Pause in it.actions }
     val canResume = group.jobs.any { JobAction.Resume in it.actions }
+    val accent = statusAccent(group.section.status)
+    val chevron by animateFloatAsState(if (expanded) 180f else 0f, label = "chevron")
 
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
-        Column(Modifier.padding(vertical = 8.dp)) {
-            Row(
-                Modifier.fillMaxWidth().clickable(onClickLabel = toggleLabel, onClick = onToggleExpanded).padding(start = 16.dp, end = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f).padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(group.title, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        pluralStringResource(R.plurals.queue_episode_count, group.episodeCount, group.episodeCount),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    group.progress?.let { ProgressRow(it, indeterminate = false, percentLabel = group.percentLabel) }
-                }
-                Icon(
-                    if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+    AppCard(modifier = modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().clickable(onClickLabel = toggleLabel, onClick = onToggleExpanded).padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            IconTile(Icons.Outlined.Layers, container = accent.container, content = accent.onContainer)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(group.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(
+                    pluralStringResource(R.plurals.queue_episode_count, group.episodeCount, group.episodeCount),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Box {
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.queue_batch_menu, group.title))
-                    }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        if (canPause) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.queue_batch_pause_all)) },
-                                onClick = { menuOpen = false; onPauseAll() },
-                            )
-                        }
-                        if (canResume) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.queue_batch_resume_all)) },
-                                onClick = { menuOpen = false; onResumeAll() },
-                            )
-                        }
+                group.progress?.let { ProgressRow(it, indeterminate = false, percentLabel = group.percentLabel, color = accent.accent) }
+            }
+            Icon(
+                Icons.Outlined.ExpandMore,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.rotate(chevron),
+            )
+            Box {
+                IconButton(onClick = { menuOpen = true }) {
+                    Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.queue_batch_menu, group.title))
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    if (canPause) {
                         DropdownMenuItem(
-                            text = { Text(stringResource(R.string.queue_batch_cancel_all)) },
-                            onClick = { menuOpen = false; onCancelAll() },
+                            text = { Text(stringResource(R.string.queue_batch_pause_all)) },
+                            leadingIcon = { Icon(Icons.Outlined.Pause, contentDescription = null) },
+                            onClick = { menuOpen = false; onPauseAll() },
                         )
                     }
+                    if (canResume) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.queue_batch_resume_all)) },
+                            leadingIcon = { Icon(Icons.Outlined.PlayArrow, contentDescription = null) },
+                            onClick = { menuOpen = false; onResumeAll() },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.queue_batch_cancel_all)) },
+                        leadingIcon = { Icon(Icons.Outlined.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                        onClick = { menuOpen = false; onCancelAll() },
+                    )
                 }
             }
         }
@@ -492,9 +656,15 @@ private fun CancelDialog(request: CancelRequest, onConfirm: () -> Unit, onDismis
     }
     AlertDialog(
         onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Outlined.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
         title = { Text(title) },
         text = { Text(body) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.queue_cancel_confirm)) } },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            ) { Text(stringResource(R.string.queue_cancel_confirm)) }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.queue_cancel_keep)) } },
     )
 }
@@ -512,6 +682,10 @@ private fun previewQueueJob(id: String = "preview", status: JobStatus = JobStatu
     percentLabel = "64%",
     stats = "3.1 MiB/s · 1:52 left · 463 MiB / 720 MiB",
     actions = if (status == JobStatus.PAUSED) listOf(JobAction.Resume, JobAction.Cancel) else listOf(JobAction.Pause, JobAction.Cancel),
+    layout = "tv",
+    speed = "3.1 MiB/s",
+    eta = "1:52 left",
+    size = "463 MiB / 720 MiB",
 )
 
 @Composable
@@ -548,7 +722,7 @@ private fun ExpandedBatchPreview() {
                     )
                 }
                 items(group.jobs, key = { it.id }) { job ->
-                    Card(Modifier.fillMaxWidth().padding(start = 12.dp), shape = RoundedCornerShape(16.dp)) {
+                    AppCard(Modifier.fillMaxWidth().padding(start = 16.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
                         JobDetails(job, onPause = {}, onResume = {}, onCancel = {}, showCategory = false)
                     }
                 }

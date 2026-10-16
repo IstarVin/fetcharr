@@ -18,7 +18,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Subtitles
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -46,6 +53,9 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.istarvin.fetcharr.ui.common.screenGutter
 import com.istarvin.fetcharr.R
+import com.istarvin.fetcharr.ui.common.AppCard
+import com.istarvin.fetcharr.ui.common.EmptyState
+import com.istarvin.fetcharr.ui.common.LoadingBlock
 import com.istarvin.fetcharr.data.network.ApiError
 import com.istarvin.fetcharr.ui.common.ScreenFrame
 import com.istarvin.fetcharr.ui.incoming.FormFooter
@@ -157,7 +167,8 @@ internal fun AddContent(
                                 )
                             }
                             Button(onClick = onSubmit, enabled = state.canSubmit, modifier = Modifier.heightIn(min = 48.dp)) {
-                                Text(stringResource(R.string.add_submit))
+                                Icon(Icons.Outlined.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Text(stringResource(R.string.add_submit), Modifier.padding(start = 8.dp))
                             }
                         }
                     }
@@ -167,14 +178,7 @@ internal fun AddContent(
     ) { padding ->
         ScreenFrame(Modifier.padding(padding).consumeWindowInsets(padding)) {
             if (!state.settingsLoaded) {
-                Column(
-                    Modifier.align(Alignment.Center).padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    CircularProgressIndicator()
-                    Text(stringResource(R.string.a11y_loading), style = MaterialTheme.typography.bodyMedium)
-                }
+                LoadingBlock(Modifier.align(Alignment.Center).padding(24.dp))
                 return@ScreenFrame
             }
             Column(
@@ -182,35 +186,41 @@ internal fun AddContent(
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = screenGutter(), vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 if (!state.serverConfigured) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(stringResource(R.string.incoming_no_server_title), style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            stringResource(R.string.incoming_no_server_body),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Button(onClick = onOpenSettings, modifier = Modifier.heightIn(min = 48.dp)) {
-                            Text(stringResource(R.string.incoming_open_settings))
-                        }
-                    }
+                    EmptyState(
+                        icon = Icons.Outlined.CloudOff,
+                        title = stringResource(R.string.incoming_no_server_title),
+                        body = stringResource(R.string.incoming_no_server_body),
+                        modifier = Modifier.fillMaxWidth().padding(top = 64.dp),
+                        actions = {
+                            Button(onClick = onOpenSettings, modifier = Modifier.heightIn(min = 48.dp)) {
+                                Text(stringResource(R.string.incoming_open_settings))
+                            }
+                        },
+                    )
                     return@Column
                 }
-                OutlinedTextField(
-                    value = state.url,
-                    onValueChange = onUrl,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.add_url)) },
-                    singleLine = true,
-                    isError = state.urlInvalid,
-                    supportingText = if (state.urlInvalid) {
-                        { Text(stringResource(R.string.add_url_invalid)) }
-                    } else null,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                )
-                FormSection(stringResource(R.string.field_category)) {
+                AppCard {
+                    Column(Modifier.padding(16.dp)) {
+                        OutlinedTextField(
+                            value = state.url,
+                            onValueChange = onUrl,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text(stringResource(R.string.add_url)) },
+                            leadingIcon = { Icon(Icons.Outlined.Link, contentDescription = null) },
+                            singleLine = true,
+                            isError = state.urlInvalid,
+                            supportingText = if (state.urlInvalid) {
+                                { Text(stringResource(R.string.add_url_invalid)) }
+                            } else null,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        )
+                    }
+                }
+                SectionCard {
+                FormSection(stringResource(R.string.field_category), Icons.Outlined.Folder) {
                     when {
                         state.categoriesLoading && state.categories.isEmpty() -> {
                             Text(stringResource(R.string.add_categories_loading))
@@ -243,8 +253,10 @@ internal fun AddContent(
                         else -> CategoryChips(state.categories, state.categoryId, onSelectCategory)
                     }
                 }
-                state.layout?.let { ItemFormFields(it, state.form, actions) }
-                FormSection(stringResource(R.string.add_headers)) {
+                }
+                state.layout?.let { layout -> SectionCard { ItemFormFields(layout, state.form, actions) } }
+                SectionCard {
+                FormSection(stringResource(R.string.add_headers), Icons.Outlined.Code) {
                     state.headers.forEach { row ->
                         ResponsiveFormRow(
                             first = { fieldModifier ->
@@ -273,12 +285,14 @@ internal fun AddContent(
                             },
                         )
                     }
-                    OutlinedButton(onClick = onAddHeader, modifier = Modifier.heightIn(min = 48.dp)) {
+                    FilledTonalButton(onClick = onAddHeader, modifier = Modifier.heightIn(min = 48.dp)) {
                         Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Text(stringResource(R.string.add_header_add), modifier = Modifier.padding(start = 8.dp))
                     }
                 }
-                FormSection(stringResource(R.string.add_subtitles)) {
+                }
+                SectionCard {
+                FormSection(stringResource(R.string.add_subtitles), Icons.Outlined.Subtitles) {
                     state.subtitles.forEach { row ->
                         ResponsiveFormRow(
                             first = { fieldModifier ->
@@ -312,12 +326,19 @@ internal fun AddContent(
                     if (state.subtitleInvalid) {
                         Text(stringResource(R.string.add_subtitle_url_invalid), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     }
-                    OutlinedButton(onClick = onAddSubtitle, modifier = Modifier.heightIn(min = 48.dp)) {
+                    FilledTonalButton(onClick = onAddSubtitle, modifier = Modifier.heightIn(min = 48.dp)) {
                         Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Text(stringResource(R.string.add_subtitle_add), modifier = Modifier.padding(start = 8.dp))
                     }
                 }
+                }
             }
         }
     }
+}
+
+/** A card around one group of related fields. */
+@Composable
+private fun SectionCard(content: @Composable () -> Unit) {
+    AppCard { Column(Modifier.padding(16.dp)) { content() } }
 }
