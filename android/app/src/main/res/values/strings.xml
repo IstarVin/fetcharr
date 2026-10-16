@@ -174,9 +174,12 @@
     <string name="a11y_sending">Sending download request</string>
     <string name="settings_group_ytdlp">yt-dlp</string>
     <string name="settings_ytdlp_version">yt-dlp version</string>
-    <string name="settings_ytdlp_update">Update now</string>
+    <string name="settings_ytdlp_update">Update to latest</string>
     <string name="settings_ytdlp_updating">Updating…</string>
-    <string name="settings_ytdlp_updating_desc">Updating yt-dlp</string>
+    <string name="settings_ytdlp_check">Check for update</string>
+    <string name="settings_ytdlp_checking">Checking…</string>
+    <string name="settings_ytdlp_latest">Latest version</string>
+    <string name="settings_ytdlp_available">Version %1$s is available</string>
     <string name="settings_ytdlp_updated">Updated to %1$s</string>
     <string name="settings_ytdlp_updated_unknown">yt-dlp updated</string>
     <string name="settings_ytdlp_unknown">Unknown</string>

@@ -81,7 +81,7 @@ class SettingsViewModelTest {
     }
 
     private fun ytdlpResult(v: SettingsViewModel): YtdlpUpdateStatus =
-        await { v.uiState.first { it.ytdlpUpdate !is YtdlpUpdateStatus.Idle && it.ytdlpUpdate !is YtdlpUpdateStatus.Running } }.ytdlpUpdate
+        await { v.uiState.first { it.ytdlpUpdate !is YtdlpUpdateStatus.Idle && it.ytdlpUpdate !is YtdlpUpdateStatus.Running && it.ytdlpUpdate !is YtdlpUpdateStatus.Checking } }.ytdlpUpdate
 
     @Test
     fun aboutAndYtdlpShowInfo() {
@@ -108,13 +108,55 @@ class SettingsViewModelTest {
                 .setBody(infoJson().replace("2026.09.30", "2026.10.01")),
         )
         v.updateYtdlp()
-        assertEquals(YtdlpUpdateStatus.Updated("2026.09.30"), ytdlpResult(v))
-        assertEquals("2026.10.01", await { v.uiState.first { it.ytdlpVersion == "2026.10.01" } }.ytdlpVersion)
+        assertEquals(YtdlpUpdateStatus.Latest("2026.09.30"), ytdlpResult(v))
+        assertEquals("2026.09.30", v.uiState.value.ytdlpVersion) // update response is authoritative
         server.takeRequest() // /api/info
         val post = server.takeRequest()
         assertEquals("POST", post.method)
         assertEquals("/api/system/ytdlp/update", post.path)
         assertEquals("Bearer tok", post.getHeader("Authorization"))
+    }
+
+    @Test
+    fun ytdlpCheckShowsLatestWithoutUpdating() {
+        val v = vmWithSavedServer()
+        server.enqueue(MockResponse().setBody(
+            """{"current":"2026.09.30","latest":"2026.09.30","update_available":false}""",
+        ))
+        v.checkYtdlpUpdate()
+        assertEquals(YtdlpUpdateStatus.Latest("2026.09.30"), ytdlpResult(v))
+        server.takeRequest()
+        val check = server.takeRequest()
+        assertEquals("GET", check.method)
+        assertEquals("/api/system/ytdlp/check", check.path)
+        assertEquals("Bearer tok", check.getHeader("Authorization"))
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun ytdlpAvailableUpdateCanBeRetriedAfterBusy() {
+        val v = vmWithSavedServer()
+        server.enqueue(MockResponse().setBody(
+            """{"current":"2026.09.30","latest":"2026.10.01","update_available":true}""",
+        ))
+        v.checkYtdlpUpdate()
+        assertEquals(YtdlpUpdateStatus.Available("2026.09.30", "2026.10.01"), ytdlpResult(v))
+        server.enqueue(MockResponse().setResponseCode(409).setBody(Fixtures.text("error-ytdlp_busy.json")))
+        v.updateYtdlp()
+        assertEquals(YtdlpUpdateStatus.Failed(ApiError.YtdlpBusy, "2026.10.01"), ytdlpResult(v))
+        server.enqueue(MockResponse().setBody("""{"previous":"2026.09.30","current":"2026.10.01"}"""))
+        server.enqueue(MockResponse().setBody(infoJson().replace("2026.09.30", "2026.10.01")))
+        v.updateYtdlp()
+        assertEquals(YtdlpUpdateStatus.Latest("2026.10.01"), ytdlpResult(v))
+        assertEquals("2026.10.01", v.uiState.value.ytdlpVersion)
+    }
+
+    @Test
+    fun ytdlpCheckFailureDoesNotClaimLatest() {
+        val v = vmWithSavedServer()
+        server.enqueue(MockResponse().setResponseCode(500).setBody("boom"))
+        v.checkYtdlpUpdate()
+        assertTrue(ytdlpResult(v) is YtdlpUpdateStatus.Failed)
     }
 
     @Test
@@ -251,9 +293,21 @@ class SettingsViewModelTest {
     @Test
     fun editingResetsTestStatus() {
         server.enqueue(MockResponse().setResponseCode(200).setBody("<html/>"))
-        runTest()
+        assertEquals(TestConnectionResult.NotFetcharr, runTest())
         vm.onTokenChange("x")
-        assertEquals(TestStatus.Idle, vm.uiState.value.testStatus)
+        // uiState combines flows asynchronously; wait until it reflects the edit before asserting.
+        val edited = await { vm.uiState.first { it.token == "x" } }
+        assertEquals(TestStatus.Idle, edited.testStatus)
+    }
+
+    @Test
+    fun editingUrlResetsTestStatus() {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html/>"))
+        assertEquals(TestConnectionResult.NotFetcharr, runTest())
+        val newUrl = "http://$hostPort/changed"
+        vm.onUrlChange(newUrl)
+        val edited = await { vm.uiState.first { it.url == newUrl } }
+        assertEquals(TestStatus.Idle, edited.testStatus)
     }
 
     @Test

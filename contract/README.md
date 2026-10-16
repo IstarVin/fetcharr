@@ -12,6 +12,7 @@ Wire-format fixtures shared by the server and Android tests. Any change here is 
 | `batch-create-response.json` | `201` from `POST /api/jobs/batch` (2 created, 1 skipped) | server §6.3 |
 | `error-<code>.json` (invalid_request, unauthorized, not_found, invalid_state, duplicate, ytdlp_unmanaged, ytdlp_busy) | Error envelope | server §6.1 |
 | `ws-snapshot.json`, `ws-job_added.json`, `ws-job_updated.json`, `ws-job_removed.json` | WebSocket messages | server §7 |
+| `ytdlp-check.json` | `GET /api/system/ytdlp/check` | server §6.3 |
 | `ytdlp-update.json` | `POST /api/system/ytdlp/update` | server §6.3 |
 | `create-job-movie.json`, `create-job-tv.json`, `create-job-flat.json` | `POST /api/jobs` bodies, one per layout | server §2.1, §6.3 |
 | `create-batch.json` | `POST /api/jobs/batch` body (episode 3 is the duplicate that gets skipped) | server §6.3 |

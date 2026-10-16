@@ -39,3 +39,11 @@ data class HealthDto(val status: String)
 /** `POST /api/system/ytdlp/update`. */
 @Serializable
 data class YtdlpUpdateResponse(val previous: String? = null, val current: String? = null)
+
+/** `GET /api/system/ytdlp/check`. */
+@Serializable
+data class YtdlpCheckResponse(
+    val current: String,
+    val latest: String,
+    @SerialName("update_available") val updateAvailable: Boolean,
+)

@@ -460,6 +460,9 @@ Clears history. Deletes every finished job matching `?status=` (default `complet
 #### `POST /api/batches/{batch_id}/pause` · `/resume` · `/cancel` · `/retry`
 Applies the action to each job in the batch where the transition is allowed and skips the rest. Returns `200 { "jobs": [ …updated jobs… ] }`, or `404` if the batch doesn't exist.
 
+#### `GET /api/system/ytdlp/check`
+Checks the latest stable yt-dlp release without installing it or interrupting downloads. Returns `200 {"current": "2026.09.01", "latest": "2026.09.30", "update_available": true}`. Returns `409 ytdlp_unmanaged` when `ytdlp.binary` is set. Both versions must be available for a successful response.
+
 #### `POST /api/system/ytdlp/update`
 Updates the managed yt-dlp binary right away. Returns `200 {"previous": "2026.09.01", "current": "2026.09.30"}`. Returns `409 ytdlp_unmanaged` when `ytdlp.binary` is set, and `409 ytdlp_busy` while any job is `downloading`. A manual update never waits; the client tries again later.
 

@@ -35,12 +35,18 @@ sealed interface TestStatus {
 sealed interface YtdlpUpdateStatus {
     data object Idle : YtdlpUpdateStatus
 
+    data object Checking : YtdlpUpdateStatus
+
+    data class Available(val current: String, val latest: String) : YtdlpUpdateStatus
+
+    data class Latest(val version: String) : YtdlpUpdateStatus
+
     data object Running : YtdlpUpdateStatus
 
     /** [version] is the version now installed (null if the server didn't say). */
     data class Updated(val version: String?) : YtdlpUpdateStatus
 
-    data class Failed(val error: ApiError) : YtdlpUpdateStatus
+    data class Failed(val error: ApiError, val latest: String? = null) : YtdlpUpdateStatus
 }
 
 data class SettingsUiState(
@@ -59,7 +65,7 @@ data class SettingsUiState(
     /** From the last successful `/api/info`; null until one arrives. */
     val serverVersion: String? = null,
     val ytdlpVersion: String? = null,
-    /** False when the server didn't report yt-dlp as managed (or info is unknown): "Update now" is hidden. */
+    /** False when the server didn't report yt-dlp as managed (or info is unknown): update controls are hidden. */
     val ytdlpManaged: Boolean = false,
     val ytdlpUpdate: YtdlpUpdateStatus = YtdlpUpdateStatus.Idle,
 )
@@ -84,6 +90,7 @@ class SettingsViewModel @Inject constructor(
     private val form = MutableStateFlow(Form())
     private val ytdlpUpdate = MutableStateFlow<YtdlpUpdateStatus>(YtdlpUpdateStatus.Idle)
     private var testJob: Job? = null
+    private var ytdlpJob: Job? = null
 
     val uiState: StateFlow<SettingsUiState> = combine(form, settings.settings, categories.info, ytdlpUpdate) { f, s, info, update ->
         SettingsUiState(
@@ -101,13 +108,24 @@ class SettingsViewModel @Inject constructor(
             defaultMovieCategoryId = s.defaultMovieCategoryId,
             defaultTvCategoryId = s.defaultTvCategoryId,
             serverVersion = info?.version,
-            ytdlpVersion = info?.ytdlpVersion,
-            ytdlpManaged = info?.ytdlpManaged == true && update != YtdlpUpdateStatus.Failed(ApiError.YtdlpUnmanaged),
+            ytdlpVersion = when (update) {
+                is YtdlpUpdateStatus.Updated -> update.version ?: info?.ytdlpVersion
+                is YtdlpUpdateStatus.Latest -> update.version
+                is YtdlpUpdateStatus.Available -> update.current
+                else -> info?.ytdlpVersion
+            },
+            ytdlpManaged = info?.ytdlpManaged == true && (update as? YtdlpUpdateStatus.Failed)?.error != ApiError.YtdlpUnmanaged,
             ytdlpUpdate = update,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
     init {
+        viewModelScope.launch {
+            settings.config.collect {
+                ytdlpJob?.cancel()
+                ytdlpUpdate.value = YtdlpUpdateStatus.Idle
+            }
+        }
         // Make sure the About/yt-dlp rows have data even when the sync connection hasn't fetched /api/info yet.
         viewModelScope.launch { if (categories.info.value == null) categories.refresh() }
         viewModelScope.launch {
@@ -176,17 +194,41 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settings.setDefaultTvCategoryId(id) }
     }
 
+    fun checkYtdlpUpdate() {
+        if (ytdlpUpdate.value == YtdlpUpdateStatus.Checking || ytdlpUpdate.value == YtdlpUpdateStatus.Running) return
+        ytdlpUpdate.value = YtdlpUpdateStatus.Checking
+        ytdlpJob = viewModelScope.launch {
+            ytdlpUpdate.value = when (val result = system.checkYtdlpUpdate()) {
+                is ApiResult.Success -> if (result.value.updateAvailable) {
+                    YtdlpUpdateStatus.Available(result.value.current, result.value.latest)
+                } else {
+                    YtdlpUpdateStatus.Latest(result.value.current)
+                }
+                is ApiResult.Failure -> YtdlpUpdateStatus.Failed(result.error)
+            }
+        }
+    }
+
     /** `POST /api/system/ytdlp/update`, then refreshes `/api/info` so the new version shows. */
     fun updateYtdlp() {
-        if (ytdlpUpdate.value == YtdlpUpdateStatus.Running) return
+        if (ytdlpUpdate.value == YtdlpUpdateStatus.Running || ytdlpUpdate.value == YtdlpUpdateStatus.Checking) return
+        val latest = when (val status = ytdlpUpdate.value) {
+            is YtdlpUpdateStatus.Available -> status.latest
+            is YtdlpUpdateStatus.Failed -> status.latest
+            else -> null
+        }
         ytdlpUpdate.value = YtdlpUpdateStatus.Running
-        viewModelScope.launch {
+        ytdlpJob = viewModelScope.launch {
             when (val result = system.updateYtdlp()) {
                 is ApiResult.Success -> {
                     categories.refresh()
-                    ytdlpUpdate.value = YtdlpUpdateStatus.Updated(result.value.current)
+                    ytdlpUpdate.value = if (!result.value.current.isNullOrBlank()) {
+                        YtdlpUpdateStatus.Latest(result.value.current)
+                    } else {
+                        YtdlpUpdateStatus.Updated(null)
+                    }
                 }
-                is ApiResult.Failure -> ytdlpUpdate.value = YtdlpUpdateStatus.Failed(result.error)
+                is ApiResult.Failure -> ytdlpUpdate.value = YtdlpUpdateStatus.Failed(result.error, latest)
             }
         }
     }

@@ -11,6 +11,7 @@ import com.istarvin.fetcharr.data.network.dto.JobDto
 import com.istarvin.fetcharr.data.network.dto.JobListDto
 import com.istarvin.fetcharr.data.network.dto.PlaybackDto
 import com.istarvin.fetcharr.data.network.dto.RetryRequest
+import com.istarvin.fetcharr.data.network.dto.YtdlpCheckResponse
 import com.istarvin.fetcharr.data.network.dto.YtdlpUpdateResponse
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -103,6 +104,9 @@ interface FetcharrApi {
 
     @POST("batches/{batchId}/retry")
     suspend fun retryBatch(@Path("batchId") batchId: String): BatchJobsResponse
+
+    @GET("system/ytdlp/check")
+    suspend fun checkYtdlpUpdate(): YtdlpCheckResponse
 
     @POST("system/ytdlp/update")
     suspend fun updateYtdlp(): YtdlpUpdateResponse

@@ -25,6 +25,18 @@ type UpdateResult struct {
 	Current  string `json:"current"`
 }
 
+// YtdlpCheckResult reports installed and latest stable versions without updating.
+type YtdlpCheckResult struct {
+	Current         string `json:"current"`
+	Latest          string `json:"latest"`
+	UpdateAvailable bool   `json:"update_available"`
+}
+
+// YtdlpUpdateChecker checks the upstream stable release without changing the binary.
+type YtdlpUpdateChecker interface {
+	LatestVersion(ctx context.Context) (string, error)
+}
+
 // ErrYtdlpBusy is returned by a YtdlpUpdater when a job is downloading; the
 // API maps it to 409 ytdlp_busy.
 var ErrYtdlpBusy = errors.New("ytdlp busy: a job is downloading")
@@ -125,6 +137,7 @@ func New(opts Options) http.Handler {
 		{"POST", "/api/batches/{batch_id}/resume", s.handleBatchAction("resume")},
 		{"POST", "/api/batches/{batch_id}/cancel", s.handleBatchAction("cancel")},
 		{"POST", "/api/batches/{batch_id}/retry", s.handleBatchAction("retry")},
+		{"GET", "/api/system/ytdlp/check", s.handleYtdlpCheck},
 		{"POST", "/api/system/ytdlp/update", s.handleYtdlpUpdate},
 	}
 	if opts.WebSocket != nil {

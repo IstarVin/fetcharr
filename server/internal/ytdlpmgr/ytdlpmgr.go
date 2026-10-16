@@ -412,3 +412,31 @@ func (m *Manager) Wake() {
 	default:
 	}
 }
+
+// LatestVersion resolves GitHub's stable release redirect using HEAD, without
+// downloading an asset, running the binary, or holding the download dispatcher.
+func (m *Manager) LatestVersion(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, versionTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, strings.TrimSuffix(m.baseURL, "/download"), nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("check yt-dlp release: unexpected status %s", resp.Status)
+	}
+	parts := strings.Split(strings.Trim(resp.Request.URL.Path, "/"), "/")
+	if len(parts) < 2 || parts[len(parts)-2] != "tag" {
+		return "", fmt.Errorf("check yt-dlp release: missing release tag")
+	}
+	version := parts[len(parts)-1]
+	if _, err := time.Parse("2006.01.02", version); err != nil {
+		return "", fmt.Errorf("check yt-dlp release: invalid stable version %q", version)
+	}
+	return version, nil
+}

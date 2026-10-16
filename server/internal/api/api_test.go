@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -49,7 +50,7 @@ func TestAuth(t *testing.T) {
 	for _, ep := range []struct{ m, p string }{
 		{"GET", "/api/info"}, {"POST", "/api/jobs"}, {"POST", "/api/jobs/batch"}, {"DELETE", "/api/jobs"},
 		{"GET", "/api/jobs/x"}, {"POST", "/api/jobs/x/pause"}, {"POST", "/api/batches/x/cancel"},
-		{"POST", "/api/system/ytdlp/update"},
+		{"GET", "/api/system/ytdlp/check"}, {"POST", "/api/system/ytdlp/update"},
 	} {
 		if r := e.requestWith(ep.m, ep.p, nil, ""); r.Code != 401 {
 			t.Errorf("%s %s without token = %d, want 401", ep.m, ep.p, r.Code)
@@ -820,4 +821,28 @@ func TestSubtitleLangIsCapped(t *testing.T) {
 	if lang == "" || len(lang) > 16 {
 		t.Errorf("lang = %q (%d bytes), want 1-16 bytes", lang, len(lang))
 	}
+}
+
+func TestYtdlpCheck(t *testing.T) {
+	e := newEnv(t)
+	e.cfg.Ytdlp.Binary = ""
+	for _, tc := range []struct {
+		latest    string
+		available bool
+	}{
+		{"2099.01.01", false}, {"2099.01.02", true}, {"2098.12.31", false},
+	} {
+		e.updater.latest = tc.latest
+		got := e.want(e.request("GET", "/api/system/ytdlp/check", nil), 200).Obj(t)
+		if got["current"] != "2099.01.01" || got["latest"] != tc.latest || got["update_available"] != tc.available {
+			t.Errorf("unexpected check result: %v", got)
+		}
+	}
+	if e.updater.calls != 0 {
+		t.Fatal("checking performed an update")
+	}
+	e.updater.err = errors.New("upstream unavailable")
+	e.want(e.request("GET", "/api/system/ytdlp/check", nil), 500)
+	e.cfg.Ytdlp.Binary = "custom-yt-dlp"
+	e.want(e.request("GET", "/api/system/ytdlp/check", nil), 409)
 }

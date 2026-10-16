@@ -141,3 +141,26 @@ func (s *server) handleYtdlpUpdate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, res)
 	}
 }
+
+func (s *server) handleYtdlpCheck(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.YtdlpManaged() {
+		writeError(w, http.StatusConflict, codeYtdlpUnmanaged, "yt-dlp is not managed: ytdlp.binary is set")
+		return
+	}
+	checker, ok := s.updater.(YtdlpUpdateChecker)
+	if !ok {
+		s.fail(w, r, errors.New("yt-dlp update checking is unavailable"))
+		return
+	}
+	latest, err := checker.LatestVersion(r.Context())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	current := s.ytdlp.get(r.Context(), s.ytdlpBinary())
+	if current == "" {
+		s.fail(w, r, errors.New("cannot read installed yt-dlp version"))
+		return
+	}
+	writeJSON(w, http.StatusOK, YtdlpCheckResult{Current: current, Latest: latest, UpdateAvailable: current < latest})
+}

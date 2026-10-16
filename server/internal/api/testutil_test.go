@@ -74,9 +74,14 @@ func fakeYtdlpPath(t *testing.T) string {
 }
 
 type fakeUpdater struct {
-	res   UpdateResult
-	err   error
-	calls int
+	latest string
+	res    UpdateResult
+	err    error
+	calls  int
+}
+
+func (f *fakeUpdater) LatestVersion(context.Context) (string, error) {
+	return f.latest, f.err
 }
 
 func (f *fakeUpdater) Update(context.Context) (UpdateResult, error) {

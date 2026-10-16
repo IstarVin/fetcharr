@@ -62,8 +62,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -231,7 +232,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel(), onServerSetti
                     }
                 }
 
-                if (state.serverVersion != null) YtdlpSection(state, onUpdate = viewModel::updateYtdlp)
+                if (state.serverVersion != null) YtdlpSection(state, onCheck = viewModel::checkYtdlpUpdate, onUpdate = viewModel::updateYtdlp)
 
                 SectionLabel(stringResource(R.string.settings_group_about))
                 val uriHandler = LocalUriHandler.current
@@ -258,58 +259,73 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel(), onServerSetti
     }
 }
 
-/** yt-dlp version + "Update now". The button is hidden when the server doesn't manage yt-dlp. */
+/** Keeps the version, check result, and next action together without squeezing the row. */
 @Composable
-private fun YtdlpSection(state: SettingsUiState, onUpdate: () -> Unit) {
+private fun YtdlpSection(state: SettingsUiState, onCheck: () -> Unit, onUpdate: () -> Unit) {
     val update = state.ytdlpUpdate
-    val version = state.ytdlpVersion
-        ?: (update as? YtdlpUpdateStatus.Updated)?.version
+    val running = update == YtdlpUpdateStatus.Running
+    val checking = update == YtdlpUpdateStatus.Checking
+    val available = update is YtdlpUpdateStatus.Available ||
+        (update is YtdlpUpdateStatus.Failed && update.latest != null)
     SectionLabel(stringResource(R.string.settings_group_ytdlp))
     AppCard {
         SettingsRow(
             Icons.Outlined.Terminal,
             stringResource(R.string.settings_ytdlp_version),
-            subtitle = version ?: stringResource(R.string.settings_ytdlp_unknown),
-            trailing = if (state.ytdlpManaged) {
-                {
-                    val running = update == YtdlpUpdateStatus.Running
-                    val updatingDesc = stringResource(R.string.settings_ytdlp_updating_desc)
-                    FilledTonalButton(onClick = onUpdate, enabled = !running, modifier = Modifier.heightIn(min = 40.dp)) {
-                        if (running) {
-                            CircularProgressIndicator(
-                                modifier = Modifier
-                                    .size(16.dp)
-                                    .semantics { contentDescription = updatingDesc },
-                                strokeWidth = 2.dp,
-                            )
-                        } else {
-                            Icon(Icons.Outlined.SystemUpdateAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-                        }
-                        Text(
-                            stringResource(if (running) R.string.settings_ytdlp_updating else R.string.settings_ytdlp_update),
-                            Modifier.padding(start = 8.dp),
-                        )
-                    }
-                }
-            } else {
-                null
-            },
+            subtitle = state.ytdlpVersion ?: stringResource(R.string.settings_ytdlp_unknown),
         )
-        when (update) {
-            is YtdlpUpdateStatus.Updated -> Text(
-                update.version?.let { stringResource(R.string.settings_ytdlp_updated, it) }
-                    ?: stringResource(R.string.settings_ytdlp_updated_unknown),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 72.dp, end = 16.dp, bottom = 12.dp),
-            )
-            is YtdlpUpdateStatus.Failed -> Text(
-                update.error.userMessage,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(start = 72.dp, end = 16.dp, bottom = 12.dp),
-            )
-            else -> Unit
+        Column(
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            val statusColors = MaterialTheme.statusColors
+            Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
+                when (update) {
+                    is YtdlpUpdateStatus.Latest -> Pill(
+                        stringResource(R.string.settings_ytdlp_latest),
+                        icon = Icons.Outlined.CheckCircle,
+                        container = statusColors.successContainer,
+                        content = statusColors.onSuccessContainer,
+                    )
+                    is YtdlpUpdateStatus.Available -> Text(
+                        stringResource(R.string.settings_ytdlp_available, update.latest),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    is YtdlpUpdateStatus.Updated -> Text(
+                        stringResource(R.string.settings_ytdlp_updated_unknown),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    is YtdlpUpdateStatus.Failed -> Text(
+                        update.error.userMessage,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    else -> Unit
+                }
+            }
+            if (state.ytdlpManaged) {
+                FilledTonalButton(
+                    onClick = if (available) onUpdate else onCheck,
+                    enabled = !running && !checking,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) {
+                    if (running || checking) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Outlined.SystemUpdateAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
+                    Text(
+                        stringResource(when {
+                            running -> R.string.settings_ytdlp_updating
+                            checking -> R.string.settings_ytdlp_checking
+                            available -> R.string.settings_ytdlp_update
+                            else -> R.string.settings_ytdlp_check
+                        }),
+                        Modifier.padding(start = 8.dp),
+                    )
+                }
+            }
         }
     }
 }
