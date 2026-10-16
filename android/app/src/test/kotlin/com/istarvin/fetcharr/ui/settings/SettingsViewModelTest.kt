@@ -1,6 +1,5 @@
 package com.istarvin.fetcharr.ui.settings
 
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import com.istarvin.fetcharr.data.CategoryRepository
 import com.istarvin.fetcharr.data.SystemRepository
 import com.istarvin.fetcharr.data.network.ApiError
@@ -10,6 +9,7 @@ import com.istarvin.fetcharr.data.network.FetcharrApiFactory
 import com.istarvin.fetcharr.data.network.FetcharrApiProvider
 import com.istarvin.fetcharr.data.network.FetcharrJson
 import com.istarvin.fetcharr.data.network.TestConnectionResult
+import com.istarvin.fetcharr.data.settings.InMemoryPreferencesDataStore
 import com.istarvin.fetcharr.data.settings.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,15 +33,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SettingsViewModelTest {
-    @get:Rule
-    val tmp = TemporaryFolder()
-
     private val scope = CoroutineScope(Job() + Dispatchers.IO)
     private lateinit var server: MockWebServer
     private lateinit var settings: SettingsRepository
@@ -57,7 +53,7 @@ class SettingsViewModelTest {
             .readTimeout(4, TimeUnit.SECONDS)
             .build()
         factory = FetcharrApiFactory(client, FetcharrJson)
-        val dataStore = PreferenceDataStoreFactory.create(scope = scope) { tmp.newFile("settings.preferences_pb") }
+        val dataStore = InMemoryPreferencesDataStore()
         settings = SettingsRepository(dataStore, FetcharrJson, scope)
         vm = newVm()
     }

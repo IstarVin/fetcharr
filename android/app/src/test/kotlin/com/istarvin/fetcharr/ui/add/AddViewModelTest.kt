@@ -20,21 +20,16 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
-import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.TemporaryFolder
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AddViewModelTest {
-    @get:Rule
-    val tmp = TemporaryFolder()
-
     private lateinit var env: VmTestEnv
 
     @Before
     fun setUp() {
         kotlinx.coroutines.Dispatchers.setMain(UnconfinedTestDispatcher())
-        env = VmTestEnv(tmp.root)
+        env = VmTestEnv()
     }
 
     @After

@@ -20,15 +20,10 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
-import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.TemporaryFolder
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class IncomingViewModelTest {
-    @get:Rule
-    val tmp = TemporaryFolder()
-
     private lateinit var env: VmTestEnv
     private lateinit var vm: IncomingViewModel
     private val submitListener = com.istarvin.fetcharr.notifications.SubmitListener { }
@@ -36,7 +31,7 @@ class IncomingViewModelTest {
     @Before
     fun setUp() {
         kotlinx.coroutines.Dispatchers.setMain(UnconfinedTestDispatcher())
-        env = VmTestEnv(tmp.root)
+        env = VmTestEnv()
         vm = IncomingViewModel(env.hub, env.settings, env.categoryRepository, env.submit, submitListener)
     }
 

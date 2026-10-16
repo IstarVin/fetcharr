@@ -1,6 +1,5 @@
 package com.istarvin.fetcharr.ui.history
 
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.lifecycle.viewModelScope
 import com.istarvin.fetcharr.data.CategoryRepository
 import com.istarvin.fetcharr.data.history.HistoryRepository
@@ -11,6 +10,7 @@ import com.istarvin.fetcharr.data.network.ApiError
 import com.istarvin.fetcharr.data.network.Fixtures
 import com.istarvin.fetcharr.data.network.dto.JobDto
 import com.istarvin.fetcharr.data.network.dto.JobListDto
+import com.istarvin.fetcharr.data.settings.InMemoryPreferencesDataStore
 import com.istarvin.fetcharr.data.settings.SettingsRepository
 import com.istarvin.fetcharr.data.sync.ActiveJobsStore
 import com.istarvin.fetcharr.data.sync.JobActions
@@ -40,15 +40,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.TemporaryFolder
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.CountDownLatch
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HistoryViewModelTest {
-    @get:Rule
-    val tmp = TemporaryFolder()
-
     private val ioScope = CoroutineScope(Job() + Dispatchers.IO)
     private val server = MockWebServer()
     private lateinit var vm: HistoryViewModel
@@ -113,7 +109,7 @@ class HistoryViewModelTest {
         val client = OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS).build()
         val factory = FetcharrApiFactory(client, FetcharrJson)
         settings = SettingsRepository(
-            PreferenceDataStoreFactory.create(scope = ioScope) { tmp.newFile("settings.preferences_pb") },
+            InMemoryPreferencesDataStore(),
             FetcharrJson,
             ioScope,
         )

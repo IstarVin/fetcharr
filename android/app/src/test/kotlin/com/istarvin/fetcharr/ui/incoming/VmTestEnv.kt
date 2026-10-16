@@ -1,11 +1,11 @@
 package com.istarvin.fetcharr.ui.incoming
 
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import com.istarvin.fetcharr.data.CategoryRepository
 import com.istarvin.fetcharr.data.network.FetcharrApiFactory
 import com.istarvin.fetcharr.data.network.FetcharrApiProvider
 import com.istarvin.fetcharr.data.network.FetcharrJson
 import com.istarvin.fetcharr.data.network.dto.CategoryDto
+import com.istarvin.fetcharr.data.settings.InMemoryPreferencesDataStore
 import com.istarvin.fetcharr.data.settings.SettingsRepository
 import com.istarvin.fetcharr.incoming.IncomingCoordinator
 import kotlinx.coroutines.CoroutineScope
@@ -18,11 +18,10 @@ import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
-import java.io.File
 import java.util.concurrent.TimeUnit
 
 /** Real settings (temp DataStore), real network layer against MockWebServer, hub on a real-time scope. */
-internal class VmTestEnv(tmpDir: File) {
+internal class VmTestEnv() {
     val scope = CoroutineScope(Job() + Dispatchers.IO)
     val server = MockWebServer().also { it.start() }
     private val client = OkHttpClient.Builder()
@@ -31,7 +30,7 @@ internal class VmTestEnv(tmpDir: File) {
         .build()
     private val factory = FetcharrApiFactory(client, FetcharrJson)
     val settings = SettingsRepository(
-        PreferenceDataStoreFactory.create(scope = scope) { File(tmpDir, "settings.preferences_pb") },
+        InMemoryPreferencesDataStore(),
         FetcharrJson,
         scope,
     )

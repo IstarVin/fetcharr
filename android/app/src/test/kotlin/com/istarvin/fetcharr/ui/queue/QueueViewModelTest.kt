@@ -1,6 +1,5 @@
 package com.istarvin.fetcharr.ui.queue
 
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.lifecycle.viewModelScope
 import com.istarvin.fetcharr.data.CategoryRepository
 import com.istarvin.fetcharr.data.network.FetcharrApiFactory
@@ -10,6 +9,7 @@ import com.istarvin.fetcharr.data.network.Fixtures
 import com.istarvin.fetcharr.data.network.ServerConfig
 import com.istarvin.fetcharr.data.network.dto.JobDto
 import com.istarvin.fetcharr.data.network.dto.JobStatus
+import com.istarvin.fetcharr.data.settings.InMemoryPreferencesDataStore
 import com.istarvin.fetcharr.data.settings.SettingsRepository
 import com.istarvin.fetcharr.data.sync.ActiveJobsStore
 import com.istarvin.fetcharr.data.sync.ConnectionState
@@ -42,15 +42,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.TemporaryFolder
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class QueueViewModelTest {
-    @get:Rule
-    val tmp = TemporaryFolder()
-
     private class FakeConnector : WebSocketConnector {
         class Attempt(val listener: WebSocketConnector.Listener) : WebSocketConnector.Handle {
             override fun close() = Unit
@@ -91,7 +87,7 @@ class QueueViewModelTest {
         val client = OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS).build()
         val factory = FetcharrApiFactory(client, FetcharrJson)
         settings = SettingsRepository(
-            PreferenceDataStoreFactory.create(scope = ioScope) { tmp.newFile("settings.preferences_pb") },
+            InMemoryPreferencesDataStore(),
             FetcharrJson,
             ioScope,
         )

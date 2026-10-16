@@ -1,11 +1,11 @@
 package com.istarvin.fetcharr.data
 
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import com.istarvin.fetcharr.data.network.ApiResult
 import com.istarvin.fetcharr.data.network.FetcharrApiFactory
 import com.istarvin.fetcharr.data.network.FetcharrJson
 import com.istarvin.fetcharr.data.network.ServerConfig
 import com.istarvin.fetcharr.data.network.dto.CategoryDto
+import com.istarvin.fetcharr.data.settings.InMemoryPreferencesDataStore
 import com.istarvin.fetcharr.data.settings.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,12 +27,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.TemporaryFolder
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class CategoryRepositoryTest {
-    @get:Rule val tmp = TemporaryFolder()
     private val scope = CoroutineScope(Job() + Dispatchers.IO)
     private val server = MockWebServer()
     private lateinit var settings: SettingsRepository
@@ -43,7 +41,7 @@ class CategoryRepositoryTest {
     @Before fun setup() {
         server.start()
         settings = SettingsRepository(
-            PreferenceDataStoreFactory.create(scope = scope) { tmp.newFile("categories.preferences_pb") },
+            InMemoryPreferencesDataStore(),
             FetcharrJson, scope,
         )
         repository = CategoryRepository(FetcharrApiFactory(OkHttpClient(), FetcharrJson), settings, scope)
