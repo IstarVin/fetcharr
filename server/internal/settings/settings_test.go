@@ -3,6 +3,7 @@ package settings_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,6 +93,75 @@ func TestImportPersistenceAndWriteOnlyCredentials(t *testing.T) {
 	_, stored, _ := s.ReadSettings(t.Context())
 	if strings.Contains(string(stored), replacement) || len(restarted.Current().MediaServers) != 0 {
 		t.Fatal("removed credential retained")
+	}
+}
+
+func TestNewCategoryCreatesMissingFolders(t *testing.T) {
+	c, s, m := fixture(t)
+	d := m.Get()
+	path := filepath.Join(t.TempDir(), "media", "movies")
+	d.Categories = append(d.Categories, config.Category{ID: "movies", Path: path, Layout: naming.LayoutMovie})
+	saved, err := m.Save(t.Context(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("category folder was not created: %v", err)
+	}
+	cat, ok := c.Category("movies")
+	if !ok || cat.Path != path || cat.Label != "movies" || saved.Revision != d.Revision+1 {
+		t.Fatalf("new category was not applied: %+v, revision %d", cat, saved.Revision)
+	}
+	restarted, err := settings.Open(t.Context(), c.Clone(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := restarted.Get(); got.Revision != saved.Revision || len(got.Categories) != 2 || got.Categories[1].Path != path {
+		t.Fatalf("new category was not persisted: %+v", got)
+	}
+}
+
+func TestNewCategoryRejectsFilePaths(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		t.Run(fmt.Sprintf("nested=%t", nested), func(t *testing.T) {
+			c, s, m := fixture(t)
+			path := filepath.Join(t.TempDir(), "file")
+			if err := os.WriteFile(path, []byte("keep"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			categoryPath := path
+			if nested {
+				categoryPath = filepath.Join(path, "movies")
+			}
+			d := m.Get()
+			d.Categories = append(d.Categories, config.Category{ID: "movies", Path: categoryPath, Layout: naming.LayoutMovie})
+			_, err := m.Save(t.Context(), d)
+			var validation *settings.ValidationError
+			if !errors.As(err, &validation) || !strings.Contains(validation.Message, "movies") {
+				t.Fatalf("expected category validation error, got %v", err)
+			}
+			revision, _, err := s.ReadSettings(t.Context())
+			if err != nil || revision != d.Revision || m.Get().Revision != d.Revision || len(c.Current().Categories) != 1 {
+				t.Fatalf("failed creation changed settings: revision %d, error %v", revision, err)
+			}
+			if data, err := os.ReadFile(path); err != nil || string(data) != "keep" {
+				t.Fatalf("existing file changed: %q, %v", data, err)
+			}
+		})
+	}
+}
+
+func TestInvalidNewCategoryDoesNotCreateFolders(t *testing.T) {
+	_, _, m := fixture(t)
+	d := m.Get()
+	path := filepath.Join(t.TempDir(), "movies")
+	d.Categories = append(d.Categories, config.Category{ID: "invalid id", Path: path, Layout: naming.LayoutMovie})
+	if _, err := m.Save(t.Context(), d); err == nil {
+		t.Fatal("invalid category accepted")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("invalid category created a folder: %v", err)
 	}
 }
 

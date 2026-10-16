@@ -1,8 +1,10 @@
 package com.istarvin.fetcharr.ui.history
 
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -32,6 +34,7 @@ import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Replay
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
@@ -77,6 +80,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.istarvin.fetcharr.R
@@ -98,6 +102,8 @@ fun HistoryScreen(onOpenSettings: () -> Unit, viewModel: HistoryViewModel = hilt
     val context = LocalContext.current
     val settingsLabel = stringResource(R.string.queue_snackbar_settings)
     val copiedMessage = stringResource(R.string.history_path_copied)
+    val noPlayerMessage = stringResource(R.string.history_no_player)
+    val playerFailedMessage = stringResource(R.string.history_player_failed)
 
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
@@ -121,6 +127,26 @@ fun HistoryScreen(onOpenSettings: () -> Unit, viewModel: HistoryViewModel = hilt
                         launch { snackbar.showSnackbar(copiedMessage) }
                     }
                 }
+                is HistoryEvent.OpenPlayer -> {
+                    if (viewModel.isCurrentPlayback(event)) {
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(event.url.toUri(), event.mimeType)
+                            putExtra(Intent.EXTRA_TITLE, event.title)
+                        }
+                        val error = try {
+                            context.startActivity(intent)
+                            null
+                        } catch (_: ActivityNotFoundException) {
+                            noPlayerMessage
+                        } catch (_: SecurityException) {
+                            playerFailedMessage
+                        }
+                        if (error != null) {
+                            snackbar.currentSnackbarData?.dismiss()
+                            launch { snackbar.showSnackbar(error) }
+                        }
+                    }
+                }
             }
         }
     }
@@ -132,6 +158,7 @@ fun HistoryScreen(onOpenSettings: () -> Unit, viewModel: HistoryViewModel = hilt
         onLoadMore = viewModel::loadMore,
         onAction = { action, id ->
             when (action) {
+                HistoryAction.Play -> viewModel.play(id)
                 HistoryAction.CopyPath -> viewModel.copyPath(id)
                 HistoryAction.Retry -> viewModel.retry(id)
                 HistoryAction.Details -> viewModel.showDetails(id)
@@ -239,7 +266,7 @@ internal fun HistoryContent(
                                         for (group in state.groups) {
                                             stickyHeader(key = "header:${group.key}") { DayHeader(group.label) }
                                             items(group.items, key = { it.id }) { row ->
-                                                HistoryRow(row, onAction = { onAction(it, row.id) }, onDeleteSwiped = { onDeleteSwiped(row.id) })
+                                                HistoryRow(row, row.id in state.preparingPlayback, onAction = { onAction(it, row.id) }, onDeleteSwiped = { onDeleteSwiped(row.id) })
                                             }
                                         }
                                         if (state.loadingMore) {
@@ -275,7 +302,7 @@ private fun DayHeader(label: String) {
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-private fun LazyItemScope.HistoryRow(row: HistoryRowModel, onAction: (HistoryAction) -> Unit, onDeleteSwiped: () -> Unit) {
+private fun LazyItemScope.HistoryRow(row: HistoryRowModel, preparingPlayback: Boolean, onAction: (HistoryAction) -> Unit, onDeleteSwiped: () -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
     // Never actually dismisses: the swipe only asks for confirmation, then the row snaps back.
     val dismissState = rememberSwipeToDismissBoxState(
@@ -363,6 +390,15 @@ private fun LazyItemScope.HistoryRow(row: HistoryRowModel, onAction: (HistoryAct
                             tint = MaterialTheme.colorScheme.tertiary,
                         )
                     }
+                    if (HistoryAction.Play in row.actions) {
+                        IconButton(onClick = { onAction(HistoryAction.Play) }, enabled = !preparingPlayback) {
+                            if (preparingPlayback) {
+                                CircularProgressIndicator(Modifier.size(24.dp))
+                            } else {
+                                Icon(Icons.Outlined.PlayArrow, contentDescription = stringResource(R.string.history_play))
+                            }
+                        }
+                    }
                     IconButton(onClick = { menuOpen = true }) {
                         Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.history_row_actions))
                     }
@@ -370,6 +406,7 @@ private fun LazyItemScope.HistoryRow(row: HistoryRowModel, onAction: (HistoryAct
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     for (action in row.actions) {
                         DropdownMenuItem(
+                            enabled = action != HistoryAction.Play || !preparingPlayback,
                             text = { Text(actionLabels.getValue(action)) },
                             leadingIcon = { Icon(action.icon, contentDescription = null) },
                             onClick = { menuOpen = false; onAction(action) },
@@ -383,6 +420,7 @@ private fun LazyItemScope.HistoryRow(row: HistoryRowModel, onAction: (HistoryAct
 
 private val HistoryAction.labelRes: Int
     get() = when (this) {
+        HistoryAction.Play -> R.string.history_play
         HistoryAction.CopyPath -> R.string.history_copy_path
         HistoryAction.Retry -> R.string.history_retry
         HistoryAction.Details -> R.string.history_details
@@ -391,6 +429,7 @@ private val HistoryAction.labelRes: Int
 
 private val HistoryAction.icon: ImageVector
     get() = when (this) {
+        HistoryAction.Play -> Icons.Outlined.PlayArrow
         HistoryAction.CopyPath -> Icons.Outlined.ContentCopy
         HistoryAction.Retry -> Icons.Outlined.Replay
         HistoryAction.Details -> Icons.Outlined.Info
@@ -516,7 +555,7 @@ private fun PopulatedHistoryPreview() {
         statusLine = "/media/movies/A long movie title (2026)/A long movie title.mkv",
         hasWarnings = true, warnings = listOf("Some metadata could not be saved"),
         filePath = "/media/movies/title.mkv", errorCode = null, errorMessage = null,
-        actions = listOf(HistoryAction.CopyPath, HistoryAction.Details, HistoryAction.Delete),
+        actions = listOf(HistoryAction.Play, HistoryAction.CopyPath, HistoryAction.Details, HistoryAction.Delete),
     )
     val failed = completed.copy(
         id = "failed", status = JobStatus.FAILED, heading = "A television series — S02E03",

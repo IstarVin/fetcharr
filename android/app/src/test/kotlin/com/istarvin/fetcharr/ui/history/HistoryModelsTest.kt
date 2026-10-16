@@ -103,16 +103,22 @@ class HistoryModelsTest {
         assertEquals("/media/movies/Oppenheimer (2023)/Oppenheimer (2023).mp4", row.statusLine)
         assertEquals(row.statusLine, row.filePath)
         assertTrue(row.hasWarnings)
-        assertEquals(listOf(HistoryAction.CopyPath, HistoryAction.Details, HistoryAction.Delete), row.actions)
+        assertEquals(listOf(HistoryAction.Play, HistoryAction.CopyPath, HistoryAction.Details, HistoryAction.Delete), row.actions)
         assertEquals("subtitle es (https://cdn.example/oppenheimer.es.vtt): download failed: HTTP 404", row.detailsText)
     }
 
     @Test
-    fun completedWithoutWarningsHasCopyPathAndDeleteOnly() {
+    fun completedWithoutWarningsHasPlayCopyPathAndDelete() {
         val row = job("job-completed.json").copy(warnings = emptyList()).toHistoryRow("Movies", "movie")
         assertFalse(row.hasWarnings)
-        assertEquals(listOf(HistoryAction.CopyPath, HistoryAction.Delete), row.actions)
+        assertEquals(listOf(HistoryAction.Play, HistoryAction.CopyPath, HistoryAction.Delete), row.actions)
         assertNull(row.detailsText)
+    }
+
+    @Test
+    fun completedWithoutAPathCannotPlayOrCopy() {
+        val row = job("job-completed.json").copy(filePath = " ", warnings = emptyList()).toHistoryRow("Movies", "movie")
+        assertEquals(listOf(HistoryAction.Delete), row.actions)
     }
 
     @Test

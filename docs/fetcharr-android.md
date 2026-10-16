@@ -21,12 +21,12 @@ Related contracts:
 - Merge a run of single-episode intents for the same show and season into one confirmation.
 - Let the user review metadata, pick a category, and choose episodes before submitting.
 - Show active jobs live over WebSocket, with pause, resume, cancel and retry.
-- Show the download history, with retry, copy path, delete and clear.
+- Show the download history, with external playback, retry, copy path, delete and clear.
 - Post a notification when downloads complete or fail, including while the app is in the background.
 
 ### Non-goals
 
-- No downloading, playback or local media management.
+- No downloading, built-in player or local media management.
 - No offline queue. If the server is unreachable, a submit fails and the user retries.
 - No device-side job database. The server is the source of truth.
 
@@ -199,11 +199,12 @@ Shows `completed`, `failed` and `cancelled` jobs, newest first, grouped by date 
 
 | Status | Shows | Actions |
 | --- | --- | --- |
-| `completed` | Final file path; a warning icon if `warnings` isn't empty | Copy path, Delete |
+| `completed` | Final file path; a warning icon if `warnings` isn't empty | Play, Copy path, Delete |
 | `failed` | A short error for `error_code`, with `error_message` behind "Details" | Retry, Delete |
 | `cancelled` | "Cancelled" | Retry, Delete |
 
 - Actions open from a long-press menu. Swipe-to-dismiss also triggers Delete.
+- **Play** also appears as a button on completed rows with a file path. It requests a temporary stream link from `POST /api/jobs/{id}/playback`, then opens an external player with Android `ACTION_VIEW` and the media MIME type. Android uses the default player or offers a choice. Fetcharr shows a message if no player is installed or the file is unavailable. The player streams the saved server file with support for seeking; Fetcharr does not download a local copy. The API token is never passed to the player. Links expire after 24 hours or a server restart; tap Play again to renew one. This requires a server with the playback endpoints.
 - **Delete** asks for confirmation. For completed jobs the dialog has an "Also delete file from disk" checkbox (off by default), which maps to `DELETE /api/jobs/{id}?delete_file=true`.
 - **Retry** on `already_exists` asks "A file with this name already exists. Replace it?" and then sends `{"overwrite": true}`. Other failures retry straight away.
 - Error text by `error_code`:
@@ -236,7 +237,7 @@ About
 - A URL entered without a scheme gets `http://` added. A trailing slash is removed.
 - **Update now** calls `POST /api/system/ytdlp/update` and shows the new version. On `409 ytdlp_busy` it shows "Downloads are running — try again when they finish".
 
-**Server settings** opens a separate editor for download concurrency, merge format, minimum free space (decimal GB), history retention, managed yt-dlp auto-update, categories, and Jellyfin/Plex connections with optional path mappings. Save applies the whole document through `PUT /api/system/settings`. Category IDs stay fixed after creation; users enter existing server/container destination paths, and Docker mounts are configured on the host. Saved credentials are never displayed; blank fields retain them and typed values replace them.
+**Server settings** opens a separate editor for download concurrency, merge format, minimum free space (decimal GB), history retention, managed yt-dlp auto-update, categories, and Jellyfin/Plex connections with optional path mappings. Save applies the whole document through `PUT /api/system/settings`. Category IDs stay fixed after creation; users enter server/container destination paths, and saving a new category creates missing folders, including parents. Destinations must be writable; changing an existing category's path requires an existing folder. Docker mounts are configured on the host. Saved credentials are never displayed; blank fields retain them and typed values replace them.
 
 The editor loads from the saved connection, keeps drafts and secrets in memory only, and discards them when that connection changes. Back and Reload prompt before discarding unsaved edits. Errors preserve the draft; stale revisions require a reload. Successful saves refresh categories and clear defaults that no longer match the available layouts. A server without `settings_supported` shows an upgrade message and receives no settings request. Connection settings, default categories, and the existing manual yt-dlp update remain available as before.
 

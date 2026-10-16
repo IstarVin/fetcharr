@@ -22,7 +22,7 @@ A self-hosted download server. It accepts download jobs from the [Fetcharr Andro
 ### Non-goals
 
 - No web UI. The server serves only the API and WebSocket.
-- No media playback, metadata scraping or library management beyond placing files.
+- No built-in player, transcoding, metadata scraping or library management beyond placing files. Completed files can be streamed to an external player.
 - No multi-user model. One optional shared API token protects the whole server.
 
 ---
@@ -244,7 +244,7 @@ Example:
 ### 6.1 Conventions
 
 - **Base URL:** `http://<host>:<port>/api`. Bodies are JSON (`application/json`).
-- **Auth:** when `server.auth_token` is set, every endpoint except `/api/health` requires `Authorization: Bearer <token>`. The WebSocket upgrade request also needs it. A missing or wrong token returns `401 unauthorized`. Tokens are compared in constant time.
+- **Auth:** when `server.auth_token` is set, every endpoint except `/api/health` and the signed media stream requires `Authorization: Bearer <token>`. The WebSocket upgrade request also needs it. A missing or wrong token returns `401 unauthorized`. Tokens are compared in constant time. The media endpoint requires its job-scoped playback signature, even when API authentication is disabled.
 - **Times:** RFC 3339 in UTC with millisecond precision, e.g. `2026-10-14T14:30:00.123Z`. The precision keeps `finished_after` catch-up from skipping jobs that finish in the same second.
 - **Errors:** every non-2xx response has this shape:
 
@@ -346,7 +346,7 @@ PUT replaces the complete editable document and requires the revision returned b
 
 Integration IDs are stable; clients assign a unique nonempty ID when adding a connection. `credential` is an optional write-only field: omit it to retain a saved credential for the same ID and type, or supply a nonempty replacement (the Jellyfin API key or Plex token). New connections require a credential. GET and successful PUT responses omit credentials and report `has_credential` instead. Removing a connection removes its stored credential. `path_map` rewrites absolute Fetcharr prefixes to media-server paths, including Windows destinations.
 
-Category IDs are fixed in Android after creation. Destination paths must be absolute server/container paths that already exist and are writable; saving never creates folders. Removing a category or changing its path/layout returns `409 category_busy` if pending, paused, downloading, or processing jobs reference it. This check is coordinated with submission and retry. Labels can change at any time. Historical jobs retain their original destination root for safe file deletion; unknown legacy roots cannot be guessed. Retry revalidates against the current category and records the current root.
+Category IDs are fixed in Android after creation. Destination paths must be absolute server/container paths and writable. Saving a new category creates its missing destination folder and parent folders; creation or permission failures return `400 invalid_request`. Changing an existing category's path requires an existing writable folder. Removing a category or changing its path/layout returns `409 category_busy` if pending, paused, downloading, or processing jobs reference it. This check is coordinated with submission and retry. Labels can change at any time. Historical jobs retain their original destination root for safe file deletion; unknown legacy roots cannot be guessed. Retry revalidates against the current category and records the current root.
 
 Live updates never kill existing downloads. Decreased concurrency takes effect as workers finish; increased concurrency wakes dispatch. Download arguments and free-space checks use a snapshot for each new attempt. Retention changes wake the pruner and remove records only. Auto-update can be toggled only for the managed binary; enabling it schedules an immediate safe check. Pending integration refreshes use the current connections at dispatch time. No filesystem browser or folder-creation API is provided.
 
@@ -425,6 +425,22 @@ Response: `{ "jobs": [ … ], "total": 123 }`.
 
 #### `GET /api/jobs/{id}`
 Returns one Job, or `404`.
+
+#### `POST /api/jobs/{id}/playback`
+Requires normal API authentication. Checks that the job is completed and its saved media file is available, then returns `200`:
+
+```json
+{
+  "url": "jobs/<id>/media?expires=<unix-seconds>&signature=<signature>",
+  "mime_type": "video/mp4",
+  "expires_at": "2026-10-17T00:00:00.000Z"
+}
+```
+
+Resolve `url` relative to the configured API base (`<server>/api/`), preserving any reverse-proxy prefix. The signed link authorizes only this job's media for 24 hours and never contains the API token. A server restart invalidates existing links. Responses are not cached. Returns `409 invalid_state` for unfinished jobs or a missing file path, `404 not_found` for missing jobs or unavailable files, and `400 invalid_request` for an unknown original destination or an out-of-root path.
+
+#### `GET /api/jobs/{id}/media` · `HEAD /api/jobs/{id}/media`
+Requires the `expires` and `signature` query parameters issued by the playback endpoint; missing, modified or expired links return `401 unauthorized`. No Bearer header is needed by the external player. Streams the completed file directly, with `Content-Type`, `Content-Length`, `Accept-Ranges: bytes`, and standard range responses (`206` / `416`) for seeking. HEAD returns headers only. There is no transcoding. Each request rechecks the job and file, confined to the job's saved original destination using symlink-safe filesystem access. Removing the history record makes its link unavailable, even if the file is kept. Query strings are excluded from request logs.
 
 #### `POST /api/jobs/{id}/pause` · `/resume` · `/cancel`
 Apply the transition (§2.4). Return `200` with the updated Job.

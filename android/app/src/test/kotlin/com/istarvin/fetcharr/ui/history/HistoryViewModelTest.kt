@@ -7,6 +7,7 @@ import com.istarvin.fetcharr.data.history.HistoryRepository
 import com.istarvin.fetcharr.data.network.FetcharrApiFactory
 import com.istarvin.fetcharr.data.network.FetcharrApiProvider
 import com.istarvin.fetcharr.data.network.FetcharrJson
+import com.istarvin.fetcharr.data.network.ApiError
 import com.istarvin.fetcharr.data.network.Fixtures
 import com.istarvin.fetcharr.data.network.dto.JobDto
 import com.istarvin.fetcharr.data.network.dto.JobListDto
@@ -50,6 +51,7 @@ class HistoryViewModelTest {
     private val ioScope = CoroutineScope(Job() + Dispatchers.IO)
     private val server = MockWebServer()
     private lateinit var vm: HistoryViewModel
+    private lateinit var settings: SettingsRepository
 
     /** What `GET /api/jobs` returns. */
     @Volatile
@@ -58,6 +60,9 @@ class HistoryViewModelTest {
     /** When set, `DELETE /api/jobs/{id}`, `DELETE /api/jobs` and retries fail with this status. */
     @Volatile
     private var failWith: Int? = null
+
+    @Volatile
+    private var playbackUrl = "jobs/done/media?expires=9999999999&signature=scoped-link"
 
     @Before
     fun setUp() {
@@ -71,6 +76,8 @@ class HistoryViewModelTest {
                         json(200, FetcharrJson.encodeToString(JobListDto(jobs = listed, total = listed.size)))
                     fail != null && fail == 409 -> json(409, Fixtures.text("error-invalid_state.json"))
                     fail != null -> MockResponse().setResponseCode(fail)
+                    request.method == "POST" && path.endsWith("/playback") -> json(200,
+                        """{"url":"$playbackUrl","mime_type":"video/mp4","expires_at":"2026-10-17T00:00:00.000Z"}""")
                     request.method == "POST" && path.endsWith("/retry") -> json(200, Fixtures.text("job-pending.json"))
                     request.method == "DELETE" && path == "/api/jobs" -> json(200, """{"deleted": 3}""")
                     request.method == "DELETE" -> MockResponse().setResponseCode(204)
@@ -104,17 +111,17 @@ class HistoryViewModelTest {
         listed = jobs
         val client = OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS).build()
         val factory = FetcharrApiFactory(client, FetcharrJson)
-        val settings = SettingsRepository(
+        settings = SettingsRepository(
             PreferenceDataStoreFactory.create(scope = ioScope) { tmp.newFile("settings.preferences_pb") },
             FetcharrJson,
             ioScope,
         )
         settings.setServer(server.url("/").toString().trimEnd('/'), "")
         settings.config.first { it != null }
-        val provider = FetcharrApiProvider(factory, settings)
+        val provider = FetcharrApiProvider(factory, settings, ioScope)
         val store = ActiveJobsStore()
         val history = HistoryRepository(provider, settings, store, ioScope)
-        vm = HistoryViewModel(settings, history, JobActions(provider, store), CategoryRepository(factory, settings, ioScope))
+        vm = HistoryViewModel(settings, history, JobActions(provider, store), CategoryRepository(factory, settings, ioScope), provider)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.state.collect { } }
         // DataStore emits from a real thread: wait for the state instead of running the test scheduler by hand.
         vm.state.first { it.historyLoaded && it.groups.sumOf { g -> g.items.size } == jobs.size }
@@ -128,6 +135,53 @@ class HistoryViewModelTest {
             val request = checkNotNull(server.takeRequest(5, TimeUnit.SECONDS)) { "no request arrived" }
             if (!(request.method == "GET" && request.requestUrl!!.encodedPath == "/api/jobs")) return request
         }
+    }
+
+    @Test
+    fun playRequestsAScopedLinkAndEmitsAnExternalPlayerEvent() = runTest {
+        build(listOf(completed))
+        vm.play("done")
+        vm.play("done") // repeated taps while the request is running are ignored
+        val event = vm.events.first() as HistoryEvent.OpenPlayer
+        assertEquals(server.url("/api/$playbackUrl").toString(), event.url)
+        assertEquals("video/mp4", event.mimeType)
+        assertEquals("Oppenheimer (2023)", event.title)
+        assertTrue(vm.isCurrentPlayback(event))
+        assertEquals("/api/jobs/done/playback", nextAction().path)
+        assertEquals(2, server.requestCount) // one history load and one playback link
+        vm.state.first { it.preparingPlayback.isEmpty() }
+
+        // Even an already buffered event is invalidated when the token changes.
+        settings.setServer(server.url("/").toString().trimEnd('/'), "new-token")
+        settings.config.first { it?.token == "new-token" }
+        assertTrue(!vm.isCurrentPlayback(event))
+    }
+
+    @Test
+    fun playFailureShowsTheApiError() = runTest {
+        build(listOf(completed))
+        failWith = 401
+        vm.play("done")
+        assertEquals(HistoryEvent.Snackbar("Wrong API token", openSettings = true), vm.events.first())
+        vm.state.first { it.preparingPlayback.isEmpty() }
+    }
+
+    @Test
+    fun playRejectsAUrlOutsideTheJobMediaEndpoint() = runTest {
+        build(listOf(completed))
+        playbackUrl = "https://other.example/video.mp4"
+        vm.play("done")
+        assertEquals(HistoryEvent.Snackbar(ApiError.InvalidResponse.userMessage), vm.events.first())
+    }
+
+    @Test
+    fun playIgnoresFailedCancelledAndMissingFiles() = runTest {
+        build(listOf(failed, cancelled, completed.copy(filePath = null)))
+        vm.play("failed")
+        vm.play("cancelled")
+        vm.play("done")
+        vm.play("gone")
+        assertEquals(1, server.requestCount)
     }
 
     @Test

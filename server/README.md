@@ -15,7 +15,7 @@ Full behaviour and the HTTP/WebSocket API are specified in [`docs/fetcharr-serve
    cp config.minimal.yaml config/config.yaml   # optionally set server.auth_token
    ```
 
-   `data_dir` (`/data`) and the media folders you will add in Android must already exist inside the container and be writable by the container user.
+   `data_dir` (`/data`) must already exist inside the container and be writable by the container user. Adding a category in Android creates missing media folders, including parent folders, if the container user has permission.
 
 2. Run it (the image runs as UID/GID 1000 by default; pass `--user` to match the owner of your media folders):
 
@@ -59,7 +59,7 @@ Build locally with `docker build -t fetcharr-server server/` (optional `--build-
 
 Start with [`config.minimal.yaml`](config.minimal.yaml). YAML owns listen host/port, authentication, log level, data directory, the optional custom yt-dlp executable, and arbitrary extra arguments. These deployment settings require a restart. The file is selected with `--config <path>`, `FETCHARR_CONFIG`, or defaults to `./config.yaml`; unknown keys are rejected.
 
-Routine settings are saved in `<data_dir>/fetcharr.db` and apply live. Lowering concurrency lets current work finish. New download attempts use the latest download settings. History retention removes records only; files remain. Category destinations must exist and be writable, and paths/layouts cannot change while queued, paused, downloading, or processing jobs reference them. Docker mounts and filesystem permissions are configured on the host.
+Routine settings are saved in `<data_dir>/fetcharr.db` and apply live. Lowering concurrency lets current work finish. New download attempts use the latest download settings. History retention removes records only; files remain. Adding a category creates missing destination folders, including parents; destinations must be writable. Paths/layouts cannot change while queued, paused, downloading, or processing jobs reference them. Docker mounts and filesystem permissions are configured on the host.
 
 Existing full YAML files remain supported: their routine settings are imported into SQLite once, on the first successful startup after upgrading. Afterward, SQLite is authoritative for those fields, so editing the old YAML does not reset changes made in Android. You can reduce the YAML to the deployment fields after import. Keep and back up the data directory; the database also stores integration credentials with the same private file permissions as job headers. Integration credentials can be replaced in Android but are never returned by the API. The config mount can be read-only.
 

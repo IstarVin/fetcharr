@@ -6,7 +6,11 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import com.istarvin.fetcharr.data.CategoryRepository
 import com.istarvin.fetcharr.data.history.HistoryRepository
 import com.istarvin.fetcharr.data.network.ApiError
+import com.istarvin.fetcharr.data.network.ApiResult
+import com.istarvin.fetcharr.data.network.FetcharrApiProvider
+import com.istarvin.fetcharr.data.network.FetcharrApiSession
 import com.istarvin.fetcharr.data.network.ServerConfigProvider
+import com.istarvin.fetcharr.data.network.safeApiCall
 import com.istarvin.fetcharr.data.network.dto.CategoryDto
 import com.istarvin.fetcharr.data.network.dto.JobStatus
 import com.istarvin.fetcharr.data.sync.ActionOutcome
@@ -21,7 +25,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.time.ZoneId
 import javax.inject.Inject
 
@@ -56,6 +62,7 @@ data class HistoryUiState(
     /** The last load error. Shown inline while nothing has loaded yet. */
     val error: ApiError? = null,
     val dialog: HistoryDialog? = null,
+    val preparingPlayback: Set<String> = emptySet(),
 ) {
     val isEmpty: Boolean get() = historyLoaded && groups.isEmpty()
 }
@@ -67,6 +74,9 @@ sealed interface HistoryEvent {
 
     /** The screen puts [path] on the clipboard. */
     data class CopyPath(val path: String) : HistoryEvent
+
+    /** Checked again on delivery so a buffered event cannot open a previous server's media. */
+    data class OpenPlayer(val url: String, val mimeType: String, val title: String, val session: FetcharrApiSession) : HistoryEvent
 }
 
 @HiltViewModel
@@ -75,6 +85,7 @@ class HistoryViewModel @Inject constructor(
     private val history: HistoryRepository,
     private val actions: JobActions,
     categoryRepository: CategoryRepository,
+    private val apiProvider: FetcharrApiProvider,
 ) : ViewModel() {
 
     private val categories: StateFlow<List<CategoryDto>> =
@@ -82,6 +93,7 @@ class HistoryViewModel @Inject constructor(
 
     private val refreshing = MutableStateFlow(false)
     private val dialog = MutableStateFlow<HistoryDialog?>(null)
+    private val preparingPlayback = MutableStateFlow<Set<String>>(emptySet())
     private val eventChannel = Channel<HistoryEvent>(Channel.BUFFERED)
     private val inFlight = mutableSetOf<String>()
 
@@ -95,7 +107,7 @@ class HistoryViewModel @Inject constructor(
         Triple(hasServer, state, buildHistoryGroups(state.items, categories, System.currentTimeMillis(), ZoneId.systemDefault()))
     }
 
-    val state: StateFlow<HistoryUiState> = combine(content, refreshing, dialog) { (hasServer, repo, groups), isRefreshing, open ->
+    val state: StateFlow<HistoryUiState> = combine(content, refreshing, dialog, preparingPlayback) { (hasServer, repo, groups), isRefreshing, open, preparing ->
         HistoryUiState(
             loaded = true,
             hasServer = hasServer,
@@ -105,6 +117,7 @@ class HistoryViewModel @Inject constructor(
             loadingMore = repo.loadingMore,
             error = repo.error,
             dialog = open,
+            preparingPlayback = preparing,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryUiState())
 
@@ -136,6 +149,40 @@ class HistoryViewModel @Inject constructor(
     }
 
     // --- Row actions -------------------------------------------------------------------------------------------
+
+    fun play(jobId: String) {
+        val job = rowFor(jobId)?.takeIf { HistoryAction.Play in it.actions } ?: return
+        val session = apiProvider.captureSession() ?: run {
+            eventChannel.trySend(HistoryEvent.Snackbar("Server not set up", openSettings = true))
+            return
+        }
+        if (!inFlight.add("play:$jobId")) return
+        preparingPlayback.update { it + jobId }
+        viewModelScope.launch {
+            try {
+                val result = safeApiCall {
+                    val playback = session.api.createPlayback(jobId)
+                    val base = (session.config.baseUrl.trimEnd('/') + "/api/").toHttpUrl()
+                    val url = requireNotNull(base.resolve(playback.url))
+                    val expected = base.newBuilder().addPathSegment("jobs").addPathSegment(jobId).addPathSegment("media").build()
+                    require(url.scheme == base.scheme && url.host == base.host && url.port == base.port && url.encodedPath == expected.encodedPath)
+                    val mime = playback.mimeType.takeIf { it.startsWith("video/") || it.startsWith("audio/") } ?: "video/*"
+                    HistoryEvent.OpenPlayer(url.toString(), mime, job.heading, session)
+                }
+                apiProvider.withCurrentSession(session) {
+                    when (result) {
+                        is ApiResult.Success -> eventChannel.trySend(result.value)
+                        is ApiResult.Failure -> snackbar(result.error)
+                    }
+                }
+            } finally {
+                inFlight.remove("play:$jobId")
+                preparingPlayback.update { it - jobId }
+            }
+        }
+    }
+
+    fun isCurrentPlayback(event: HistoryEvent.OpenPlayer): Boolean = apiProvider.isCurrent(event.session)
 
     /** Retries straight away, except for `already_exists`, which asks about replacing the file first. */
     fun retry(jobId: String) {

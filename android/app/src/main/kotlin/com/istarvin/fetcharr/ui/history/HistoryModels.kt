@@ -12,7 +12,7 @@ import java.util.Locale
 
 // Pure presentation mapping for the History screen (app spec §5.4). No Android or Compose types, so it is unit-tested.
 
-enum class HistoryAction { CopyPath, Retry, Details, Delete }
+enum class HistoryAction { Play, CopyPath, Retry, Details, Delete }
 
 /** What one history row shows. */
 data class HistoryRowModel(
@@ -62,7 +62,7 @@ fun errorText(errorCode: String?): String = when (errorCode) {
 /**
  * Maps a finished job to its row. [layout] is the job's category layout, when known.
  *
- * Actions: completed gets Copy path (when the server sent a path) and Delete, plus Details when there are warnings
+ * Actions: completed gets Play and Copy path (when the server sent a path) and Delete, plus Details when there are warnings
  * to read; failed gets Retry, Details (when there is an error message) and Delete; cancelled gets Retry and Delete.
  */
 fun JobDto.toHistoryRow(categoryLabel: String, layout: String?): HistoryRowModel {
@@ -71,6 +71,7 @@ fun JobDto.toHistoryRow(categoryLabel: String, layout: String?): HistoryRowModel
     val warned = status == JobStatus.COMPLETED && warnings.isNotEmpty()
     val actions = when (status) {
         JobStatus.COMPLETED -> listOfNotNull(
+            HistoryAction.Play.takeIf { path != null },
             HistoryAction.CopyPath.takeIf { path != null },
             HistoryAction.Details.takeIf { warned },
             HistoryAction.Delete,

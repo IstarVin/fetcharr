@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -261,9 +262,6 @@ func (m *Manager) Save(ctx context.Context, d Document) (Document, error) {
 	if err := c.Validate(); err != nil {
 		return bad(err.Error())
 	}
-	if err := c.ValidateDestinations(); err != nil {
-		return bad(err.Error())
-	}
 	m.runtime.Gate.Lock()
 	defer m.runtime.Gate.Unlock()
 	for _, previous := range m.doc.Categories {
@@ -278,6 +276,17 @@ func (m *Manager) Save(ctx context.Context, d Document) (Document, error) {
 		if count > 0 {
 			return Document{}, fmt.Errorf("%w: %s; finish or cancel its queued and running jobs first", ErrCategoryBusy, previous.ID)
 		}
+	}
+	for _, cat := range c.Categories {
+		if _, exists := m.cfg.Category(cat.ID); exists {
+			continue
+		}
+		if err := os.MkdirAll(cat.Path, 0o755); err != nil {
+			return bad(fmt.Sprintf("category %s: cannot create folder %q: %v", cat.ID, cat.Path, err))
+		}
+	}
+	if err := c.ValidateDestinations(); err != nil {
+		return bad(err.Error())
 	}
 	d.Revision++
 	body, err := json.Marshal(d)

@@ -9,6 +9,7 @@ import com.istarvin.fetcharr.data.network.dto.HealthDto
 import com.istarvin.fetcharr.data.network.dto.InfoDto
 import com.istarvin.fetcharr.data.network.dto.JobDto
 import com.istarvin.fetcharr.data.network.dto.JobListDto
+import com.istarvin.fetcharr.data.network.dto.PlaybackDto
 import com.istarvin.fetcharr.data.network.dto.RetryRequest
 import com.istarvin.fetcharr.data.network.dto.YtdlpUpdateResponse
 import retrofit2.http.Body
@@ -59,6 +60,9 @@ interface FetcharrApi {
 
     @GET("jobs/{id}")
     suspend fun getJob(@Path("id") id: String): JobDto
+
+    @POST("jobs/{id}/playback")
+    suspend fun createPlayback(@Path("id") id: String): PlaybackDto
 
     @POST("jobs/{id}/pause")
     suspend fun pauseJob(@Path("id") id: String): JobDto

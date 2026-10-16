@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
@@ -63,19 +64,20 @@ type Options struct {
 }
 
 type server struct {
-	settings *settings.Manager
-	cfg      *config.Config
-	svc      *service.Service
-	version  string
-	updater  YtdlpUpdater
-	log      *slog.Logger
-	maxBody  int64
-	ytdlp    *versionCache
+	settings    *settings.Manager
+	cfg         *config.Config
+	svc         *service.Service
+	version     string
+	updater     YtdlpUpdater
+	log         *slog.Logger
+	maxBody     int64
+	ytdlp       *versionCache
+	playbackKey [32]byte
 }
 
 // New returns the HTTP handler for the whole API (everything lives under
 // /api). Middleware order, outermost first: request logging, panic recovery,
-// Bearer authentication, routing.
+// routing and endpoint authentication.
 func New(opts Options) http.Handler {
 	s := &server{
 		settings: opts.Settings,
@@ -96,6 +98,7 @@ func New(opts Options) http.Handler {
 		s.maxBody = maxBodyBytesDefault
 	}
 	s.ytdlp = newVersionCache(opts.YtdlpVersion)
+	rand.Read(s.playbackKey[:])
 
 	mux := http.NewServeMux()
 	type route struct {
@@ -112,6 +115,7 @@ func New(opts Options) http.Handler {
 		{"GET", "/api/jobs", s.handleList},
 		{"DELETE", "/api/jobs", s.handleDeleteMany},
 		{"GET", "/api/jobs/{id}", s.handleGet},
+		{"POST", "/api/jobs/{id}/playback", s.handlePlayback},
 		{"DELETE", "/api/jobs/{id}", s.handleDelete},
 		{"POST", "/api/jobs/{id}/pause", s.handleAction("pause")},
 		{"POST", "/api/jobs/{id}/resume", s.handleAction("resume")},
@@ -127,12 +131,15 @@ func New(opts Options) http.Handler {
 		routes = append(routes, route{"GET", "/api/ws", opts.WebSocket.ServeHTTP})
 	}
 	for _, rt := range routes {
-		mux.HandleFunc(rt.method+" "+rt.path, rt.h)
+		mux.Handle(rt.method+" "+rt.path, s.authenticate(rt.h))
 	}
+	// Players cannot reliably send custom headers. Only this read-only route
+	// accepts a signed, expiring link instead of the server's Bearer token.
+	mux.HandleFunc("GET /api/jobs/{id}/media", s.handleMedia)
 	// The catch-all also receives requests whose path exists but whose method
 	// does not (a method-less pattern for those paths would conflict with
 	// "GET /api/jobs/{id}"). Probe the mux to tell 405 from 404.
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/", s.authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var allow []string
 		for _, m := range []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodDelete} {
 			probe := r.Clone(r.Context())
@@ -147,17 +154,18 @@ func New(opts Options) http.Handler {
 			return
 		}
 		writeError(w, http.StatusNotFound, codeNotFound, "no such endpoint")
-	})
+	})))
 
-	return s.logRequests(s.recoverPanics(s.authenticate(mux)))
+	return s.logRequests(s.recoverPanics(mux))
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// authenticate enforces the Bearer token (spec §6.1) on every endpoint except
-// /api/health. With no token configured it is a pass-through.
+// authenticate enforces the Bearer token on API endpoints except /api/health.
+// The signed media stream is registered separately. With no token configured
+// this middleware is a pass-through.
 func (s *server) authenticate(next http.Handler) http.Handler {
 	token := s.cfg.Server.AuthToken
 	if token == "" {

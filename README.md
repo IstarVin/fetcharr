@@ -6,6 +6,10 @@ it with ffmpeg, and files it into movie, TV, or flat library folders. Android
 shows the live queue, history, and background notifications. Server settings
 and optional Jellyfin/Plex connections can be managed in the app.
 
+Tap **Play** on a completed History item to stream the saved file in an external
+Android player. Both the app and server need the playback update. Seeking is
+supported; temporary playback links keep the API token inside Fetcharr.
+
 ## Run the server
 
 Follow the [server quick start](server/README.md) for Docker or a standalone

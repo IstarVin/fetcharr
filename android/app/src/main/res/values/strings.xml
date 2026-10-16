@@ -36,6 +36,9 @@
     <string name="history_replace_confirm">Replace</string>
     <string name="history_retry">Retry</string>
     <string name="history_copy_path">Copy path</string>
+    <string name="history_play">Play</string>
+    <string name="history_no_player">No video player found. Install a player, then try again.</string>
+    <string name="history_player_failed">Couldn\'t open the video player. Try another player.</string>
     <string name="history_details">Details</string>
     <string name="history_path_copied">Path copied</string>
     <string name="history_cd_warning">Completed with warnings</string>
@@ -182,7 +185,7 @@
     <string name="server_settings_auto_update">Update yt-dlp automatically</string>
     <string name="server_settings_unmanaged_hint">Automatic updates are controlled externally when the server uses a custom yt-dlp binary.</string>
     <string name="server_settings_categories">Categories</string>
-    <string name="server_settings_paths_hint">Enter paths on the server, such as /media/movies. Folders must already exist and be writable. Configure Docker mounts on the host.</string>
+    <string name="server_settings_paths_hint">Enter paths on the server, such as /media/movies. Missing folders are created for new categories and must be writable. Configure Docker mounts on the host.</string>
     <string name="server_settings_no_categories">Add a category to start downloading.</string>
     <string name="server_settings_add_category">Add category</string>
     <string name="server_settings_new_category">New category</string>
