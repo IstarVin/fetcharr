@@ -63,6 +63,7 @@ data class HistoryUiState(
     val error: ApiError? = null,
     val dialog: HistoryDialog? = null,
     val preparingPlayback: Set<String> = emptySet(),
+    val deletingJobs: Set<String> = emptySet(),
 ) {
     val isEmpty: Boolean get() = historyLoaded && groups.isEmpty()
 }
@@ -94,6 +95,7 @@ class HistoryViewModel @Inject constructor(
     private val refreshing = MutableStateFlow(false)
     private val dialog = MutableStateFlow<HistoryDialog?>(null)
     private val preparingPlayback = MutableStateFlow<Set<String>>(emptySet())
+    private val deletingJobs = MutableStateFlow<Set<String>>(emptySet())
     private val eventChannel = Channel<HistoryEvent>(Channel.BUFFERED)
     private val inFlight = mutableSetOf<String>()
 
@@ -107,7 +109,7 @@ class HistoryViewModel @Inject constructor(
         Triple(hasServer, state, buildHistoryGroups(state.items, categories, System.currentTimeMillis(), ZoneId.systemDefault()))
     }
 
-    val state: StateFlow<HistoryUiState> = combine(content, refreshing, dialog, preparingPlayback) { (hasServer, repo, groups), isRefreshing, open, preparing ->
+    val state: StateFlow<HistoryUiState> = combine(content, refreshing, dialog, preparingPlayback, deletingJobs) { (hasServer, repo, groups), isRefreshing, open, preparing, deleting ->
         HistoryUiState(
             loaded = true,
             hasServer = hasServer,
@@ -118,6 +120,7 @@ class HistoryViewModel @Inject constructor(
             error = repo.error,
             dialog = open,
             preparingPlayback = preparing,
+            deletingJobs = deleting,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryUiState())
 
@@ -211,12 +214,17 @@ class HistoryViewModel @Inject constructor(
 
     fun confirmDelete() {
         val open = dialog.value as? HistoryDialog.Delete ?: return
+        deletingJobs.update { it + open.jobId }
         dialog.value = null
         val deleteFile = open.canDeleteFile && open.deleteFile
         run("delete:${open.jobId}") {
-            val outcome = actions.delete(open.jobId, deleteFile)
-            if (outcome == ActionOutcome.Ok) history.remove(open.jobId)
-            outcome
+            try {
+                val outcome = actions.delete(open.jobId, deleteFile)
+                if (outcome == ActionOutcome.Ok) history.remove(open.jobId)
+                outcome
+            } finally {
+                deletingJobs.update { it - open.jobId }
+            }
         }
     }
 

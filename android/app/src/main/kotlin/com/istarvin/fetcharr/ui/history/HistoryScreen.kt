@@ -336,6 +336,7 @@ internal fun HistoryContent(
                                                     onOpen = { openRowId = row.id },
                                                     onAction = { onAction(it, row.id) },
                                                     onDeleteSwiped = { onDeleteSwiped(row.id) },
+                                                    deletionPending = (state.dialog as? HistoryDialog.Delete)?.jobId == row.id || row.id in state.deletingJobs,
                                                 )
                                             }
                                         }
@@ -390,14 +391,19 @@ private fun LazyItemScope.HistoryRow(
     onOpen: () -> Unit,
     onAction: (HistoryAction) -> Unit,
     onDeleteSwiped: () -> Unit,
+    deletionPending: Boolean,
 ) {
-    // Never actually dismisses: the swipe only asks for confirmation, then the row snaps back.
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            if (value != SwipeToDismissBoxValue.Settled) onDeleteSwiped()
-            false
-        },
-    )
+    val dismissState = rememberSwipeToDismissBoxState()
+    val requestDelete by rememberUpdatedState(onDeleteSwiped)
+    // Keep the row swiped away while confirming and deleting; restore it on cancel or failure.
+    LaunchedEffect(dismissState.settledValue) {
+        if (dismissState.settledValue == SwipeToDismissBoxValue.EndToStart) {
+            requestDelete()
+        }
+    }
+    LaunchedEffect(deletionPending) {
+        if (!deletionPending) dismissState.reset()
+    }
     val actionLabels = row.actions.associateWith { stringResource(it.labelRes) }
     val colors = MaterialTheme.colorScheme
     val status = MaterialTheme.statusColors

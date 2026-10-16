@@ -42,6 +42,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.CountDownLatch
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HistoryViewModelTest {
@@ -327,6 +328,31 @@ class HistoryViewModelTest {
         vm.state.first { it.dialog != null }
         vm.confirmDelete()
         assertEquals(HistoryEvent.Snackbar("Server error — try again"), vm.events.first())
+        assertEquals(listOf("done"), ids())
+    }
+
+    @Test
+    fun deletionStaysPendingUntilTheRequestFails() = runTest {
+        build(listOf(completed))
+        val responseGate = CountDownLatch(1)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                check(responseGate.await(10, TimeUnit.SECONDS))
+                return MockResponse().setResponseCode(503)
+            }
+        }
+        vm.requestDelete("done")
+        vm.state.first { it.dialog is HistoryDialog.Delete }
+        try {
+            vm.confirmDelete()
+            val deleting = vm.state.first { "done" in it.deletingJobs }
+            assertNull(deleting.dialog)
+            assertEquals(listOf("done"), ids())
+        } finally {
+            responseGate.countDown()
+        }
+        assertEquals(HistoryEvent.Snackbar("Server error — try again"), vm.events.first())
+        vm.state.first { it.deletingJobs.isEmpty() }
         assertEquals(listOf("done"), ids())
     }
 
