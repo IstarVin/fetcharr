@@ -19,6 +19,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -84,12 +85,14 @@ class ServerSettingsViewModelTest {
         assertTrue(vm.uiState.value.dirty)
         server.enqueue(response(FetcharrJson.encodeToString(document.copy(revision = 2, downloads = document.downloads.copy(concurrency = 4)))))
         server.enqueue(response(info))
+        // Subscribe before saving: a fresh `first { }` that races the in-flight write can miss its emission.
+        val observed = await { settings.settings.stateIn(scope) }
         vm.save()
         val saved = await { vm.uiState.first { it.saved } }
         assertFalse(saved.dirty)
         assertEquals("", saved.draft!!.integrations.single().credential)
         assertEquals(2L, saved.draft.revision)
-        await { settings.settings.first { it.defaultTvCategoryId == null && it.cachedCategories.isNotEmpty() } }
+        await { observed.first { it.defaultTvCategoryId == null && it.cachedCategories.isNotEmpty() } }
         server.takeRequest()
         server.takeRequest()
         val request = server.takeRequest()

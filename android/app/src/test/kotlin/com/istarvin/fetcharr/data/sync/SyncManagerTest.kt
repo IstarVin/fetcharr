@@ -323,7 +323,8 @@ class SyncManagerTest {
         val clearing = CountDownLatch(1)
         val cleared = CountDownLatch(1)
         val oldJob = FetcharrJson.decodeFromString<JobDto>(Fixtures.text("job-pending.json"))
-        val oldEffect = async(Dispatchers.Default) {
+        // Each of these blocks a thread (monitor or latch); IO grows its pool, Default would starve on 2 CPUs.
+        val oldEffect = async(Dispatchers.IO) {
             env.apiProvider.withCurrentSession(session) {
                 applying.countDown()
                 check(release.await(5, TimeUnit.SECONDS))
@@ -334,11 +335,11 @@ class SyncManagerTest {
         var replacement: kotlinx.coroutines.Deferred<Unit>? = null
         try {
             assertTrue(applying.await(5, TimeUnit.SECONDS))
-            setter = async(Dispatchers.Default) { env.config.config.value = b }
+            setter = async(Dispatchers.IO) { env.config.config.value = b }
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
             while (env.config.config.value != b && System.nanoTime() < deadline) Thread.yield()
             assertEquals(b, env.config.config.value)
-            replacement = async(Dispatchers.Default) {
+            replacement = async(Dispatchers.IO) {
                 clearing.countDown()
                 env.manager.runFor(false, b)
                 cleared.countDown()

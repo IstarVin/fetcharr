@@ -17,6 +17,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -228,9 +229,11 @@ class SettingsViewModelTest {
         vm.uiState.first { it.loaded }
         vm.onUrlChange("  $hostPort// ")
         vm.onTokenChange(" tok ")
+        // Subscribe before saving: a fresh `first { }` that races the in-flight write can miss its emission.
+        val observed = settings.settings.stateIn(scope)
         assertTrue(vm.save())
         assertEquals("http://$hostPort", vm.uiState.value.url)
-        val saved = settings.settings.first { it.serverUrl.isNotEmpty() }
+        val saved = observed.first { it.serverUrl.isNotEmpty() }
         assertEquals("http://$hostPort", saved.serverUrl)
         assertEquals("tok", saved.token)
         assertEquals("http://$hostPort", settings.config.first { it != null }!!.baseUrl)
