@@ -323,15 +323,12 @@ private fun CategoryEditor(c: CategoryDraft, index: Int, state: ServerSettingsUi
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconTile(icon)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(c.label.ifBlank { c.id }.ifBlank { stringResource(R.string.server_settings_new_category) }, style = MaterialTheme.typography.titleMedium)
+                    Text(c.label.ifBlank { stringResource(R.string.server_settings_new_category) }, style = MaterialTheme.typography.titleMedium)
                     if (c.path.isNotBlank()) Text(c.path, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 ExpandIndicator(expanded || hasErrors)
             }
             if (expanded || hasErrors) {
-                SettingField(R.string.server_settings_category_id, c.id, { change(c.copy(id = it)) }, !state.saving && !c.existing,
-                    errors["category.$index.id"])
-                if (c.existing) Hint(R.string.server_settings_category_id_hint)
                 SettingField(R.string.server_settings_label, c.label, { change(c.copy(label = it)) }, !state.saving)
                 SettingField(R.string.server_settings_destination, c.path, { change(c.copy(path = it)) }, !state.saving,
                     errors["category.$index.path"])

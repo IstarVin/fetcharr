@@ -28,7 +28,8 @@ import kotlinx.coroutines.launch
 
 data class CategoryDraft(
     val key: String = UUID.randomUUID().toString(),
-    val id: String = "",
+    // Keep the generated ID stable across edits and compatible with the server's ID format.
+    val id: String = UUID.randomUUID().toString().replace("-", ""),
     val label: String = "",
     val path: String = "",
     val layout: String = "flat",

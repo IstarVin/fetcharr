@@ -186,6 +186,28 @@ class ServerSettingsViewModelTest {
         assertTrue(windows.validationErrors().isEmpty())
     }
 
+    @Test fun newCategoryIdsAreValidUniqueAndStableAcrossEditsAndReloads() {
+        val first = CategoryDraft()
+        val second = CategoryDraft()
+        assertTrue(Regex("^[a-z0-9_]+$").matches(first.id))
+        assertTrue(Regex("^[a-z0-9_]+$").matches(second.id))
+        assertFalse(first.id == second.id)
+
+        val draft = ServerSettingsDraft.from(document)
+        val updated = draft.copy(categories = draft.categories + first.copy(
+            label = "TV Shows", path = "/media/tv", layout = "tv",
+        ))
+        assertTrue(updated.validationErrors().isEmpty())
+        val saved = updated.document()
+        assertEquals("movies", saved.categories.first().id)
+        assertEquals(first.id, saved.categories.last().id)
+
+        val reloaded = ServerSettingsDraft.from(saved)
+        assertTrue(reloaded.categories.last().existing)
+        val renamed = reloaded.copy(categories = reloaded.categories.map { it.copy(label = "Renamed") })
+        assertEquals(listOf("movies", first.id), renamed.document().categories.map { it.id })
+    }
+
     @Test fun draftPreservesExactBytesAndValidatesCategoriesAndMappings() {
         val draft = ServerSettingsDraft.from(document.copy(downloads = document.downloads.copy(minFreeSpace = 5_123_456_789)))
         assertEquals(5_123_456_789L, draft.document().downloads.minFreeSpace)

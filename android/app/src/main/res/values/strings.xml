@@ -216,8 +216,6 @@
     <string name="server_settings_no_categories">Add a category to start downloading.</string>
     <string name="server_settings_add_category">Add category</string>
     <string name="server_settings_new_category">New category</string>
-    <string name="server_settings_category_id">Category ID</string>
-    <string name="server_settings_category_id_hint">The ID stays fixed after creation.</string>
     <string name="server_settings_label">Label</string>
     <string name="server_settings_destination">Destination folder</string>
     <string name="server_settings_layout">Folder layout</string>
