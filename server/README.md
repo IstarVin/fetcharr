@@ -8,43 +8,42 @@ Full behaviour and the HTTP/WebSocket API are specified in [`docs/fetcharr-serve
 
 ## Quick start (Docker)
 
-1. Create the deployment config and the folders to mount:
+1. From the repository root, create the deployment config and the folders to mount:
 
    ```sh
-   mkdir -p config data
-   cp config.minimal.yaml config/config.yaml   # optionally set server.auth_token
+   mkdir -p .local/fetcharr/config .local/fetcharr/data .local/fetcharr/media
+   cp server/config.minimal.yaml .local/fetcharr/config/config.yaml   # optionally set server.auth_token
    ```
 
    `data_dir` (`/data`) must already exist inside the container and be writable by the container user. Adding a category in Android creates missing media folders, including parent folders, if the container user has permission.
 
-2. Run it (the image runs as UID/GID 1000 by default; pass `--user` to match the owner of your media folders):
+2. Build and start the server with [`compose.yaml`](../compose.yaml):
+
+   ```sh
+   FETCHARR_UID=$(id -u) FETCHARR_GID=$(id -g) docker compose up -d --build
+   ```
+
+   The command runs the container as your current UID/GID; Compose defaults to `1000:1000` when these variables are unset. The user must be able to read `.local/fetcharr/config/config.yaml` and write to the data and media folders. Set the user and host port through environment variables or a root `.env` file:
+
+   ```sh
+   FETCHARR_UID=$(id -u) FETCHARR_GID=$(id -g) \
+     FETCHARR_PORT=8080 \
+     docker compose up -d --build
+   ```
+
+   The default port is `8080`. Bind mounts map `.local/fetcharr/config`, `.local/fetcharr/data`, and `.local/fetcharr/media` to `/config`, `/data`, and `/media`. The data directory persists the database, settings, and managed yt-dlp binary. Ensure the data and media folders are writable by the configured user. Use `docker compose logs -f fetcharr` to view logs and `docker compose down` to stop; the host files remain.
+
+   To use the published image without building locally:
 
    ```sh
    docker run -d --name fetcharr \
-     --user 1000:1000 \
+     --user "$(id -u):$(id -g)" \
      -p 8080:8080 \
-     -v "$PWD/config:/config" \
-     -v "$PWD/data:/data" \
-     -v /mnt/media:/media \
+     -v "$PWD/.local/fetcharr/config:/config" \
+     -v "$PWD/.local/fetcharr/data:/data" \
+     -v "$PWD/.local/fetcharr/media:/media" \
      --restart unless-stopped \
      ghcr.io/istarvin/fetcharr-server:latest
-   ```
-
-   Or with Compose:
-
-   ```yaml
-   services:
-     fetcharr:
-       image: ghcr.io/istarvin/fetcharr-server:latest
-       user: "1000:1000"          # must be able to write to /data and the media folders
-       ports: ["8080:8080"]
-       environment:
-         FETCHARR_CONFIG: /config/config.yaml
-       volumes:
-         - ./config:/config
-         - ./data:/data
-         - /mnt/media:/media
-       restart: unless-stopped
    ```
 
 3. Check it: `curl http://localhost:8080/api/health`. The first start downloads yt-dlp into `/data/bin` and aborts if that download fails, so the container needs internet access on first start (or set `ytdlp.binary` to a binary you mount in).

@@ -1,0 +1,16 @@
+services:
+  fetcharr:
+    build:
+      context: ./server
+    image: fetcharr-server:local
+    user: "${FETCHARR_UID:-1000}:${FETCHARR_GID:-1000}"
+    ports:
+      - "${FETCHARR_PORT:-8083}:8080"
+    environment:
+      FETCHARR_CONFIG: /config/config.yaml
+    volumes:
+      - ./.local/fetcharr/config:/config
+      - ./.local/fetcharr/data:/data
+      - ./.local/fetcharr/media:/media
+    restart: unless-stopped
+    stop_grace_period: 30s

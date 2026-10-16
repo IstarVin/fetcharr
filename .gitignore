@@ -1,0 +1,3 @@
+# Local Docker Compose configuration and persistent files.
+/.env
+/.local/fetcharr/
