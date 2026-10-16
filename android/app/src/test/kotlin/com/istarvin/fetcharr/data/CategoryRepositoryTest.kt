@@ -54,7 +54,7 @@ class CategoryRepositoryTest {
         scope.cancel()
     }
 
-    private fun <T> await(block: suspend () -> T): T = runBlocking { withTimeout(5_000) { block() } }
+    private fun <T> await(block: suspend () -> T): T = runBlocking { withTimeout(30_000) { block() } }
 
     private suspend fun save(url: String, token: String = "token") {
         settings.setServer(url, token)

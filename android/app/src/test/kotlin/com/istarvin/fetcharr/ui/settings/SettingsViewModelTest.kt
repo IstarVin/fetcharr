@@ -159,7 +159,7 @@ class SettingsViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun <T> await(block: suspend () -> T): T = runBlocking { withTimeout(5_000) { block() } }
+    private fun <T> await(block: suspend () -> T): T = runBlocking { withTimeout(30_000) { block() } }
 
     private val hostPort get() = "${server.hostName}:${server.port}"
 

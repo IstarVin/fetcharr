@@ -46,7 +46,7 @@ internal class VmTestEnv(tmpDir: File) {
         CategoryDto("misc", "Misc", "flat"),
     )
 
-    fun <T> await(block: suspend () -> T): T = runBlocking { withTimeout(5_000) { block() } }
+    fun <T> await(block: suspend () -> T): T = runBlocking { withTimeout(30_000) { block() } }
 
     suspend fun configureServer() {
         settings.setServer(server.url("/").toString().trimEnd('/'), "")

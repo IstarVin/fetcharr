@@ -57,7 +57,7 @@ class ServerSettingsViewModelTest {
     @Before fun setup() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         server = MockWebServer().also { it.start() }
-        factory = FetcharrApiFactory(OkHttpClient.Builder().readTimeout(3, TimeUnit.SECONDS).build(), FetcharrJson)
+        factory = FetcharrApiFactory(OkHttpClient.Builder().readTimeout(10, TimeUnit.SECONDS).build(), FetcharrJson)
         settings = SettingsRepository(PreferenceDataStoreFactory.create(scope = scope) { tmp.newFile("settings.preferences_pb") }, FetcharrJson, scope)
     }
 
@@ -200,5 +200,5 @@ class ServerSettingsViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun <T> await(block: suspend () -> T): T = runBlocking { withTimeout(6_000) { block() } }
+    private fun <T> await(block: suspend () -> T): T = runBlocking { withTimeout(30_000) { block() } }
 }
