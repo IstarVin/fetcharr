@@ -2,6 +2,7 @@ name: android
 
 on:
   push:
+    branches: [main]
     paths:
       - "android/**"
       - "contract/**"
@@ -11,22 +12,44 @@ on:
       - "android/**"
       - "contract/**"
       - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: android
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"
       - name: Install Android platform 37
         run: yes | sdkmanager --licenses >/dev/null || true; sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
       - run: ./gradlew test lint assembleDebug assembleRelease
+
+      - name: Upload reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-reports
+          path: |
+            android/app/build/reports/
+            android/app/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 7

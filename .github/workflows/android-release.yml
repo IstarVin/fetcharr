@@ -8,23 +8,30 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: android
     env:
       TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"
       - name: Install Android platform 37
         run: yes | sdkmanager --licenses >/dev/null || true; sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
         with:
           cache-read-only: true
 
@@ -54,13 +61,17 @@ jobs:
           FETCHARR_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           FETCHARR_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           FETCHARR_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ github.run_number }}
         run: >
           ./gradlew test lint assembleRelease
-          -PversionName=${{ steps.version.outputs.name }}
-          -PversionCode=${{ github.run_number }}
+          -PversionName="$VERSION_NAME"
+          -PversionCode="$VERSION_CODE"
 
       - name: Verify the APK is signed
         id: apk
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
         run: |
           APK=$(ls app/build/outputs/apk/release/*.apk)
           case "$APK" in
@@ -68,14 +79,19 @@ jobs:
           esac
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
           "$APKSIGNER" verify --verbose "$APK"
-          OUT="fetcharr-${{ steps.version.outputs.name }}.apk"
+          OUT="fetcharr-${VERSION_NAME}.apk"
           cp "$APK" "$OUT"
           echo "path=android/$OUT" >> "$GITHUB_OUTPUT"
 
+      - name: Remove signing keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: Fetcharr Android ${{ steps.version.outputs.name }}
           prerelease: ${{ contains(steps.version.outputs.name, '-') }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: ${{ steps.apk.outputs.path }}
