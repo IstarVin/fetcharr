@@ -1,5 +1,12 @@
 package com.istarvin.fetcharr.data.network
 
+import com.istarvin.fetcharr.di.ApplicationScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -42,19 +49,61 @@ class FetcharrApiFactory @Inject constructor(
     }
 }
 
-/** The [FetcharrApi] for the currently saved settings, cached per [ServerConfig]. */
+/** A captured connection. Identity distinguishes revisiting the same URL/token from the original connection. */
+class FetcharrApiSession internal constructor(val config: ServerConfig, val api: FetcharrApi)
+
+/** The [FetcharrApi] for the currently saved settings, cached for the lifetime of each connection. */
 @Singleton
 class FetcharrApiProvider @Inject constructor(
     private val factory: FetcharrApiFactory,
     private val configProvider: ServerConfigProvider,
+    @ApplicationScope scope: CoroutineScope = CoroutineScope(SupervisorJob()),
 ) {
-    private var cached: Pair<ServerConfig, FetcharrApi>? = null
+    private var observedConfig: ServerConfig? = configProvider.config.value
+    private var cached: FetcharrApiSession? = null
+
+    init {
+        // Observe settings at emission time, including A -> B -> A between API calls. Running undispatched
+        // also establishes the subscription before a caller can capture its first session.
+        scope.launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+            configProvider.config.collect { config -> synchronized(this@FetcharrApiProvider) { observe(config) } }
+        }
+    }
 
     /** Null when no server is configured. */
+    fun current(): FetcharrApi? = captureSession()?.api
+
+    /** Capture once before starting a request; validate before applying its result. */
     @Synchronized
-    fun current(): FetcharrApi? {
-        val config = configProvider.config.value ?: return null
-        cached?.let { (cfg, api) -> if (cfg == config) return api }
-        return factory.create(config).also { cached = config to it }
+    fun captureSession(): FetcharrApiSession? {
+        observe(configProvider.config.value)
+        val config = observedConfig ?: return null
+        return cached ?: FetcharrApiSession(config, factory.create(config)).also { cached = it }
+    }
+
+    @Synchronized
+    fun isCurrent(session: FetcharrApiSession): Boolean {
+        observe(configProvider.config.value)
+        return cached === session
+    }
+
+    /** Apply synchronous effects only while [session] is current; null means its connection was replaced. */
+    @Synchronized
+    fun <T : Any> withCurrentSession(session: FetcharrApiSession, block: () -> T): T? =
+        if (isCurrent(session)) block() else null
+
+    /** Orders connection replacement effects against results already being applied by a captured session. */
+    @Synchronized
+    fun <T : Any> withCurrentConfig(config: ServerConfig?, block: () -> T): T? {
+        val current = configProvider.config.value
+        observe(current)
+        return if (config == current) block() else null
+    }
+
+    private fun observe(config: ServerConfig?) {
+        if (observedConfig != config) {
+            observedConfig = config
+            cached = null
+        }
     }
 }

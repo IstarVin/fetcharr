@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/istarvin/fetcharr/server/internal/config"
@@ -146,6 +147,88 @@ func TestPauseCancelStopHooks(t *testing.T) {
 	wantCode(t, err, CodeInvalidState)
 	if len(rec.stops) != n+1 {
 		t.Errorf("refused pause called Stop: %v", rec.stops)
+	}
+}
+
+type gatedController struct {
+	Controller
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c *gatedController) Stop(id string, reason StopReason) {
+	close(c.entered)
+	<-c.release
+	c.Controller.Stop(id, reason)
+}
+
+// Hold the stop hook after the state commit, then schedule the competing
+// action until it blocks. Its pending state must wait for that stop hook.
+func TestLifecycleActionsWaitForStopHook(t *testing.T) {
+	for _, cancel := range []bool{false, true} {
+		name := "pause-resume"
+		if cancel {
+			name = "cancel-retry"
+		}
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				svc, st, rec, _ := newSvc(t)
+				ctl := &gatedController{Controller: rec, entered: make(chan struct{}), release: make(chan struct{})}
+				release := sync.OnceFunc(func() { close(ctl.release) })
+				defer release()
+				svc.SetController(ctl)
+				j := seed(t, st, "https://a/hook-order", jobs.StatusDownloading)
+				stopped := make(chan error, 1)
+				go func() {
+					var err error
+					if cancel {
+						_, err = svc.Cancel(t.Context(), j.ID)
+					} else {
+						_, err = svc.Pause(t.Context(), j.ID)
+					}
+					stopped <- err
+				}()
+				<-ctl.entered
+				resumed := make(chan error, 1)
+				go func() {
+					var err error
+					if cancel {
+						_, err = svc.Retry(t.Context(), j.ID, RetryOptions{})
+					} else {
+						_, err = svc.Resume(t.Context(), j.ID)
+					}
+					resumed <- err
+				}()
+				synctest.Wait()
+				overtook := false
+				select {
+				case err := <-resumed:
+					overtook = true
+					t.Errorf("pending action overtook the stop hook: %v", err)
+				default:
+				}
+				row, err := st.Get(t.Context(), j.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := jobs.StatusPaused
+				if cancel {
+					want = jobs.StatusCancelled
+				}
+				if row.Status != want {
+					t.Errorf("status before stop hook returned = %s, want %s", row.Status, want)
+				}
+				release()
+				if err := <-stopped; err != nil {
+					t.Fatal(err)
+				}
+				if !overtook {
+					if err := <-resumed; err != nil {
+						t.Fatal(err)
+					}
+				}
+			})
+		})
 	}
 }
 

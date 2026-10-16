@@ -102,7 +102,7 @@ class QueueViewModelTest {
         val provider = FetcharrApiProvider(factory, settings)
         categories = CategoryRepository(factory, settings, ioScope)
         actions = JobActions(provider, store)
-        sync = SyncManager(connector, settings, store, { }, FetcharrJson, backgroundScope)
+        sync = SyncManager(connector, settings, store, { }, FetcharrJson, backgroundScope, provider)
         vm = QueueViewModel(settings, store, categories, sync, actions)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.state.collect { } }
         // `state` is built from DataStore, which emits from a real thread: wait for it, or `state.value` is still the

@@ -38,10 +38,33 @@ fun interface SubmitListener {
 
 /** The REST calls the result notifier needs. Both return null when the call failed (no network, no server, ...). */
 interface JobsGateway {
+    /** Bind all calls and effects in one notification pass to the same connection. */
+    fun captureSession(): JobsSession? = object : JobsSession {
+        override val serverKey: String? = null
+        override fun isCurrent() = true
+        override suspend fun listFinishedAfter(afterMs: Long) = this@JobsGateway.listFinishedAfter(afterMs)
+        override suspend fun listBatch(batchId: String) = this@JobsGateway.listBatch(batchId)
+    }
+
     /** All completed, failed and cancelled jobs with `finished_at` later than [afterMs], every page. */
     suspend fun listFinishedAfter(afterMs: Long): List<JobDto>?
 
     /** Every job of [batchId]. */
+    suspend fun listBatch(batchId: String): List<JobDto>?
+}
+
+/** A captured gateway connection. Production effects are guarded atomically against settings changes. */
+interface JobsSession {
+    /** The API connection that produced a live finish; compared by identity before consuming buffered events. */
+    val connectionIdentity: Any? get() = null
+    val serverKey: String?
+    fun isCurrent(): Boolean
+    fun runIfCurrent(effect: () -> Unit): Boolean {
+        if (!isCurrent()) return false
+        effect()
+        return true
+    }
+    suspend fun listFinishedAfter(afterMs: Long): List<JobDto>?
     suspend fun listBatch(batchId: String): List<JobDto>?
 }
 
@@ -57,7 +80,7 @@ interface NotifierStateStore {
     suspend fun saveServerKey(key: String)
 }
 
-/** Newest `finished_at` the notifier has processed (epoch ms). */
+/** Completed history boundary (epoch ms); live finishes must not move it over missing recovery work. */
 interface LastSeenStore {
     suspend fun get(): Long?
 

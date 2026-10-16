@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.istarvin.fetcharr.data.CategoryRepository
+import com.istarvin.fetcharr.data.network.ApiResult
+import com.istarvin.fetcharr.data.network.ServerConfig
 import com.istarvin.fetcharr.data.network.dto.SubtitleDto
 import com.istarvin.fetcharr.data.settings.SettingsRepository
 import com.istarvin.fetcharr.incoming.CategoryOption
@@ -17,10 +19,12 @@ import com.istarvin.fetcharr.ui.incoming.SubmitOutcome
 import com.istarvin.fetcharr.ui.incoming.SubmitUseCase
 import com.istarvin.fetcharr.ui.incoming.isHttpUrl
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -36,6 +40,8 @@ data class AddUiState(
     val settingsLoaded: Boolean = false,
     val serverConfigured: Boolean = false,
     val categories: List<CategoryOption> = emptyList(),
+    val categoriesLoading: Boolean = false,
+    val categoryError: String? = null,
     val categoryId: String? = null,
     val form: ItemForm = ItemForm(),
     val headers: List<HeaderRow> = emptyList(),
@@ -67,7 +73,7 @@ sealed interface AddEvent {
 class AddViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val hub: IncomingHub,
-    settings: SettingsRepository,
+    private val settings: SettingsRepository,
     private val categoryRepository: CategoryRepository,
     private val submit: SubmitUseCase,
     private val submitListener: SubmitListener,
@@ -81,7 +87,9 @@ class AddViewModel @Inject constructor(
     val events: Flow<AddEvent> = eventChannel.receiveAsFlow()
 
     private var nextRowId = 1
-    private var refreshed = false
+    private var connection: ServerConfig? = null
+    private var categoryGeneration = 0L
+    private var categoryRequest: Job? = null
 
     init {
         viewModelScope.launch {
@@ -89,12 +97,22 @@ class AddViewModel @Inject constructor(
         }
         viewModelScope.launch {
             settings.settings.collect { app ->
+                val nextConnection = app.serverUrl.takeIf { it.isNotBlank() }
+                    ?.let { ServerConfig(it, app.token.takeIf(String::isNotBlank)) }
+                val connectionChanged = connection != nextConnection
+                if (connectionChanged) {
+                    connection = nextConnection
+                    categoryGeneration++
+                    categoryRequest?.cancel()
+                }
                 val categories = app.cachedCategories.map { CategoryOption(it.id, it.label, it.layout) }
                 _uiState.update { cur ->
                     var next = cur.copy(
                         settingsLoaded = true,
                         serverConfigured = app.serverUrl.isNotBlank(),
                         categories = categories,
+                        categoriesLoading = if (connectionChanged) false else cur.categoriesLoading,
+                        categoryError = if (connectionChanged || categories.isNotEmpty()) null else cur.categoryError,
                     )
                     if (categories.none { it.id == next.categoryId }) {
                         next = next.copy(categoryId = CategoryPreselector.preselect(
@@ -103,10 +121,27 @@ class AddViewModel @Inject constructor(
                     }
                     next
                 }
-                if (app.serverUrl.isNotBlank() && categories.isEmpty() && !refreshed) {
-                    refreshed = true
-                    launch { categoryRepository.refresh() }
-                }
+                if (connectionChanged && nextConnection != null && categories.isEmpty()) refreshCategories()
+            }
+        }
+    }
+
+    /** A retry keeps the current form and is invalidated when the connection changes. */
+    fun refreshCategories() {
+        val target = connection ?: return
+        if (_uiState.value.categoriesLoading) return
+        val generation = categoryGeneration
+        _uiState.update { it.copy(categoriesLoading = true, categoryError = null) }
+        categoryRequest = viewModelScope.launch {
+            // The DataStore and its derived config flow can deliver the same write at different times.
+            settings.config.first { it == target }
+            val result = categoryRepository.refresh(target)
+            if (connection != target || categoryGeneration != generation) return@launch
+            _uiState.update { current ->
+                current.copy(
+                    categoriesLoading = false,
+                    categoryError = (result as? ApiResult.Failure)?.error?.userMessage,
+                )
             }
         }
     }

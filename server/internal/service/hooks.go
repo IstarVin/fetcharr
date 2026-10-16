@@ -54,6 +54,9 @@ const (
 //     be deleted too; the runner decides whether a process is running.
 //
 // Implementations must not block and must not call back into the Service.
+// Lifecycle actions are serialized through their hooks, so a subsequent
+// resume/retry cannot commit pending until Stop returns. Stop must register
+// cancellation and protect any asynchronous cleanup before returning.
 type Controller interface {
 	Wake()
 	Stop(jobID string, reason StopReason)

@@ -161,4 +161,42 @@ class AddViewModelTest {
         assertFalse(vm.uiState.value.serverConfigured)
         assertFalse(vm.uiState.value.canSubmit)
     }
+
+    @Test
+    fun categoryRefreshFailureCanBeRetriedWithoutLosingTheForm() = run {
+        env.configureServer()
+        env.server.enqueue(env.json(401, Fixtures.text("error-unauthorized.json")))
+        val vm = vm("https://example.com/movie")
+        vm.onTitle("Keep this title")
+        val failed = vm.uiState.first { it.categoryError != null && !it.categoriesLoading }
+        assertTrue(failed.categories.isEmpty())
+        assertFalse(failed.canSubmit)
+
+        env.server.enqueue(env.json(200, """{"version":"test","categories":[{"id":"movies","label":"Movies","layout":"movie"}]}"""))
+        vm.refreshCategories()
+        val ready = vm.uiState.first { it.categoryId == "movies" && !it.categoriesLoading }
+        assertEquals(null, ready.categoryError)
+        assertEquals("Keep this title", ready.form.title)
+        assertEquals("https://example.com/movie", ready.url)
+        assertTrue(ready.canSubmit)
+        assertEquals(2, env.server.requestCount)
+    }
+
+    @Test
+    fun emptyServerCategoriesFinishLoadingAndCanBeRefreshedAfterSetup() = run {
+        env.configureServer()
+        env.server.enqueue(env.json(200, """{"version":"test","categories":[]}"""))
+        val vm = vm("https://example.com/movie")
+        // Waiting for the request and repository info distinguishes the initial state from a successful empty response.
+        env.categoryRepository.info.first { it != null }
+        val empty = vm.uiState.first { !it.categoriesLoading }
+        assertEquals(null, empty.categoryError)
+        assertTrue(empty.categories.isEmpty())
+        assertFalse(empty.canSubmit)
+
+        env.server.enqueue(env.json(200, """{"version":"test","categories":[{"id":"misc","label":"Files","layout":"flat"}]}"""))
+        vm.refreshCategories()
+        val ready = vm.uiState.first { it.categoryId == "misc" && !it.categoriesLoading }
+        assertEquals("flat", ready.layout)
+    }
 }

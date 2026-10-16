@@ -22,6 +22,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -78,6 +81,13 @@ fun FetcharrAppUi(openTargets: Flow<OpenTarget> = emptyFlow()) {
     val snackbarHostState = remember { SnackbarHostState() }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val destination = backStackEntry?.destination
+    val onSettingsDestination = destination?.hierarchy?.any {
+        it.hasRoute(SettingsRoute::class) || it.hasRoute(ServerSettingsRoute::class)
+    } == true
+    var recoveringIncomingRequest by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(onSettingsDestination) {
+        if (!onSettingsDestination) recoveringIncomingRequest = false
+    }
     val incomingViewModel: IncomingViewModel = hiltViewModel()
     val openSettings = {
         navController.navigate(SettingsRoute) {
@@ -182,15 +192,20 @@ fun FetcharrAppUi(openTargets: Flow<OpenTarget> = emptyFlow()) {
                             ServerSettingsScreen(onBack = { navController.popBackStack() })
                         }
                         composable<AddRoute> {
-                            AddScreen(onBack = { navController.popBackStack() }, onOpenSettings = { openSettings() })
+                            AddScreen(
+                                onBack = { navController.popBackStack() },
+                                onOpenSettings = { openSettings() },
+                                onOpenServerSettings = { navController.navigate(ServerSettingsRoute) },
+                            )
                         }
                     }
                 }
             }
         }
         IncomingSheetHost(
-            onOpenSettings = { openSettings() },
-            onSettingsDestination = destination?.hierarchy?.any { it.hasRoute(SettingsRoute::class) } == true,
+            onOpenSettings = { recoveringIncomingRequest = true; openSettings() },
+            onSettingsDestination = onSettingsDestination,
+            recoveringInSettings = recoveringIncomingRequest,
             viewModel = incomingViewModel,
         )
     }

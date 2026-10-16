@@ -90,6 +90,10 @@
     <string name="incoming_no_server_body">Add your Fetcharr server in Settings. Your download request is kept until then.</string>
     <string name="incoming_open_settings">Open Settings</string>
     <string name="field_category">Category</string>
+    <string name="add_categories_loading">Loading categories…</string>
+    <string name="add_categories_error">Couldn\'t load categories: %1$s</string>
+    <string name="add_categories_empty">This server has no categories yet. Add a destination folder in Server settings to start downloading.</string>
+    <string name="add_manage_categories">Set up categories</string>
     <string name="field_title">Title</string>
     <string name="field_year">Year</string>
     <string name="field_show">Show</string>
@@ -211,6 +215,9 @@
     <string name="server_settings_edit">Edit</string>
     <string name="server_settings_collapse">Collapse</string>
     <string name="server_settings_discard_title">Discard unsaved changes?</string>
+    <string name="server_settings_leave_saving_title">Leave while saving?</string>
+    <string name="server_settings_leave_saving_message">The server may still apply this save if you leave. Reload Server settings when you return to check the result.</string>
+    <string name="server_settings_leave">Leave screen</string>
     <string name="server_settings_discard_message">Your changes have not been saved to the server.</string>
     <string name="server_settings_discard">Discard changes</string>
     <string name="server_settings_keep_editing">Keep editing</string>

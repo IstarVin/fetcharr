@@ -2,6 +2,7 @@ package com.istarvin.fetcharr.ui.add
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -36,6 +37,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -59,6 +62,7 @@ import com.istarvin.fetcharr.ui.incoming.isHttpUrl
 fun AddScreen(
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenServerSettings: () -> Unit = onOpenSettings,
     viewModel: AddViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -86,6 +90,8 @@ fun AddScreen(
         onRemoveSubtitle = viewModel::removeSubtitle,
         onAddSubtitle = viewModel::addSubtitle,
         onSubmit = viewModel::submit,
+        onRefreshCategories = viewModel::refreshCategories,
+        onOpenServerSettings = onOpenServerSettings,
     )
 }
 
@@ -107,6 +113,8 @@ internal fun AddContent(
     onRemoveSubtitle: (Int) -> Unit,
     onAddSubtitle: () -> Unit,
     onSubmit: () -> Unit,
+    onRefreshCategories: () -> Unit = {},
+    onOpenServerSettings: () -> Unit = onOpenSettings,
 ) {
     Scaffold(
         topBar = {
@@ -122,15 +130,36 @@ internal fun AddContent(
         bottomBar = {
             if (state.settingsLoaded && state.serverConfigured) {
                 FormFooter(Modifier.imePadding().navigationBarsPadding()) {
-                    if (state.submitting) {
-                        val sending = stringResource(R.string.a11y_sending)
-                        CircularProgressIndicator(
-                            Modifier.size(24.dp).semantics { contentDescription = sending },
-                            strokeWidth = 2.dp,
-                        )
-                    }
-                    Button(onClick = onSubmit, enabled = state.canSubmit, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Text(stringResource(R.string.add_submit))
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        state.error?.let { error ->
+                            Text(
+                                error,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                            if (error == ApiError.Unauthorized.userMessage) {
+                                TextButton(onClick = onOpenSettings, modifier = Modifier.heightIn(min = 48.dp)) {
+                                    Text(stringResource(R.string.queue_snackbar_settings))
+                                }
+                            }
+                        }
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (state.submitting) {
+                                val sending = stringResource(R.string.a11y_sending)
+                                CircularProgressIndicator(
+                                    Modifier.size(24.dp).semantics { contentDescription = sending },
+                                    strokeWidth = 2.dp,
+                                )
+                            }
+                            Button(onClick = onSubmit, enabled = state.canSubmit, modifier = Modifier.heightIn(min = 48.dp)) {
+                                Text(stringResource(R.string.add_submit))
+                            }
+                        }
                     }
                 }
             }
@@ -182,7 +211,37 @@ internal fun AddContent(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 )
                 FormSection(stringResource(R.string.field_category)) {
-                    CategoryChips(state.categories, state.categoryId, onSelectCategory)
+                    when {
+                        state.categoriesLoading && state.categories.isEmpty() -> {
+                            Text(stringResource(R.string.add_categories_loading))
+                            CircularProgressIndicator(Modifier.size(24.dp))
+                        }
+                        state.categoryError != null && state.categories.isEmpty() -> {
+                            Text(
+                                stringResource(R.string.add_categories_error, state.categoryError),
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                            OutlinedButton(onClick = onRefreshCategories, modifier = Modifier.heightIn(min = 48.dp)) {
+                                Text(stringResource(R.string.history_error_retry))
+                            }
+                            if (state.categoryError == ApiError.Unauthorized.userMessage) {
+                                TextButton(onClick = onOpenSettings, modifier = Modifier.heightIn(min = 48.dp)) {
+                                    Text(stringResource(R.string.queue_snackbar_settings))
+                                }
+                            }
+                        }
+                        state.categories.isEmpty() -> {
+                            Text(stringResource(R.string.add_categories_empty))
+                            OutlinedButton(onClick = onOpenServerSettings, modifier = Modifier.heightIn(min = 48.dp)) {
+                                Text(stringResource(R.string.add_manage_categories))
+                            }
+                            TextButton(onClick = onRefreshCategories, modifier = Modifier.heightIn(min = 48.dp)) {
+                                Text(stringResource(R.string.history_error_retry))
+                            }
+                        }
+                        else -> CategoryChips(state.categories, state.categoryId, onSelectCategory)
+                    }
                 }
                 state.layout?.let { ItemFormFields(it, state.form, actions) }
                 FormSection(stringResource(R.string.add_headers)) {
@@ -256,16 +315,6 @@ internal fun AddContent(
                     OutlinedButton(onClick = onAddSubtitle, modifier = Modifier.heightIn(min = 48.dp)) {
                         Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Text(stringResource(R.string.add_subtitle_add), modifier = Modifier.padding(start = 8.dp))
-                    }
-                }
-                state.error?.let {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-                        if (it == ApiError.Unauthorized.userMessage) {
-                            TextButton(onClick = onOpenSettings, modifier = Modifier.heightIn(min = 48.dp)) {
-                                Text(stringResource(R.string.queue_snackbar_settings))
-                            }
-                        }
                     }
                 }
             }

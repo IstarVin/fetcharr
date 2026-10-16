@@ -16,7 +16,8 @@ import (
 // place moves the subtitles and then the media file into the library (spec
 // §4.3 step 3). The media file goes last: until then the work directory still
 // holds it, so a failed placement can be retried, and the files placed so far
-// are removed again. ctx only interrupts a cross-filesystem copy.
+// are removed again. Overwritten files are backed up until the media succeeds.
+// ctx only interrupts a cross-filesystem copy.
 func (p *Processor) place(ctx context.Context, t naming.Target, mediaFile string, subs []subtitle, overwrite bool) (err error) {
 	// MkdirAll follows symlinks. The folder was checked before (the deepest
 	// existing ancestor is inside the root, the rest is new); check again
@@ -37,23 +38,80 @@ func (p *Processor) place(ctx context.Context, t naming.Target, mediaFile string
 	media := filepath.Join(dir, t.Base+filepath.Ext(mediaFile))
 	keep := map[string]bool{media: true}
 
-	var placed []string
+	type placement struct {
+		dst, backup string
+		placed      bool
+	}
+	var placed []placement
+	var backupDir string
 	defer func() {
 		if err != nil {
-			for _, f := range placed {
-				_ = os.Remove(f)
+			for i := len(placed) - 1; i >= 0; i-- {
+				f := placed[i]
+				if f.backup != "" {
+					// Restore atomically over a replacement. If this fails, leave
+					// the backup intact and identify it in the returned error.
+					if rerr := os.Rename(f.backup, f.dst); rerr != nil {
+						err = errors.Join(err, fmt.Errorf("restore %s from %s: %w", f.dst, f.backup, rerr))
+					}
+				} else if f.placed {
+					if rerr := os.Remove(f.dst); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
+						err = errors.Join(err, fmt.Errorf("rollback %s: %w", f.dst, rerr))
+					}
+				}
+			}
+			if backupDir != "" {
+				// Remove only an empty directory: a failed restore must retain
+				// its original file for recovery.
+				if rerr := os.Remove(backupDir); rerr != nil {
+					err = errors.Join(err, fmt.Errorf("remove backup directory %s: %w", backupDir, rerr))
+				}
+			}
+		} else if backupDir != "" {
+			if rerr := os.RemoveAll(backupDir); rerr != nil {
+				p.log.Warn("overwrite: delete backups", "dir", backupDir, "err", rerr)
 			}
 		}
 	}()
+	placeFile := func(src, dst string) error {
+		f := placement{dst: dst}
+		if overwrite {
+			if info, statErr := os.Lstat(dst); statErr == nil {
+				if info.IsDir() {
+					return fmt.Errorf("cannot replace directory %s", dst)
+				}
+				if backupDir == "" {
+					var mkErr error
+					backupDir, mkErr = os.MkdirTemp(dir, ".fetcharr-overwrite-")
+					if mkErr != nil {
+						return mkErr
+					}
+				}
+				f.backup = filepath.Join(backupDir, filepath.Base(dst))
+				// Both paths are in the resolved library directory, so this
+				// rename cannot cross filesystems or expose a partial copy.
+				if renameErr := os.Rename(dst, f.backup); renameErr != nil {
+					return renameErr
+				}
+			} else if !errors.Is(statErr, os.ErrNotExist) {
+				return statErr
+			}
+		}
+		placed = append(placed, f)
+		if moveErr := p.move(ctx, src, dst); moveErr != nil {
+			return moveErr
+		}
+		placed[len(placed)-1].placed = true
+		return nil
+	}
 	for i, s := range subs {
 		dst := filepath.Join(dir, names[i])
 		keep[dst] = true
-		if err := p.move(ctx, s.path, dst); err != nil {
+		if err := placeFile(s.path, dst); err != nil {
 			return err
 		}
-		placed = append(placed, dst)
 	}
-	if err := p.move(ctx, mediaFile, media); err != nil {
+	if err := placeFile(mediaFile, media); err != nil {
 		return err
 	}
 

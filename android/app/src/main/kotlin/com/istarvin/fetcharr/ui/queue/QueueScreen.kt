@@ -35,7 +35,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -132,6 +131,7 @@ internal fun QueueContent(
     onResumeAll: (String) -> Unit,
     onRequestCancelAll: (BatchGroup) -> Unit,
 ) {
+    var expandedBatchIds by rememberSaveable { mutableStateOf(listOf<String>()) }
     Scaffold(
         topBar = { TopAppBar(title = { Text(stringResource(R.string.nav_queue)) }) },
         floatingActionButton = {
@@ -164,23 +164,51 @@ internal fun QueueContent(
                                 } else {
                                     for (section in state.sections) {
                                         item(key = "header:${section.kind.name}") { SectionHeader(section.kind) }
-                                        items(section.items, key = { it.key }) { item ->
+                                        for (item in section.items) {
                                             when (item) {
-                                                is JobItem -> JobCard(
-                                                    job = item.job,
-                                                    onPause = { onPause(item.job.id) },
-                                                    onResume = { onResume(item.job.id) },
-                                                    onCancel = { onRequestCancel(item.job) },
-                                                )
-                                                is BatchGroup -> BatchGroupCard(
-                                                    group = item,
-                                                    onPause = onPause,
-                                                    onResume = onResume,
-                                                    onRequestCancel = onRequestCancel,
-                                                    onPauseAll = { onPauseAll(item.batchId) },
-                                                    onResumeAll = { onResumeAll(item.batchId) },
-                                                    onCancelAll = { onRequestCancelAll(item) },
-                                                )
+                                                is JobItem -> item(key = item.key, contentType = "job") {
+                                                    JobCard(
+                                                        job = item.job,
+                                                        onPause = { onPause(item.job.id) },
+                                                        onResume = { onResume(item.job.id) },
+                                                        onCancel = { onRequestCancel(item.job) },
+                                                    )
+                                                }
+                                                is BatchGroup -> {
+                                                    val expanded = item.batchId in expandedBatchIds
+                                                    item(key = item.key, contentType = "batch") {
+                                                        BatchGroupCard(
+                                                            group = item,
+                                                            expanded = expanded,
+                                                            onToggleExpanded = {
+                                                                expandedBatchIds = if (expanded) {
+                                                                    expandedBatchIds - item.batchId
+                                                                } else {
+                                                                    expandedBatchIds + item.batchId
+                                                                }
+                                                            },
+                                                            onPauseAll = { onPauseAll(item.batchId) },
+                                                            onResumeAll = { onResumeAll(item.batchId) },
+                                                            onCancelAll = { onRequestCancelAll(item) },
+                                                        )
+                                                    }
+                                                    if (expanded) {
+                                                        items(item.jobs, key = { "${item.key}:job:${it.id}" }, contentType = { "batch-job" }) { job ->
+                                                            Card(
+                                                                modifier = Modifier.fillMaxWidth().padding(start = 12.dp),
+                                                                shape = RoundedCornerShape(16.dp),
+                                                            ) {
+                                                                JobDetails(
+                                                                    job = job,
+                                                                    onPause = { onPause(job.id) },
+                                                                    onResume = { onResume(job.id) },
+                                                                    onCancel = { onRequestCancel(job) },
+                                                                    showCategory = false,
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -395,15 +423,12 @@ private fun ProgressRow(progress: Float?, indeterminate: Boolean, percentLabel: 
 @Composable
 private fun BatchGroupCard(
     group: BatchGroup,
-    onPause: (String) -> Unit,
-    onResume: (String) -> Unit,
-    onRequestCancel: (JobCardModel) -> Unit,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
     onPauseAll: () -> Unit,
     onResumeAll: () -> Unit,
     onCancelAll: () -> Unit,
-    initiallyExpanded: Boolean = false,
 ) {
-    var expanded by rememberSaveable(group.key) { mutableStateOf(initiallyExpanded) }
     var menuOpen by remember { mutableStateOf(false) }
     val toggleLabel = stringResource(if (expanded) R.string.queue_batch_collapse else R.string.queue_batch_expand, group.title)
     val canPause = group.jobs.any { JobAction.Pause in it.actions }
@@ -412,7 +437,7 @@ private fun BatchGroupCard(
     Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
         Column(Modifier.padding(vertical = 8.dp)) {
             Row(
-                Modifier.fillMaxWidth().clickable(onClickLabel = toggleLabel) { expanded = !expanded }.padding(start = 16.dp, end = 4.dp),
+                Modifier.fillMaxWidth().clickable(onClickLabel = toggleLabel, onClick = onToggleExpanded).padding(start = 16.dp, end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f).padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -449,20 +474,6 @@ private fun BatchGroupCard(
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.queue_batch_cancel_all)) },
                             onClick = { menuOpen = false; onCancelAll() },
-                        )
-                    }
-                }
-            }
-            if (expanded) {
-                Column {
-                    for (job in group.jobs) {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        JobDetails(
-                            job = job,
-                            onPause = { onPause(job.id) },
-                            onResume = { onResume(job.id) },
-                            onCancel = { onRequestCancel(job) },
-                            showCategory = false,
                         )
                     }
                 }
@@ -520,16 +531,28 @@ private fun PopulatedQueuePreview() {
     )))
 }
 
-@Preview(name = "Queue · expanded batch", showBackground = true)
+@Preview(name = "Queue · expanded batch", showBackground = true, heightDp = 600)
 @Composable
 private fun ExpandedBatchPreview() {
+    val group = BatchGroup("batch", QueueSectionKind.Active, "A television series — Season 2", listOf(previewQueueJob("one"), previewQueueJob("two")), 0.64f)
     FetcharrTheme {
         Surface {
-            BatchGroupCard(
-                group = BatchGroup("batch", QueueSectionKind.Active, "A television series — Season 2", listOf(previewQueueJob("one"), previewQueueJob("two")), 0.64f),
-                onPause = {}, onResume = {}, onRequestCancel = {}, onPauseAll = {}, onResumeAll = {}, onCancelAll = {},
-                initiallyExpanded = true,
-            )
+            LazyColumn(
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item {
+                    BatchGroupCard(
+                        group = group, expanded = true, onToggleExpanded = {},
+                        onPauseAll = {}, onResumeAll = {}, onCancelAll = {},
+                    )
+                }
+                items(group.jobs, key = { it.id }) { job ->
+                    Card(Modifier.fillMaxWidth().padding(start = 12.dp), shape = RoundedCornerShape(16.dp)) {
+                        JobDetails(job, onPause = {}, onResume = {}, onCancel = {}, showCategory = false)
+                    }
+                }
+            }
         }
     }
 }

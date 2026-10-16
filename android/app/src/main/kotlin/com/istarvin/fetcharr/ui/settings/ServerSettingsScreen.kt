@@ -74,9 +74,14 @@ fun ServerSettingsScreen(onBack: () -> Unit, viewModel: ServerSettingsViewModel 
         if (message != null) snackbar.showSnackbar(message)
     }
     var discardAction by remember(state.serverUrl) { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.saving) {
+        if (!state.saving && discardAction == "saving") discardAction = null
+    }
     val leave = {
-        if (!state.saving) {
-            if (state.dirty) discardAction = "back" else onBack()
+        when {
+            state.saving -> discardAction = "saving"
+            state.dirty -> discardAction = "back"
+            else -> onBack()
         }
     }
     BackHandler(enabled = state.dirty || state.saving) { leave() }
@@ -84,14 +89,14 @@ fun ServerSettingsScreen(onBack: () -> Unit, viewModel: ServerSettingsViewModel 
     if (discardAction != null) {
         AlertDialog(
             onDismissRequest = { discardAction = null },
-            title = { Text(stringResource(R.string.server_settings_discard_title)) },
-            text = { Text(stringResource(R.string.server_settings_discard_message)) },
+            title = { Text(stringResource(if (discardAction == "saving") R.string.server_settings_leave_saving_title else R.string.server_settings_discard_title)) },
+            text = { Text(stringResource(if (discardAction == "saving") R.string.server_settings_leave_saving_message else R.string.server_settings_discard_message)) },
             confirmButton = {
                 TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = {
                     val action = discardAction
                     discardAction = null
                     if (action == "reload") viewModel.reload() else onBack()
-                }) { Text(stringResource(R.string.server_settings_discard)) }
+                }) { Text(stringResource(if (discardAction == "saving") R.string.server_settings_leave else R.string.server_settings_discard)) }
             },
             dismissButton = {
                 TextButton(modifier = Modifier.heightIn(min = 48.dp), onClick = { discardAction = null }) { Text(stringResource(R.string.server_settings_keep_editing)) }
@@ -104,7 +109,7 @@ fun ServerSettingsScreen(onBack: () -> Unit, viewModel: ServerSettingsViewModel 
             TopAppBar(
                 title = { Text(stringResource(R.string.server_settings_title)) },
                 navigationIcon = {
-                    IconButton(onClick = leave, enabled = !state.saving) {
+                    IconButton(onClick = leave) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.server_settings_back))
                     }
                 },

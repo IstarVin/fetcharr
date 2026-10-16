@@ -1,10 +1,15 @@
 package com.istarvin.fetcharr.data.sync
 
 import app.cash.turbine.test
+import com.istarvin.fetcharr.data.network.FetcharrApiFactory
+import com.istarvin.fetcharr.data.network.FetcharrApiProvider
 import com.istarvin.fetcharr.data.network.FetcharrJson
 import com.istarvin.fetcharr.data.network.Fixtures
 import com.istarvin.fetcharr.data.network.ServerConfig
 import com.istarvin.fetcharr.data.network.ServerConfigProvider
+import com.istarvin.fetcharr.data.network.dto.JobDto
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +24,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import okhttp3.OkHttpClient
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SyncManagerTest {
@@ -53,9 +61,12 @@ class SyncManagerTest {
         val connector = FakeConnector().also { it.clock = { scope.currentTime } }
         val config = FakeConfig(config)
         val store = ActiveJobsStore()
+        val apiProvider = FetcharrApiProvider(
+            FetcharrApiFactory(OkHttpClient(), FetcharrJson), this.config, scope.backgroundScope,
+        )
         var refreshes = 0
         val manager = SyncManager(
-            connector, this.config, store, { refreshes++ }, FetcharrJson, scope.backgroundScope,
+            connector, this.config, store, { refreshes++ }, FetcharrJson, scope.backgroundScope, apiProvider,
         )
     }
 
@@ -303,6 +314,77 @@ class SyncManagerTest {
     }
 
     @Test
+    fun replacementClearWaitsForAnOldSessionEffectAlreadyBeingApplied() = runTest {
+        val env = env()
+        runCurrent()
+        val session = env.apiProvider.captureSession()!!
+        val applying = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val clearing = CountDownLatch(1)
+        val cleared = CountDownLatch(1)
+        val oldJob = FetcharrJson.decodeFromString<JobDto>(Fixtures.text("job-pending.json"))
+        val oldEffect = async(Dispatchers.Default) {
+            env.apiProvider.withCurrentSession(session) {
+                applying.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+                env.store.upsert(oldJob)
+            }
+        }
+        var setter: kotlinx.coroutines.Deferred<Unit>? = null
+        var replacement: kotlinx.coroutines.Deferred<Unit>? = null
+        try {
+            assertTrue(applying.await(5, TimeUnit.SECONDS))
+            setter = async(Dispatchers.Default) { env.config.config.value = b }
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (env.config.config.value != b && System.nanoTime() < deadline) Thread.yield()
+            assertEquals(b, env.config.config.value)
+            replacement = async(Dispatchers.Default) {
+                clearing.countDown()
+                env.manager.runFor(false, b)
+                cleared.countDown()
+            }
+            assertTrue(clearing.await(5, TimeUnit.SECONDS))
+            assertEquals("Replacement must wait for the old effect", 1L, cleared.count)
+        } finally {
+            release.countDown()
+        }
+        oldEffect.await()
+        setter?.await()
+        replacement?.await()
+        assertTrue(env.store.jobs.value.isEmpty())
+        assertFalse(env.store.hasSnapshot.value)
+    }
+
+    @Test
+    fun staleConfigRunCannotClearOrChangeCurrentConnectionState() = runTest {
+        val env = env()
+        env.manager.acquire("ui")
+        runCurrent()
+        env.config.config.value = b
+        runCurrent()
+        val socket = env.connector.attempts.last()
+        socket.open()
+        socket.send(Fixtures.text("ws-snapshot.json"))
+        runCurrent()
+        val currentJobs = env.store.jobs.value
+        env.manager.runFor(false, a)
+        env.manager.runFor(true, a)
+        env.manager.runFor(false, null)
+        assertEquals(currentJobs, env.store.jobs.value)
+        assertEquals(ConnectionState.Connected, env.manager.state.value)
+        assertEquals(2, env.connector.attempts.size)
+    }
+
+    @Test
+    fun firstProcessedConfigClearsJobsFromBeforeTheCollectorStarted() = runTest {
+        val env = env()
+        env.store.upsert(FetcharrJson.decodeFromString<JobDto>(Fixtures.text("job-pending.json")))
+        env.config.config.value = b
+        runCurrent()
+        assertTrue(env.store.jobs.value.isEmpty())
+    }
+
+    @Test
     fun releasingTheLastHolderClosesAndStopsRetrying() = runTest {
         val env = env()
         env.manager.acquire("ui")
@@ -388,5 +470,41 @@ class SyncManagerTest {
         assertEquals(ConnectionState.Connecting, env.manager.state.value)
         assertTrue(env.store.jobs.value.isEmpty())
         assertEquals(2, env.connector.attempts.size)
+    }
+
+    @Test
+    fun oldSocketIsRejectedAfterSwitchingAwayAndBackBeforeCollectorRuns() = runTest {
+        val env = env()
+        env.manager.acquire("ui")
+        runCurrent()
+        val old = env.connector.attempts.single()
+        val oldSession = env.apiProvider.captureSession()!!
+        old.open()
+        old.send(Fixtures.text("ws-snapshot.json"))
+        env.config.config.value = b
+        env.config.config.value = a
+        assertFalse(env.apiProvider.isCurrent(oldSession))
+        runCurrent()
+        assertTrue(old.closed)
+        assertTrue(env.store.jobs.value.isEmpty())
+        assertEquals(0, env.refreshes)
+        assertEquals(2, env.connector.attempts.size)
+        assertEquals(ConnectionState.Connecting, env.manager.state.value)
+    }
+
+    @Test
+    fun socketFinishPreservesTheConnectionsCapturedSessionIdentity() = runTest {
+        val env = env()
+        env.manager.acquire("ui")
+        runCurrent()
+        val session = env.apiProvider.captureSession()!!
+        val socket = env.connector.attempts.single()
+        socket.open()
+        runCurrent()
+        env.store.finishedEvents.test {
+            socket.send("""{"type":"job_updated","job":${Fixtures.text("job-completed.json")}}""")
+            runCurrent()
+            assertTrue(awaitItem().connectionIdentity === session)
+        }
     }
 }

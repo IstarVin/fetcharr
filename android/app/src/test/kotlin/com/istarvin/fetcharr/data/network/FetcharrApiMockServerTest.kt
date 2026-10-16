@@ -11,6 +11,7 @@ import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -182,6 +183,30 @@ class FetcharrApiMockServerTest {
         assertTrue(first !== provider.current())
         flow.value = null
         assertNull(provider.current())
+    }
+
+    @Test
+    fun capturedSessionStaysInvalidAfterSwitchingAwayAndBack() {
+        val original = ServerConfig(baseUrl(), "t")
+        val flow = kotlinx.coroutines.flow.MutableStateFlow<ServerConfig?>(original)
+        val provider = FetcharrApiProvider(factory, object : ServerConfigProvider {
+            override val config = flow
+        })
+        val first = provider.captureSession()!!
+        assertTrue(provider.isCurrent(first))
+        assertTrue(first === provider.captureSession())
+        flow.value = original.copy(token = "other")
+        flow.value = original
+        assertFalse(provider.isCurrent(first))
+        var applied = false
+        assertNull(provider.withCurrentSession(first) { applied = true })
+        assertFalse(applied)
+        val next = provider.captureSession()!!
+        assertTrue(provider.isCurrent(next))
+        assertTrue(first.api !== next.api)
+        flow.value = null
+        flow.value = original
+        assertFalse(provider.isCurrent(next))
     }
 
     @Test

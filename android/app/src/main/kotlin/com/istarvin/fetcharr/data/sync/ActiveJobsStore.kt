@@ -45,20 +45,29 @@ class ActiveJobsStore @Inject constructor() {
      */
     val finished: SharedFlow<JobDto> = _finished.asSharedFlow()
 
+    /** Tags queued finishes with their originating store contents, so a later server cannot consume them. */
+    data class FinishedEvent(val job: JobDto, val generation: Long, val connectionIdentity: Any? = null)
+
+    private val _finishedEvents = MutableSharedFlow<FinishedEvent>(
+        extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val finishedEvents: SharedFlow<FinishedEvent> = _finishedEvents.asSharedFlow()
+
     private val lock = Any()
+    private var generation = 0L
     private val recentlyFinished = LinkedHashSet<String>()
 
-    fun apply(event: WsEvent) {
+    fun apply(event: WsEvent, connectionIdentity: Any? = null) {
         when (event) {
-            is WsEvent.Snapshot -> {
+            is WsEvent.Snapshot -> synchronized(lock) {
                 _jobs.value = event.jobs.filter { it.status.isActive }
                 _hasSnapshot.value = true
                 _snapshotFresh.value = true
-                synchronized(lock) { event.jobs.forEach { if (it.status.isActive) recentlyFinished.remove(it.id) } }
+                event.jobs.forEach { if (it.status.isActive) recentlyFinished.remove(it.id) }
             }
-            is WsEvent.JobAdded -> upsert(event.job)
-            is WsEvent.JobUpdated -> upsert(event.job)
-            is WsEvent.JobRemoved -> {
+            is WsEvent.JobAdded -> upsert(event.job, connectionIdentity)
+            is WsEvent.JobUpdated -> upsert(event.job, connectionIdentity)
+            is WsEvent.JobRemoved -> synchronized(lock) {
                 val ids = event.jobIds.toSet()
                 _jobs.update { list -> list.filterNot { it.id in ids } }
             }
@@ -67,37 +76,58 @@ class ActiveJobsStore @Inject constructor() {
     }
 
     /** Applies a job fetched over REST (or any updated job) with the same rules as `job_updated`. */
-    fun upsert(job: JobDto) {
-        if (job.status.isActive) {
-            synchronized(lock) { recentlyFinished.remove(job.id) }
-            _jobs.update { list ->
-                val index = list.indexOfFirst { it.id == job.id }
-                if (index < 0) list + job else list.toMutableList().also { it[index] = job }
+    fun upsert(job: JobDto, connectionIdentity: Any? = null) {
+        val finishedEvent = synchronized(lock) {
+            if (job.status.isActive) {
+                recentlyFinished.remove(job.id)
+                _jobs.update { list ->
+                    val index = list.indexOfFirst { it.id == job.id }
+                    if (index < 0) list + job else list.toMutableList().also { it[index] = job }
+                }
+                null
+            } else {
+                _jobs.update { list -> if (list.any { it.id == job.id }) list.filterNot { it.id == job.id } else list }
+                if (markFinished(job.id)) FinishedEvent(job, generation, connectionIdentity) else null
             }
-        } else {
-            _jobs.update { list -> if (list.any { it.id == job.id }) list.filterNot { it.id == job.id } else list }
-            if (markFinished(job.id)) _finished.tryEmit(job)
+        }
+        // Keep flow consumers outside the lock. A concurrent clear invalidates the captured generation even
+        // when it happens between tagging and emission, and consumers can safely acquire their API lock.
+        if (finishedEvent != null) {
+            _finishedEvents.tryEmit(finishedEvent)
+            _finished.tryEmit(job)
         }
     }
 
+    fun currentGeneration(): Long = synchronized(lock) { generation }
+
+    fun isCurrentGeneration(expected: Long): Boolean = synchronized(lock) { generation == expected }
+
+    /** Call inside an API session guard to serialize posting with connection-driven clears. */
+    fun runIfCurrentGeneration(expected: Long, effect: () -> Unit): Boolean = synchronized(lock) {
+        if (generation != expected) return@synchronized false
+        effect()
+        true
+    }
+
     /** The WebSocket opened: the server's snapshot is on its way and the list is stale until it arrives. */
-    fun onConnectionOpened() {
+    fun onConnectionOpened() = synchronized(lock) {
         _snapshotFresh.value = false
     }
 
     /** Forgets everything, e.g. when the server changes. */
-    fun clear() {
+    fun clear() = synchronized(lock) {
+        generation++
         _jobs.value = emptyList()
         _hasSnapshot.value = false
         _snapshotFresh.value = false
-        synchronized(lock) { recentlyFinished.clear() }
+        recentlyFinished.clear()
     }
 
     /** True the first time [id] is marked since it was last active. */
-    private fun markFinished(id: String): Boolean = synchronized(lock) {
+    private fun markFinished(id: String): Boolean {
         val added = recentlyFinished.add(id)
         if (recentlyFinished.size > MAX_REMEMBERED) recentlyFinished.remove(recentlyFinished.first())
-        added
+        return added
     }
 
     private companion object {

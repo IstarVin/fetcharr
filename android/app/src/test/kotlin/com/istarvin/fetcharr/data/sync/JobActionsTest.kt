@@ -9,17 +9,23 @@ import com.istarvin.fetcharr.data.network.ServerConfig
 import com.istarvin.fetcharr.data.network.ServerConfigProvider
 import com.istarvin.fetcharr.data.network.dto.JobDto
 import com.istarvin.fetcharr.data.network.dto.JobStatus
+import com.istarvin.fetcharr.data.network.dto.WsEvent
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.CountDownLatch
 
 class JobActionsTest {
     private lateinit var server: MockWebServer
@@ -27,6 +33,7 @@ class JobActionsTest {
         override val config = MutableStateFlow<ServerConfig?>(null)
     }
     private val store = ActiveJobsStore()
+    private lateinit var apiProvider: FetcharrApiProvider
     private lateinit var actions: JobActions
 
     private val completedId = "91b4c6e8-0d3f-4a25-8e7b-c5a2f1d60937"
@@ -37,7 +44,8 @@ class JobActionsTest {
         server.start()
         configProvider.config.value = ServerConfig(server.url("/").toString().trimEnd('/'), "tok")
         val client = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(2, TimeUnit.SECONDS).build()
-        actions = JobActions(FetcharrApiProvider(FetcharrApiFactory(client, FetcharrJson), configProvider), store)
+        apiProvider = FetcharrApiProvider(FetcharrApiFactory(client, FetcharrJson), configProvider)
+        actions = JobActions(apiProvider, store)
     }
 
     @After
@@ -92,6 +100,18 @@ class JobActionsTest {
         assertEquals("GET", refresh.method)
         assertEquals("/api/jobs/$completedId", refresh.path)
         assertTrue(store.jobs.value.isEmpty())
+    }
+
+    @Test
+    fun finishedActionPreservesItsCapturedConnectionIdentity() = runBlocking {
+        val session = apiProvider.captureSession()!!
+        server.enqueue(json(200, Fixtures.text("job-completed.json")))
+        store.finishedEvents.test {
+            assertEquals(ActionOutcome.Ok, actions.cancel(completedId))
+            val event = awaitItem()
+            assertEquals(completedId, event.job.id)
+            assertTrue(event.connectionIdentity === session)
+        }
     }
 
     @Test
@@ -192,5 +212,108 @@ class JobActionsTest {
     fun deleteOfActiveJobIsChanged() = runBlocking {
         server.enqueue(json(409, Fixtures.text("error-invalid_state.json")))
         assertEquals(ActionOutcome.Changed("Job already changed"), actions.delete("j", false))
+    }
+
+    @Test
+    fun delayedSingleActionCannotPopulateAnotherServersQueue() = assertStaleResponse(
+        json(200, Fixtures.text("job-paused.json")),
+        action = { actions.pause("old-job") },
+    )
+
+    @Test
+    fun delayedBatchCannotPopulateAnotherServersQueue() = assertStaleResponse(
+        json(200, """{"jobs":[${Fixtures.text("job-paused.json")}]}"""),
+        action = { actions.pauseAll("old-batch") },
+    )
+
+    @Test
+    fun delayedSingleConflictRefreshCannotPopulateAnotherServersQueue() = assertStaleResponse(
+        json(200, Fixtures.text("job-paused.json")),
+        conflict = true,
+        action = { actions.pause("old-job") },
+    )
+
+    @Test
+    fun delayedMissingJobRefreshCannotRemoveCurrentServersJob() = assertStaleResponse(
+        json(404, Fixtures.text("error-not_found.json")),
+        conflict = true,
+        action = { actions.pause("current-job") },
+    )
+
+    @Test
+    fun delayedBatchConflictRefreshCannotPopulateAnotherServersQueue() = assertStaleResponse(
+        json(200, """{"jobs":[${Fixtures.text("job-paused.json")}],"total":1}"""),
+        conflict = true,
+        action = { actions.pauseAll("old-batch") },
+    )
+
+    @Test
+    fun delayedConflictDoesNotStartARefreshAfterServerChanged() {
+        assertStaleResponse(
+            json(409, Fixtures.text("error-invalid_state.json")),
+            action = { actions.pause("old-job") },
+        )
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun tokenChangeInvalidatesPendingAction() = assertStaleResponse(
+        json(200, Fixtures.text("job-paused.json")),
+        action = { actions.pause("old-job") },
+        switch = { configProvider.config.value = configProvider.config.value!!.copy(token = "new-token") },
+    )
+
+    @Test
+    fun switchingAwayAndBackDoesNotRevivePendingAction() = assertStaleResponse(
+        json(200, Fixtures.text("job-paused.json")),
+        action = { actions.pause("old-job") },
+        switch = {
+            val original = configProvider.config.value
+            configProvider.config.value = ServerConfig("http://server-b.invalid", "other")
+            configProvider.config.value = original
+        },
+    )
+
+    @Test
+    fun delayedDeleteDoesNotReportSuccessForTheCurrentServer() = assertStaleResponse(
+        MockResponse().setResponseCode(204),
+        action = { actions.delete("old-job", false) },
+    )
+
+    @Test
+    fun delayedClearHistoryDoesNotReportSuccessForTheCurrentServer() = assertStaleResponse(
+        json(200, """{"deleted":3}"""),
+        action = { actions.clearHistory() },
+    )
+
+    /** Hold the old connection's response until the new connection has installed its snapshot. */
+    private fun assertStaleResponse(
+        response: MockResponse,
+        conflict: Boolean = false,
+        action: suspend () -> ActionOutcome,
+        switch: () -> Unit = { configProvider.config.value = ServerConfig("http://server-b.invalid", "other") },
+    ) = runBlocking {
+        val requested = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                if (conflict && request.method == "POST") return json(409, Fixtures.text("error-invalid_state.json"))
+                requested.countDown()
+                check(release.await(5, TimeUnit.SECONDS)) { "Response was never released" }
+                return response
+            }
+        }
+        val pending = async(Dispatchers.Default) { action() }
+        val current = job("job-pending.json").copy(id = "current-job")
+        try {
+            assertTrue("Old request did not arrive", requested.await(5, TimeUnit.SECONDS))
+            switch()
+            store.clear()
+            store.apply(WsEvent.Snapshot(listOf(current)))
+        } finally {
+            release.countDown()
+        }
+        assertEquals(ActionOutcome.Failed("Server changed — try again"), pending.await())
+        assertEquals(listOf(current), store.jobs.value)
     }
 }

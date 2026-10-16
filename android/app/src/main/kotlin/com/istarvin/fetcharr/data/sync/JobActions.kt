@@ -4,6 +4,7 @@ import com.istarvin.fetcharr.data.network.ApiError
 import com.istarvin.fetcharr.data.network.ApiResult
 import com.istarvin.fetcharr.data.network.FetcharrApi
 import com.istarvin.fetcharr.data.network.FetcharrApiProvider
+import com.istarvin.fetcharr.data.network.FetcharrApiSession
 import com.istarvin.fetcharr.data.network.dto.JobDto
 import com.istarvin.fetcharr.data.network.dto.RetryRequest
 import com.istarvin.fetcharr.data.network.dto.WsEvent
@@ -58,10 +59,13 @@ class JobActions @Inject constructor(
      * `DELETE /api/jobs`: removes every finished job record (files are kept). The caller refreshes history.
      */
     suspend fun clearHistory(): ActionOutcome {
-        val api = api() ?: return ActionOutcome.NotConfigured
-        return when (val result = safeApiCall { api.clearHistory() }) {
-            is ApiResult.Success -> ActionOutcome.Ok
-            is ApiResult.Failure -> ActionOutcome.Failed(result.error.userMessage)
+        val session = session() ?: return ActionOutcome.NotConfigured
+        val result = safeApiCall { session.api.clearHistory() }
+        return complete(session) {
+            when (result) {
+                is ApiResult.Success -> ActionOutcome.Ok
+                is ApiResult.Failure -> ActionOutcome.Failed(result.error.userMessage)
+            }
         }
     }
 
@@ -75,71 +79,90 @@ class JobActions @Inject constructor(
 
     /** [deleteFile] also removes the downloaded file (completed jobs only). */
     suspend fun delete(jobId: String, deleteFile: Boolean): ActionOutcome {
-        val api = api() ?: return ActionOutcome.NotConfigured
-        return when (val result = safeApiCall { api.deleteJob(jobId, if (deleteFile) true else null) }) {
-            is ApiResult.Success -> ActionOutcome.Ok
-            is ApiResult.Failure -> {
-                val error = result.error
-                if (error is ApiError.InvalidState) ActionOutcome.Changed(error.userMessage) else ActionOutcome.Failed(error.userMessage)
+        val session = session() ?: return ActionOutcome.NotConfigured
+        val result = safeApiCall { session.api.deleteJob(jobId, if (deleteFile) true else null) }
+        return complete(session) {
+            when (result) {
+                is ApiResult.Success -> ActionOutcome.Ok
+                is ApiResult.Failure -> {
+                    val error = result.error
+                    if (error is ApiError.InvalidState) ActionOutcome.Changed(error.userMessage) else ActionOutcome.Failed(error.userMessage)
+                }
             }
         }
     }
 
     private suspend fun job(jobId: String, call: suspend (FetcharrApi) -> JobDto): ActionOutcome {
-        val api = api() ?: return ActionOutcome.NotConfigured
-        return when (val result = safeApiCall { call(api) }) {
-            is ApiResult.Success -> {
-                store.upsert(result.value)
+        val session = session() ?: return ActionOutcome.NotConfigured
+        val result = safeApiCall { call(session.api) }
+        if (!apiProvider.isCurrent(session)) return serverChanged()
+        return when (result) {
+            is ApiResult.Success -> complete(session) {
+                store.upsert(result.value, session)
                 ActionOutcome.Ok
             }
             is ApiResult.Failure -> {
                 val error = result.error
                 if (error is ApiError.InvalidState) {
-                    refreshJob(api, jobId)
-                    ActionOutcome.Changed(error.userMessage)
+                    refreshJob(session, jobId)
+                    complete(session) { ActionOutcome.Changed(error.userMessage) }
                 } else {
-                    ActionOutcome.Failed(error.userMessage)
+                    complete(session) { ActionOutcome.Failed(error.userMessage) }
                 }
             }
         }
     }
 
     private suspend fun batch(batchId: String, call: suspend (FetcharrApi) -> List<JobDto>): ActionOutcome {
-        val api = api() ?: return ActionOutcome.NotConfigured
-        return when (val result = safeApiCall { call(api) }) {
-            is ApiResult.Success -> {
-                result.value.forEach(store::upsert)
+        val session = session() ?: return ActionOutcome.NotConfigured
+        val result = safeApiCall { call(session.api) }
+        if (!apiProvider.isCurrent(session)) return serverChanged()
+        return when (result) {
+            is ApiResult.Success -> complete(session) {
+                result.value.forEach { store.upsert(it, session) }
                 ActionOutcome.Ok
             }
             is ApiResult.Failure -> {
                 val error = result.error
                 if (error is ApiError.InvalidState) {
-                    refreshBatch(api, batchId)
-                    ActionOutcome.Changed(error.userMessage)
+                    refreshBatch(session, batchId)
+                    complete(session) { ActionOutcome.Changed(error.userMessage) }
                 } else {
-                    ActionOutcome.Failed(error.userMessage)
+                    complete(session) { ActionOutcome.Failed(error.userMessage) }
                 }
             }
         }
     }
 
     /** Silent: a failure here is not worth a second message; the WebSocket will catch up. A 404 means the job is gone. */
-    private suspend fun refreshJob(api: FetcharrApi, jobId: String) {
-        when (val result = safeApiCall { api.getJob(jobId) }) {
-            is ApiResult.Success -> store.upsert(result.value)
-            is ApiResult.Failure ->
-                if (result.error is ApiError.NotFound) store.apply(WsEvent.JobRemoved(listOf(jobId)))
+    private suspend fun refreshJob(session: FetcharrApiSession, jobId: String) {
+        if (!apiProvider.isCurrent(session)) return
+        val result = safeApiCall { session.api.getJob(jobId) }
+        apiProvider.withCurrentSession(session) {
+            when (result) {
+                is ApiResult.Success -> store.upsert(result.value, session)
+                is ApiResult.Failure ->
+                    if (result.error is ApiError.NotFound) store.apply(WsEvent.JobRemoved(listOf(jobId)), session)
+            }
         }
     }
 
-    private suspend fun refreshBatch(api: FetcharrApi, batchId: String) {
-        val result = safeApiCall { api.listJobs(batchId = batchId, limit = BATCH_REFRESH_LIMIT) }
-        if (result is ApiResult.Success) result.value.jobs.forEach(store::upsert)
+    private suspend fun refreshBatch(session: FetcharrApiSession, batchId: String) {
+        if (!apiProvider.isCurrent(session)) return
+        val result = safeApiCall { session.api.listJobs(batchId = batchId, limit = BATCH_REFRESH_LIMIT) }
+        apiProvider.withCurrentSession(session) {
+            if (result is ApiResult.Success) result.value.jobs.forEach { store.upsert(it, session) }
+        }
     }
 
-    private fun api(): FetcharrApi? =
+    private fun complete(session: FetcharrApiSession, block: () -> ActionOutcome): ActionOutcome =
+        apiProvider.withCurrentSession(session, block) ?: serverChanged()
+
+    private fun serverChanged(): ActionOutcome = ActionOutcome.Failed("Server changed — try again")
+
+    private fun session(): FetcharrApiSession? =
         try {
-            apiProvider.current()
+            apiProvider.captureSession()
         } catch (e: IllegalArgumentException) {
             null // saved URL is not a valid http(s) URL
         }

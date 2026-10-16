@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -338,6 +339,56 @@ func TestPauseThenImmediateResume(t *testing.T) {
 	g.waitStatus(j.ID, jobs.StatusProcessing)
 	if g.rec.maxDownloading() > 1 {
 		t.Errorf("job downloaded twice at once: max=%d", g.rec.maxDownloading())
+	}
+}
+
+func TestCancelRetryWhileOldWorkerIsInPrecheck(t *testing.T) {
+	for _, lowDisk := range []bool{false, true} {
+		name := "claim"
+		if lowDisk {
+			name = "precheck-failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			setDuration(t, "0")
+			entered, unblock := make(chan struct{}), make(chan struct{})
+			release := sync.OnceFunc(func() { close(unblock) })
+			defer release()
+			var once sync.Once
+			g := newRig(t, rigOpts{
+				cfg: func(c *config.Config) { c.Downloads.MinFreeSpace = 1 },
+				mod: func(o *runner.Options) {
+					o.FreeBytes = func(string) (uint64, error) {
+						first := false
+						once.Do(func() {
+							first = true
+							close(entered)
+							<-unblock
+						})
+						if first && lowDisk {
+							return 0, nil
+						}
+						return 1 << 40, nil
+					}
+				},
+			})
+			j := g.create("https://example.com/precheck-retry")
+			select {
+			case <-entered:
+			case <-time.After(waitTimeout):
+				t.Fatal("worker did not enter precheck")
+			}
+			if _, err := g.svc.Cancel(t.Context(), j.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := g.svc.Retry(t.Context(), j.ID, service.RetryOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			release()
+			g.waitStatus(j.ID, jobs.StatusProcessing)
+			if !exists(filepath.Join(g.workDir(j.ID), "media.mp4")) {
+				t.Error("the retried execution lost its downloaded file")
+			}
+		})
 	}
 }
 

@@ -2,15 +2,17 @@ package com.istarvin.fetcharr.ui.incoming
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.selection.triStateToggleable
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -49,19 +51,21 @@ import java.util.Locale
  * "Server not set up" flow: with no server saved, the sheet shows a notice and an "Open Settings" button; the
  * request stays in the coordinator. While the user is on Settings with no server ([hiddenForSettings]) the sheet
  * is not composed, so they can fill the form in; as soon as they save a server, [IncomingUiState.serverConfigured]
- * flips and the sheet shows again (the form becomes usable). Going back to another tab also shows it.
+ * flips and the sheet shows again (the form becomes usable). During credential recovery, it stays hidden
+ * across Settings and Server Settings until the user returns to another destination.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun IncomingSheetHost(
     onOpenSettings: () -> Unit,
     onSettingsDestination: Boolean,
+    recoveringInSettings: Boolean = false,
     viewModel: IncomingViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val sheet = state.sheet ?: return
     if (!state.settingsLoaded) return
-    val hiddenForSettings = onSettingsDestination && !state.serverConfigured
+    val hiddenForSettings = onSettingsDestination && (!state.serverConfigured || recoveringInSettings)
     if (hiddenForSettings) return
 
     ModalBottomSheet(
@@ -70,29 +74,43 @@ fun IncomingSheetHost(
         sheetMaxWidth = 720.dp,
     ) {
         Column(Modifier.fillMaxWidth()) {
-            Column(
-                Modifier
-                    .weight(1f, fill = false)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = screenGutter(), vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp),
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+                contentPadding = PaddingValues(horizontal = screenGutter(), vertical = 8.dp),
             ) {
-                if (!state.serverConfigured) {
-                    NoServerNotice(onOpenSettings)
-                } else {
-                    SheetContent(state, sheet, viewModel)
+                item(key = "form") {
+                    Column(
+                        Modifier.padding(bottom = 24.dp),
+                        verticalArrangement = Arrangement.spacedBy(24.dp),
+                    ) {
+                        if (!state.serverConfigured) {
+                            NoServerNotice(onOpenSettings)
+                        } else {
+                            SheetContent(state, sheet, viewModel)
+                        }
+                    }
+                }
+                if (state.serverConfigured && state.isSeasonMode && sheet is IncomingSheet.SeasonSheet) {
+                    episodeChecklist(sheet.episodes, viewModel::toggleEpisode, viewModel::setAllSelected)
                 }
                 if (state.waitingCount > 0) {
-                    Text(
-                        pluralStringResource(R.plurals.incoming_waiting, state.waitingCount, state.waitingCount),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    item(key = "waiting") {
+                        Text(
+                            pluralStringResource(R.plurals.incoming_waiting, state.waitingCount, state.waitingCount),
+                            modifier = Modifier.padding(bottom = 24.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
-                state.error?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-                    if (it == ApiError.Unauthorized.userMessage) {
-                        TextButton(onClick = onOpenSettings, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.queue_snackbar_settings)) }
+                state.error?.let { error ->
+                    item(key = "error") {
+                        Column(Modifier.padding(bottom = 24.dp)) {
+                            Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                            if (error == ApiError.Unauthorized.userMessage) {
+                                TextButton(onClick = onOpenSettings, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.queue_snackbar_settings)) }
+                            }
+                        }
                     }
                 }
             }
@@ -140,7 +158,6 @@ private fun SheetContent(state: IncomingUiState, sheet: IncomingSheet, vm: Incom
     }
     if (state.isSeasonMode && sheet is IncomingSheet.SeasonSheet) {
         SeasonFormFields(state.form, actions)
-        EpisodeChecklist(sheet.episodes, vm::toggleEpisode, vm::setAllSelected)
     } else {
         state.layout?.let { ItemFormFields(it, state.form, actions) }
         state.sourceLine?.let {
@@ -149,59 +166,60 @@ private fun SheetContent(state: IncomingUiState, sheet: IncomingSheet, vm: Incom
     }
 }
 
-@Composable
-internal fun EpisodeChecklist(
+internal fun LazyListScope.episodeChecklist(
     episodes: List<SeasonEpisode>,
     onToggle: (Int) -> Unit,
     onSetAll: (Boolean) -> Unit,
 ) {
     val selected = episodes.count { it.selected }
     val allSelected = selected == episodes.size
-    Column {
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 56.dp).triStateToggleable(
-                state = when (selected) {
-                    0 -> ToggleableState.Off
-                    episodes.size -> ToggleableState.On
-                    else -> ToggleableState.Indeterminate
-                },
-                role = Role.Checkbox,
-                onClick = { onSetAll(!allSelected) },
-            ).padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TriStateCheckbox(
-                state = when (selected) {
-                    0 -> ToggleableState.Off
-                    episodes.size -> ToggleableState.On
-                    else -> ToggleableState.Indeterminate
-                },
-                onClick = null,
-            )
-            Text(
-                stringResource(R.string.incoming_select_all, selected, episodes.size),
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.weight(1f).padding(start = 12.dp),
-            )
-        }
-        HorizontalDivider()
-        episodes.forEach { episode ->
+    item(key = "episode-selection", contentType = "episode-selection") {
+        Column {
             Row(
-                Modifier.fillMaxWidth().heightIn(min = 56.dp).toggleable(
-                    value = episode.selected,
+                Modifier.fillMaxWidth().heightIn(min = 56.dp).triStateToggleable(
+                    state = when (selected) {
+                        0 -> ToggleableState.Off
+                        episodes.size -> ToggleableState.On
+                        else -> ToggleableState.Indeterminate
+                    },
                     role = Role.Checkbox,
-                    onValueChange = { onToggle(episode.episode) },
-                ).padding(vertical = 12.dp),
+                    onClick = { onSetAll(!allSelected) },
+                ).padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Checkbox(checked = episode.selected, onCheckedChange = null)
-                Text(
-                    "E%02d".format(Locale.ROOT, episode.episode),
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.padding(horizontal = 12.dp),
+                TriStateCheckbox(
+                    state = when (selected) {
+                        0 -> ToggleableState.Off
+                        episodes.size -> ToggleableState.On
+                        else -> ToggleableState.Indeterminate
+                    },
+                    onClick = null,
                 )
-                Text(episode.title.orEmpty(), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                Text(
+                    stringResource(R.string.incoming_select_all, selected, episodes.size),
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f).padding(start = 12.dp),
+                )
             }
+            HorizontalDivider()
+        }
+    }
+    items(episodes, key = { "episode:${it.episode}" }, contentType = { "episode" }) { episode ->
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 56.dp).toggleable(
+                value = episode.selected,
+                role = Role.Checkbox,
+                onValueChange = { onToggle(episode.episode) },
+            ).padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(checked = episode.selected, onCheckedChange = null)
+            Text(
+                "E%02d".format(Locale.ROOT, episode.episode),
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+            Text(episode.title.orEmpty(), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
         }
     }
 }

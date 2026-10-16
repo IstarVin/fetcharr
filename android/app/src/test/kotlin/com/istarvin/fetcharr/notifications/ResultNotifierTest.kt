@@ -8,6 +8,7 @@ import com.istarvin.fetcharr.notifications.logic.NotifierState
 import com.istarvin.fetcharr.notifications.logic.ResultNotification
 import com.istarvin.fetcharr.notifications.logic.ep
 import com.istarvin.fetcharr.notifications.logic.job
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -27,16 +28,34 @@ class ResultNotifierTest {
         var ignoreFilter = false
         val batches = mutableMapOf<String, List<JobDto>>()
         var failBatch = false
+        var generation = 0
+        var connectionIdentity: Any = Any()
+        var historyGate: CompletableDeferred<Unit>? = null
+        var batchGate: CompletableDeferred<Unit>? = null
+
+        override fun captureSession(): JobsSession {
+            val captured = generation
+            val identity = connectionIdentity
+            return object : JobsSession {
+                override val connectionIdentity = identity
+                override val serverKey: String? = null
+                override fun isCurrent() = captured == generation && identity === this@FakeGateway.connectionIdentity
+                override suspend fun listFinishedAfter(afterMs: Long) = this@FakeGateway.listFinishedAfter(afterMs)
+                override suspend fun listBatch(batchId: String) = this@FakeGateway.listBatch(batchId)
+            }
+        }
         val finishedAfterCalls = mutableListOf<Long>()
         val batchCalls = mutableListOf<String>()
 
         override suspend fun listFinishedAfter(afterMs: Long): List<JobDto>? {
             finishedAfterCalls += afterMs
+            historyGate?.await()
             return finished.filter { ignoreFilter || (it.finishedAt ?: 0) > afterMs }
         }
 
         override suspend fun listBatch(batchId: String): List<JobDto>? {
             batchCalls += batchId
+            batchGate?.await()
             return if (failBatch) null else batches[batchId]
         }
     }
@@ -134,17 +153,17 @@ class ResultNotifierTest {
             env.combined,
         )
         assertEquals("b", env.posted[1].retryJobId)
-        assertEquals(300L, env.lastSeen.value)
+        assertEquals(100L, env.lastSeen.value)
     }
 
     @Test
-    fun aUserCancelPostsNothingButAdvancesLastSeen() = runTest {
+    fun aUserCancelPostsNothingAndLeavesTheRecoveryCursorSafe() = runTest {
         val env = Env(this, lastSeenValue = 100L)
         with(env) { startAndSettle() }
         env.store.upsert(job("c", JobStatus.CANCELLED, title = "X", finishedAt = 400L))
         runCurrent()
         assertTrue(env.posted.isEmpty())
-        assertEquals(400L, env.lastSeen.value)
+        assertEquals(100L, env.lastSeen.value)
     }
 
     @Test
@@ -169,7 +188,7 @@ class ResultNotifierTest {
         assertEquals(listOf("b1"), env.gateway.batchCalls)
         assertEquals(listOf("Severance S02 — 1 downloaded, 1 failed"), env.combined)
         assertEquals("b1", env.posted.single().retryBatchId)
-        assertEquals(300L, env.lastSeen.value)
+        assertEquals(100L, env.lastSeen.value)
     }
 
     @Test
@@ -323,6 +342,135 @@ class ResultNotifierTest {
     }
 
     @Test
+    fun failedBatchThenLaterLiveResultIsRetriedAfterProcessRestartIncludingTimestampTies() = runTest {
+        val first = Env(this, lastSeenValue = 1_000L)
+        val movie = job("a", JobStatus.COMPLETED, title = "Movie", finishedAt = 2_000L)
+        val episode = ep("z", JobStatus.COMPLETED, n = 1, finishedAt = 2_000L)
+        first.gateway.finished = listOf(movie, episode)
+        first.gateway.failBatch = true
+        with(first) { startAndSettle(); reconnect() }
+        first.store.upsert(job("live", JobStatus.COMPLETED, title = "Later", finishedAt = 3_000L))
+        runCurrent()
+        assertEquals(1_000L, first.lastSeen.value)
+
+        val second = Env(this, first.lastSeen.value, first.stateStore.state)
+        second.gateway.finished = listOf(movie, episode)
+        second.gateway.batches["b1"] = listOf(episode)
+        with(second) { startAndSettle(); reconnect() }
+        assertEquals(listOf("Severance S02 — 1 downloaded"), second.combined)
+        assertEquals(2_000L, second.lastSeen.value)
+    }
+
+    @Test
+    fun bufferedOldServerFinishIsDiscardedAfterClearWhileEarlierBatchFetchWasSuspended() = runTest {
+        val env = Env(this, lastSeenValue = 1_000L)
+        env.server = "server-a"
+        env.stateStore.serverKey = "server-a"
+        val gate = CompletableDeferred<Unit>()
+        val episode = ep("old-episode", JobStatus.COMPLETED, n = 1, finishedAt = 2_000L)
+        env.gateway.batchGate = gate
+        env.gateway.batches["b1"] = listOf(episode)
+        with(env) { startAndSettle() }
+        env.store.upsert(episode)
+        runCurrent() // the collector is waiting for A's batch response
+        assertEquals(listOf("b1"), env.gateway.batchCalls)
+        env.store.upsert(job("old-buffered", JobStatus.COMPLETED, title = "Old", finishedAt = 2_100L))
+
+        env.server = "server-b"
+        env.gateway.generation++
+        env.store.clear()
+        gate.complete(Unit)
+        runCurrent()
+        assertTrue(env.posted.isEmpty())
+        assertTrue(env.stateStore.state.notifiedJobKeys.isEmpty())
+
+        env.store.apply(WsEvent.Snapshot(emptyList()))
+        env.store.upsert(job("new", JobStatus.COMPLETED, title = "New", finishedAt = 6_000L))
+        runCurrent()
+        assertEquals(listOf("Downloaded · New"), env.combined)
+        assertEquals(setOf("new@6000"), env.stateStore.state.notifiedJobKeys)
+        assertEquals("server-b", env.stateStore.serverKey)
+    }
+
+    @Test
+    fun bufferedFinishesFromOldConnectionAreDiscardedBeforeAnAsynchronousStoreClear() = runTest {
+        // Cover a URL change and a token-only connection replacement; neither needs clear to have run yet.
+        for (changeServer in listOf(true, false)) {
+            val env = Env(this, lastSeenValue = 1_000L)
+            env.server = "server-a"
+            env.stateStore.serverKey = "server-a"
+            val oldConnection = env.gateway.connectionIdentity
+            val gate = CompletableDeferred<Unit>()
+            val episode = ep("old-episode", JobStatus.COMPLETED, n = 1, finishedAt = 2_000L)
+            env.gateway.batchGate = gate
+            env.gateway.batches["b1"] = listOf(episode)
+            with(env) { startAndSettle() }
+            env.store.upsert(episode, oldConnection)
+            runCurrent()
+            assertEquals(listOf("b1"), env.gateway.batchCalls)
+            env.store.apply(
+                WsEvent.JobUpdated(job("old-buffered", JobStatus.COMPLETED, finishedAt = 2_100L)),
+                oldConnection,
+            )
+
+            if (changeServer) env.server = "server-b"
+            env.gateway.connectionIdentity = Any() // config collector has emitted a new API connection
+            gate.complete(Unit) // SyncManager's asynchronous clear deliberately has not happened
+            runCurrent()
+            assertTrue(env.posted.isEmpty())
+            assertTrue(env.stateStore.state.notifiedJobKeys.isEmpty())
+            assertEquals(1_000L, env.lastSeen.value)
+            assertEquals("server-a", env.stateStore.serverKey)
+            env.store.clear()
+        }
+    }
+
+    @Test
+    fun changingConnectionWhileHistoryIsSuspendedDiscardsItsJobs() = runTest {
+        val env = Env(this, lastSeenValue = 1_000L)
+        val gate = CompletableDeferred<Unit>()
+        env.gateway.historyGate = gate
+        env.gateway.finished = listOf(job("a", JobStatus.COMPLETED, finishedAt = 2_000L))
+        with(env) { startAndSettle(); reconnect() }
+        env.gateway.generation++
+        gate.complete(Unit)
+        runCurrent()
+        assertTrue(env.posted.isEmpty())
+        assertTrue(env.stateStore.state.notifiedJobKeys.isEmpty())
+        assertEquals(1_000L, env.lastSeen.value)
+    }
+
+    @Test
+    fun changingConnectionWhileBatchIsSuspendedDiscardsItsSummary() = runTest {
+        val env = Env(this, lastSeenValue = 1_000L)
+        val gate = CompletableDeferred<Unit>()
+        val episode = ep("e1", JobStatus.COMPLETED, n = 1, finishedAt = 2_000L)
+        env.gateway.batchGate = gate
+        env.gateway.finished = listOf(episode)
+        env.gateway.batches["b1"] = listOf(episode)
+        with(env) { startAndSettle(); reconnect() }
+        assertEquals(listOf("b1"), env.gateway.batchCalls)
+        env.gateway.generation++
+        gate.complete(Unit)
+        runCurrent()
+        assertTrue(env.posted.isEmpty())
+        assertTrue(env.stateStore.state.summarizedBatchIds.isEmpty())
+        assertEquals(1_000L, env.lastSeen.value)
+    }
+
+    @Test
+    fun changingConnectionWhileWaitingForSnapshotDoesNotFetchHistory() = runTest {
+        val env = Env(this, lastSeenValue = 1_000L)
+        env.store.clear()
+        with(env) { startAndSettle(); reconnect() }
+        env.gateway.generation++
+        env.store.apply(WsEvent.Snapshot(emptyList()))
+        runCurrent()
+        assertTrue(env.gateway.finishedAfterCalls.isEmpty())
+        assertEquals(1_000L, env.lastSeen.value)
+    }
+
+    @Test
     fun catchUpWaitsForTheSnapshotSoRunningSiblingsBlockTheSummary() = runTest {
         val env = Env(this, lastSeenValue = 1_000L)
         env.store.clear() // no snapshot yet
@@ -439,6 +587,20 @@ class ResultNotifierTest {
         assertEquals(listOf("Downloaded · New"), env.combined)
         assertTrue("x@1" !in env.stateStore.state.notifiedJobKeys)
         assertEquals("http://new:8080", env.stateStore.serverKey)
+    }
+
+    @Test
+    fun liveResultsBeyondTheNormalDedupCapStayCoveredUntilRecoveryCheckpointsThem() = runTest {
+        val env = Env(this, lastSeenValue = 100L)
+        val jobs = (1..501).map { job("live-$it", JobStatus.COMPLETED, finishedAt = 200L) }
+        with(env) { startAndSettle() }
+        jobs.forEach { env.notifier.onLiveJob(it) }
+        assertEquals(501, env.stateStore.state.notifiedJobKeys.size)
+        env.gateway.finished = jobs
+        with(env) { reconnect() }
+        assertEquals(501, env.posted.size)
+        assertEquals(200L, env.lastSeen.value)
+        assertEquals(ResultNotifier.MAX_JOB_KEYS, env.stateStore.state.notifiedJobKeys.size)
     }
 
     @Test

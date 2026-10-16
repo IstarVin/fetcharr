@@ -7,6 +7,8 @@ import com.istarvin.fetcharr.data.network.Fixtures
 import com.istarvin.fetcharr.data.network.ServerConfig
 import com.istarvin.fetcharr.data.network.ServerConfigProvider
 import com.istarvin.fetcharr.data.network.dto.Rfc3339
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
@@ -15,6 +17,9 @@ import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Test
 import java.util.concurrent.TimeUnit
@@ -75,6 +80,46 @@ class ApiJobsGatewayTest {
         val url = server.takeRequest().requestUrl!!
         assertEquals("b-1", url.queryParameter("batch_id"))
         assertEquals("500", url.queryParameter("limit"))
+    }
+
+    @Test
+    fun historyBeyondTenPagesAndBatchBeyondFiveHundredAreComplete() = runBlocking {
+        val historyIds = (1..2_001).map { "history-$it" }
+        historyIds.chunked(200).forEach { server.enqueue(page(it, historyIds.size)) }
+        assertEquals(historyIds, gateway.listFinishedAfter(0)!!.map { it.id })
+        repeat(11) { server.takeRequest() }
+
+        val batchIds = (1..501).map { "batch-$it" }
+        batchIds.chunked(500).forEach { server.enqueue(page(it, batchIds.size)) }
+        assertEquals(batchIds, gateway.listBatch("large")!!.map { it.id })
+        assertEquals("0", server.takeRequest().requestUrl!!.queryParameter("offset"))
+        assertEquals("500", server.takeRequest().requestUrl!!.queryParameter("offset"))
+    }
+
+    @Test
+    fun pageErrorsAndPrematureEmptyPagesNeverReturnPartialResults() = runBlocking {
+        server.enqueue(page(listOf("first"), total = 2))
+        server.enqueue(MockResponse().setResponseCode(500))
+        assertNull(gateway.listFinishedAfter(0))
+        server.enqueue(page(listOf("first"), total = 2))
+        server.enqueue(page(emptyList(), total = 2))
+        assertNull(gateway.listBatch("incomplete"))
+    }
+
+    @Test
+    fun connectionChangedDuringDelayedResponseInvalidatesHistoryAndBatchSession() = runBlocking {
+        val session = gateway.captureSession()!!
+        assertSame(session.connectionIdentity, gateway.captureSession()!!.connectionIdentity)
+        server.enqueue(page(listOf("old-server-job"), total = 1).setBodyDelay(200, TimeUnit.MILLISECONDS))
+        val result = async(Dispatchers.IO) { session.listFinishedAfter(0) }
+        server.takeRequest(5, TimeUnit.SECONDS)!!
+        // Even a token change on the same URL replaces the connection generation.
+        config.value = config.value!!.copy(token = "new-token")
+        assertNull(result.await())
+        assertFalse(session.isCurrent())
+        assertNotSame(session.connectionIdentity, gateway.captureSession()!!.connectionIdentity)
+        assertNull(session.listBatch("old-batch"))
+        assertEquals(1, server.requestCount)
     }
 
     @Test

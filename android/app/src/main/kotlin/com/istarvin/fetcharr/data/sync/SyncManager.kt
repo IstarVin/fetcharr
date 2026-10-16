@@ -1,6 +1,8 @@
 package com.istarvin.fetcharr.data.sync
 
 import com.istarvin.fetcharr.data.CategoryRepository
+import com.istarvin.fetcharr.data.network.FetcharrApiProvider
+import com.istarvin.fetcharr.data.network.FetcharrApiSession
 import com.istarvin.fetcharr.data.network.ServerConfig
 import com.istarvin.fetcharr.data.network.ServerConfigProvider
 import com.istarvin.fetcharr.data.network.dto.WsEvent
@@ -58,6 +60,7 @@ class SyncManager @Inject constructor(
     private val refresher: ConnectionRefresher,
     private val json: Json,
     @ApplicationScope private val scope: CoroutineScope,
+    private val apiProvider: FetcharrApiProvider,
 ) {
     private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected(null))
     val state: StateFlow<ConnectionState> = _state.asStateFlow()
@@ -101,15 +104,38 @@ class SyncManager @Inject constructor(
         generation.update { it + 1 }
     }
 
-    private suspend fun runFor(wanted: Boolean, config: ServerConfig?) {
-        // Before connecting, so a stale clear can never wipe the new server's snapshot.
-        if (config == null || (lastUrl != null && lastUrl != config.baseUrl)) store.clear()
-        lastUrl = config?.baseUrl
-        when {
-            config == null -> _state.value = ConnectionState.NotConfigured
-            !wanted -> _state.value = ConnectionState.Disconnected(null)
-            else -> connectLoop(config)
+    internal suspend fun runFor(wanted: Boolean, config: ServerConfig?) {
+        if (config == null) {
+            apiProvider.withCurrentConfig(null) {
+                store.clear()
+                lastUrl = null
+                _state.value = ConnectionState.NotConfigured
+            }
+            return
         }
+        val session = try {
+            apiProvider.captureSession()
+        } catch (e: IllegalArgumentException) {
+            apiProvider.withCurrentConfig(config) {
+                if (lastUrl != config.baseUrl) store.clear()
+                lastUrl = config.baseUrl
+                _state.value = ConnectionState.Disconnected(null)
+            }
+            return
+        } ?: return
+        if (session.config != config) return
+        // Share the action-result gate: the replacement clear must follow any result already being applied.
+        val connect = apiProvider.withCurrentSession(session) {
+            if (lastUrl != config.baseUrl) store.clear()
+            lastUrl = config.baseUrl
+            if (wanted) {
+                true
+            } else {
+                _state.value = ConnectionState.Disconnected(null)
+                false
+            }
+        } ?: return
+        if (connect) connectLoop(session)
     }
 
     private sealed interface Event {
@@ -119,10 +145,9 @@ class SyncManager @Inject constructor(
     }
 
     /** Runs until cancelled (config/wanted/reconnect change). Closes the socket on the way out. */
-    private suspend fun connectLoop(config: ServerConfig) = coroutineScope {
+    private suspend fun connectLoop(session: FetcharrApiSession) = coroutineScope {
         val backoff = BackoffPolicy()
         while (true) {
-            _state.value = ConnectionState.Connecting
             val events = Channel<Event>(Channel.UNLIMITED)
             val listener = object : WebSocketConnector.Listener {
                 override fun onOpen() {
@@ -141,45 +166,70 @@ class SyncManager @Inject constructor(
                     events.trySend(Event.Ended)
                 }
             }
-            val handle = try {
-                connector.connect(config, listener)
-            } catch (e: IllegalArgumentException) {
-                events.trySend(Event.Ended)
-                null
+            var handle: WebSocketConnector.Handle? = null
+            if (apiProvider.withCurrentSession(session) {
+                _state.value = ConnectionState.Connecting
+                handle = try {
+                    connector.connect(session.config, listener)
+                } catch (e: IllegalArgumentException) {
+                    events.trySend(Event.Ended)
+                    null
+                }
+            } == null) {
+                events.close()
+                reconnectIfRevisited(session)
+                return@coroutineScope
             }
             try {
                 for (event in events) {
-                    when (event) {
-                        Event.Opened -> {
-                            backoff.reset()
-                            // Invalidate the old snapshot before publishing Connected, so observers never show
-                            // cached transfer metrics as live while the new snapshot is still on its way.
-                            store.onConnectionOpened()
-                            _state.value = ConnectionState.Connected
-                            launch { refreshQuietly() }
-                            _connected.tryEmit(Unit)
+                    if (event == Event.Ended) break
+                    if (apiProvider.withCurrentSession(session) {
+                        when (event) {
+                            Event.Opened -> {
+                                backoff.reset()
+                                // Invalidate the old snapshot before publishing Connected.
+                                store.onConnectionOpened()
+                                _state.value = ConnectionState.Connected
+                                launch { refreshQuietly() }
+                                _connected.tryEmit(Unit)
+                            }
+                            is Event.Message -> WsEvent.parseOrNull(json, event.text)?.let { store.apply(it, session) }
+                            Event.Ended -> Unit
                         }
-                        is Event.Message -> WsEvent.parseOrNull(json, event.text)?.let(store::apply)
-                        Event.Ended -> break
+                        Unit
+                    } == null) {
+                        reconnectIfRevisited(session)
+                        return@coroutineScope
                     }
                 }
             } finally {
                 handle?.close()
                 events.close()
             }
-            waitForRetry(backoff.next())
+            if (!waitForRetry(session, backoff.next())) return@coroutineScope
         }
     }
 
     /** Shows the countdown to the next attempt. */
-    private suspend fun waitForRetry(delayMillis: Long) {
+    private suspend fun waitForRetry(session: FetcharrApiSession, delayMillis: Long): Boolean {
         var remaining = delayMillis
         while (remaining > 0) {
-            _state.value = ConnectionState.Disconnected(((remaining + 999) / 1000).toInt())
+            if (apiProvider.withCurrentSession(session) {
+                _state.value = ConnectionState.Disconnected(((remaining + 999) / 1000).toInt())
+            } == null) {
+                reconnectIfRevisited(session)
+                return false
+            }
             val step = minOf(1_000L, remaining)
             delay(step)
             remaining -= step
         }
+        return true
+    }
+
+    /** StateFlow may conflate a quick A -> B -> A; restart with the new session after rejecting the old socket. */
+    private fun reconnectIfRevisited(session: FetcharrApiSession) {
+        if (configProvider.config.value == session.config) reconnectNow()
     }
 
     private suspend fun refreshQuietly() {

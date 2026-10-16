@@ -1,6 +1,6 @@
 package com.istarvin.fetcharr.ui.add
 
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -9,7 +9,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.istarvin.fetcharr.incoming.CategoryOption
 import com.istarvin.fetcharr.incoming.SeasonEpisode
-import com.istarvin.fetcharr.ui.incoming.EpisodeChecklist
+import com.istarvin.fetcharr.ui.incoming.episodeChecklist
 import com.istarvin.fetcharr.ui.incoming.ItemForm
 import com.istarvin.fetcharr.ui.incoming.ItemFormActions
 import com.istarvin.fetcharr.ui.theme.FetcharrTheme
@@ -73,13 +73,13 @@ private fun AddExpandedPreview() = PreviewAdd(previewState)
 @Composable
 private fun AddNoServerPreview() = PreviewAdd(AddUiState(settingsLoaded = true))
 
-@Preview(name = "Incoming episodes, long titles", widthDp = 390, fontScale = 1.5f)
+@Preview(name = "Incoming episodes, long titles", widthDp = 390, heightDp = 600, fontScale = 1.5f)
 @Composable
 private fun IncomingEpisodesPreview() {
     FetcharrTheme(dynamicColor = false) {
         Surface {
-            Column(Modifier.padding(24.dp)) {
-                EpisodeChecklist(
+            LazyColumn(Modifier.padding(24.dp)) {
+                episodeChecklist(
                     episodes = listOf(
                         SeasonEpisode(1, "An episode title that wraps across several lines at large text sizes", "https://example.com/1", emptyMap(), emptyList(), true),
                         SeasonEpisode(2, "Another episode", "https://example.com/2", emptyMap(), emptyList(), false),

@@ -68,6 +68,7 @@ type Options struct {
 type entry struct {
 	worker  bool
 	cancel  context.CancelCauseFunc
+	stopped bool // retired by Stop or Shutdown; guarded by Runner.mu
 	wipe    bool // delete the work directory when the worker is done
 	wiped   bool // the deletion happened
 	counted bool // counted in Runner.downloading
@@ -259,12 +260,17 @@ func (r *Runner) WaitIdle(ctx context.Context) error {
 // also when the job has no running worker (pending, paused, processing
 // without a worker). It does not wait.
 func (r *Runner) Stop(jobID string, reason service.StopReason) {
-	if !validID(jobID) || r.superseded(jobID) {
+	if !validID(jobID) {
 		return
 	}
 	r.mu.Lock()
+	if r.superseded(jobID) {
+		r.mu.Unlock()
+		return
+	}
 	if e := r.busy[jobID]; e != nil {
 		if e.worker {
+			e.stopped = true
 			if reason == service.StopCancel {
 				e.wipe = true
 				e.cancel(errCancel)
@@ -329,6 +335,7 @@ func (r *Runner) Shutdown(ctx context.Context) error {
 		r.closing = true
 		for _, e := range r.busy {
 			if e.worker {
+				e.stopped = true
 				e.cancel(errShutdown)
 			}
 		}

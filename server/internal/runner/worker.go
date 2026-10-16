@@ -54,7 +54,7 @@ func (w *run) execute() {
 
 	// Claim: pending -> downloading, atomically, so no job starts twice.
 	now := r.now()
-	row, ok := r.move(j.ID, jobs.StatusPending, jobs.EventStart, store.Update{StartedAt: store.Set(&now)})
+	row, ok := w.move(jobs.StatusPending, jobs.EventStart, store.Update{StartedAt: store.Set(&now)})
 	if !ok {
 		return // paused or cancelled while queued
 	}
@@ -97,7 +97,7 @@ func (w *run) execute() {
 		return
 	}
 
-	row, ok = r.move(j.ID, jobs.StatusDownloading, jobs.EventDownloadDone, store.Update{
+	row, ok = w.move(jobs.StatusDownloading, jobs.EventDownloadDone, store.Update{
 		Progress: store.Set(pt.final(file)),
 	})
 	if !ok {
@@ -160,7 +160,7 @@ func (w *run) stopped() {
 // race (the user paused or cancelled) is expected and silent.
 func (w *run) fail(code, msg string) {
 	finished := w.r.now()
-	if _, ok := w.r.move(w.job.ID, w.status, jobs.EventFail, store.Update{
+	if _, ok := w.move(w.status, jobs.EventFail, store.Update{
 		ErrorCode:    store.Set(&code),
 		ErrorMessage: store.Set(&msg),
 		FinishedAt:   store.Set(&finished),
@@ -168,6 +168,24 @@ func (w *run) fail(code, msg string) {
 		// Only the code is logged, never the message.
 		w.r.log.Info("job failed", "job", w.job, "error_code", code)
 	}
+}
+
+// move excludes Stop while checking retirement and committing a worker
+// transition. In particular, a worker delayed in precheck must not claim or
+// fail the pending status belonging to a later resume/retry.
+func (w *run) move(from jobs.Status, ev jobs.Event, u store.Update) (*store.Job, bool) {
+	row, ok := func() (*store.Job, bool) {
+		w.r.mu.Lock()
+		defer w.r.mu.Unlock()
+		if w.e.stopped {
+			return nil, false
+		}
+		return w.r.moveStored(w.job.ID, from, ev, u)
+	}()
+	if ok {
+		w.r.pub.Publish(service.Change{Kind: service.ChangeUpdated, Job: row})
+	}
+	return row, ok
 }
 
 func (w *run) onPanic(p any) {
@@ -186,6 +204,14 @@ func (w *run) onPanic(p any) {
 // false when the job was not in status from any more (a concurrent pause,
 // cancel or delete won), which is expected and not logged as an error.
 func (r *Runner) move(id string, from jobs.Status, ev jobs.Event, u store.Update) (*store.Job, bool) {
+	row, ok := r.moveStored(id, from, ev, u)
+	if ok {
+		r.pub.Publish(service.Change{Kind: service.ChangeUpdated, Job: row})
+	}
+	return row, ok
+}
+
+func (r *Runner) moveStored(id string, from jobs.Status, ev jobs.Event, u store.Update) (*store.Job, bool) {
 	to, err := jobs.Transition(from, ev, false)
 	if err != nil {
 		r.log.Error("invalid runner transition", "job", id, "err", err)
@@ -195,7 +221,6 @@ func (r *Runner) move(id string, from jobs.Status, ev jobs.Event, u store.Update
 	row, err := r.st.UpdateIf(context.Background(), id, []jobs.Status{from}, u)
 	switch {
 	case err == nil:
-		r.pub.Publish(service.Change{Kind: service.ChangeUpdated, Job: row})
 		return row, true
 	case errors.Is(err, store.ErrStatusMismatch), errors.Is(err, store.ErrNotFound):
 		r.log.Debug("job changed concurrently; runner update skipped", "job", id, "event", string(ev))

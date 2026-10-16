@@ -22,9 +22,11 @@ import (
 const maxCASAttempts = 4
 
 // Service implements the job operations of spec §6.3. It is safe for
-// concurrent use; correctness under concurrency comes from the store's
-// compare-and-set updates and unique index, not from locks here.
+// concurrent use. Store guards protect state transitions; lifecycle keeps
+// each transition and its runner hooks ordered against subsequent actions.
 type Service struct {
+	lifecycle chan struct{}
+
 	store *store.Store
 	cfg   *config.Config
 	pub   Publisher
@@ -71,7 +73,7 @@ func WithClock(now func() time.Time) Option {
 
 // New returns a Service over st and cfg.
 func New(st *store.Store, cfg *config.Config, opts ...Option) *Service {
-	s := &Service{store: st, cfg: cfg, pub: nopPublisher{}, ctl: nopController{}, now: timefmt.Now, log: slog.Default()}
+	s := &Service{store: st, cfg: cfg, pub: nopPublisher{}, ctl: nopController{}, now: timefmt.Now, log: slog.Default(), lifecycle: make(chan struct{}, 1)}
 	for _, o := range opts {
 		o(s)
 	}
@@ -342,6 +344,14 @@ func (s *Service) BatchAction(ctx context.Context, batchID string, ev jobs.Event
 func (s *Service) apply(ctx context.Context, id string, ev jobs.Event, opts RetryOptions) (*store.Job, error) {
 	unlock := s.cfg.ReadSettings()
 	defer unlock()
+	// A resumed/retried job must not become pending before the previous stop
+	// has cancelled its worker or reserved its work directory for deletion.
+	select {
+	case s.lifecycle <- struct{}{}:
+		defer func() { <-s.lifecycle }()
+	case <-ctx.Done():
+		return nil, context.Cause(ctx)
+	}
 	for range maxCASAttempts {
 		cur, err := s.store.Get(ctx, id)
 		if errors.Is(err, store.ErrNotFound) {

@@ -32,8 +32,8 @@ import javax.inject.Singleton
  * A retried episode after a process restart therefore still gets its own notification. *Last seen* lives in a
  * [LastSeenStore]; on first run it is set to "now" before the first catch-up.
  *
- * When a batch summary needs a fetch that fails, nothing is recorded and *last seen* does not advance past that job,
- * so the next reconnect retries it.
+ * Only completed catch-up timestamp groups advance *last seen*. Live results therefore cannot skip over a failed
+ * batch fetch, and the next reconnect retries it even after process death.
  */
 @Singleton
 class ResultNotifier internal constructor(
@@ -78,9 +78,9 @@ class ResultNotifier internal constructor(
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             val ready = CompletableDeferred<Unit>()
             launch(start = CoroutineStart.UNDISPATCHED) {
-                store.finished.collect { job ->
+                store.finishedEvents.collect { event ->
                     ready.await()
-                    onLiveJob(job)
+                    onLiveJob(event.job, event.generation, event.connectionIdentity)
                 }
             }
             launch(start = CoroutineStart.UNDISPATCHED) {
@@ -95,56 +95,103 @@ class ResultNotifier internal constructor(
         }
     }
 
-    internal suspend fun onLiveJob(job: JobDto) = mutex.withLock {
-        resetIfServerChanged()
-        if (process(job)) advanceLastSeen(job.finishedAt)
+    private inner class Pass(
+        val session: JobsSession,
+        val key: String?,
+        val generation: Long,
+        val currentKey: () -> String?,
+    ) {
+        fun isCurrent() = session.isCurrent() && currentKey() == key && store.isCurrentGeneration(generation)
+        fun runIfCurrent(effect: () -> Unit): Boolean {
+            if (!isCurrent()) return false
+            var applied = false
+            session.runIfCurrent {
+                if (currentKey() == key) applied = store.runIfCurrentGeneration(generation, effect)
+            }
+            return applied
+        }
     }
 
-    internal suspend fun catchUp() = mutex.withLock {
-        resetIfServerChanged()
-        // The active list must be from this connection, or a batch could be judged by stale siblings: ones that
-        // finished while we were away still look active, new ones are missing.
-        withTimeoutOrNull(SNAPSHOT_WAIT_MS) { store.snapshotFresh.first { it } } ?: return@withLock
-        val last = lastSeen.get() ?: return@withLock
-        val finished = gateway.listFinishedAfter(last) ?: return@withLock
-        val plan = CatchUpPlanner.plan(last, finished)
-        var processedUpTo = last
-        for (job in plan.jobsToProcess) {
-            if (!process(job)) break
-            processedUpTo = maxOf(processedUpTo, job.finishedAt ?: processedUpTo)
+    private fun capturePass(
+        generation: Long = store.currentGeneration(),
+        connectionIdentity: Any? = null,
+    ): Pass? {
+        if (!store.isCurrentGeneration(generation)) return null
+        val session = gateway.captureSession() ?: return null
+        if (connectionIdentity != null && connectionIdentity !== session.connectionIdentity) return null
+        val key = session.serverKey ?: serverKey()
+        return Pass(session, key, generation) { session.serverKey ?: serverKey() }
+    }
+
+    internal suspend fun onLiveJob(
+        job: JobDto,
+        generation: Long = store.currentGeneration(),
+        connectionIdentity: Any? = null,
+    ) {
+        val pass = capturePass(generation, connectionIdentity) ?: return
+        mutex.withLock {
+            if (!resetIfServerChanged(pass)) return@withLock
+            process(job, pass)
+            // Only a complete history pass proves there are no missing finishes before a timestamp. A later live
+            // result must never jump over a failed batch fetch (including after a process restart).
         }
-        if (processedUpTo > last) lastSeen.set(processedUpTo)
+    }
+
+    internal suspend fun catchUp() {
+        val pass = capturePass() ?: return
+        mutex.withLock {
+            if (!resetIfServerChanged(pass)) return@withLock
+            // A connection may change during any suspension, including waiting for its first snapshot.
+            withTimeoutOrNull(SNAPSHOT_WAIT_MS) { store.snapshotFresh.first { it } } ?: return@withLock
+            if (!pass.isCurrent()) return@withLock
+            val last = lastSeen.get() ?: return@withLock
+            if (!pass.isCurrent()) return@withLock
+            val finished = pass.session.listFinishedAfter(last) ?: return@withLock
+            if (!pass.isCurrent()) return@withLock
+            val plan = CatchUpPlanner.plan(last, finished)
+            // Commit only complete timestamp groups: an exclusive server filter must not skip an unprocessed tie.
+            for ((finishedAt, jobs) in plan.jobsToProcess.groupBy { it.finishedAt!! }) {
+                for (job in jobs) if (!process(job, pass)) return@withLock
+                if (!pass.isCurrent()) return@withLock
+                lastSeen.set(finishedAt)
+                if (!pass.isCurrent()) return@withLock
+                if (!saveState(loadState(), pass)) return@withLock
+            }
+        }
     }
 
     /** True when [job] is dealt with (posted, skipped or already known); false when a fetch failed and it must be retried. */
-    private suspend fun process(job: JobDto): Boolean {
+    private suspend fun process(job: JobDto, pass: Pass): Boolean {
+        if (!pass.isCurrent()) return false
         val state = loadState()
+        if (!pass.isCurrent()) return false
         when (val decision = ResultNotificationDecider.onJobFinished(job, store.jobs.value, state)) {
             is ResultDecision.Skip ->
                 // Not recorded: when the last sibling finishes (or a catch-up runs) the batch can still be summarized.
                 if (decision.reason != ResultNotificationDecider.SKIP_BATCH_NOT_FINISHED) {
-                    saveState(ResultNotificationDecider.record(state, job, decision))
+                    saveState(ResultNotificationDecider.record(state, job, decision), pass)
                 }
             is ResultDecision.PostJob -> {
-                poster.post(decision.notification)
-                saveState(ResultNotificationDecider.record(state, job, decision))
+                if (!pass.runIfCurrent { poster.post(decision.notification) }) return false
+                saveState(ResultNotificationDecider.record(state, job, decision), pass)
             }
             is ResultDecision.SummarizeBatch -> {
-                val batchJobs = gateway.listBatch(decision.batchId) ?: return false
+                val batchJobs = pass.session.listBatch(decision.batchId) ?: return false
+                if (!pass.isCurrent()) return false
                 if (batchJobs.any { !it.status.isFinished }) {
                     // Raced with a retry or a late job: not done after all. Whoever finishes last summarizes.
-                    saveState(state.withJobNotified(job))
-                    return true
+                    return saveState(state.withJobNotified(job), pass)
                 }
-                ResultNotificationDecider.summarize(decision.batchId, batchJobs)?.let(poster::post)
+                val notification = ResultNotificationDecider.summarize(decision.batchId, batchJobs)
+                if (!pass.runIfCurrent { notification?.let(poster::post) }) return false
                 // Every job in the summary is covered by it: mark them so their own events (queued behind this one,
                 // or replayed by a catch-up) do not post again.
                 var next = ResultNotificationDecider.record(state, job, decision)
                 for (member in batchJobs) next = next.withJobNotified(member)
-                saveState(next)
+                saveState(next, pass)
             }
         }
-        return true
+        return pass.isCurrent()
     }
 
     /**
@@ -152,36 +199,48 @@ class ResultNotifier internal constructor(
      * would be announced. The same goes for the first connection to any server (the server was set up after the app
      * first ran, so the "last seen" from the first run says nothing about it).
      */
-    private suspend fun resetIfServerChanged() {
-        val current = serverKey() ?: return
+    private suspend fun resetIfServerChanged(pass: Pass): Boolean {
+        if (!pass.isCurrent()) return false
+        val current = pass.key ?: return true
         val stored = stateStore.loadServerKey()
-        if (stored == current) return
-        cachedState = NotifierState()
+        if (!pass.isCurrent()) return false
+        if (stored == current) return true
+        // Save the owner last. If settings change during persistence, the next serialized pass must reset again.
+        cachedState = null
         stateStore.save(NotifierState())
+        if (!pass.isCurrent()) return false
         lastSeen.set(time.nowMs())
+        if (!pass.isCurrent()) return false
         stateStore.saveServerKey(current)
-    }
-
-    private suspend fun advanceLastSeen(finishedAt: Long?) {
-        if (finishedAt == null) return
-        val current = lastSeen.get() ?: return
-        if (finishedAt > current) lastSeen.set(finishedAt)
+        return pass.isCurrent()
     }
 
     private suspend fun loadState(): NotifierState =
         cachedState ?: stateStore.load().also { cachedState = it }
 
-    private suspend fun saveState(state: NotifierState) {
-        val capped = state.capped()
-        if (capped == cachedState) return
-        cachedState = capped
+    private suspend fun saveState(state: NotifierState, pass: Pass): Boolean {
+        if (!pass.isCurrent()) return false
+        val cursor = lastSeen.get()
+        if (!pass.isCurrent()) return false
+        val capped = state.capped(cursor)
+        if (capped == cachedState) return true
         stateStore.save(capped)
+        cachedState = if (pass.isCurrent()) capped else null
+        return pass.isCurrent()
     }
 
-    private fun NotifierState.capped(): NotifierState = copy(
-        summarizedBatchIds = summarizedBatchIds.lastN(MAX_BATCHES),
-        notifiedJobKeys = notifiedJobKeys.lastN(MAX_JOB_KEYS),
-    )
+    private fun NotifierState.capped(cursor: Long?): NotifierState {
+        // Live results have not yet moved the recovery cursor. Keep their keys until a complete history pass
+        // covers them, even above the normal cap, or reconnecting after many live finishes would post them again.
+        val pending = notifiedJobKeys.filterTo(LinkedHashSet()) {
+            cursor == null || (it.substringAfterLast('@').toLongOrNull() ?: Long.MIN_VALUE) > cursor
+        }
+        val checkpointed = (notifiedJobKeys - pending).lastN((MAX_JOB_KEYS - pending.size).coerceAtLeast(0))
+        return copy(
+            summarizedBatchIds = summarizedBatchIds.lastN(MAX_BATCHES),
+            notifiedJobKeys = notifiedJobKeys.filterTo(LinkedHashSet()) { it in pending || it in checkpointed },
+        )
+    }
 
     private fun Set<String>.lastN(n: Int): Set<String> =
         if (size <= n) this else LinkedHashSet(toList().takeLast(n))

@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 class ActiveJobsStoreTest {
@@ -109,6 +110,28 @@ class ActiveJobsStoreTest {
             assertEquals(1, store.jobs.value.size)
             store.upsert(failed)
             assertEquals(failed.id, awaitItem().id)
+        }
+    }
+
+    @Test
+    fun clearInvalidatesTaggedFinishesAndAllowsTheSameIdOnTheNextServer() = runTest {
+        val completed = job("job-completed.json")
+        val connection = Any()
+        store.finishedEvents.test {
+            store.upsert(completed, connection)
+            val old = awaitItem()
+            assertSame(connection, old.connectionIdentity)
+            assertTrue(store.isCurrentGeneration(old.generation))
+            store.clear()
+            assertFalse(store.isCurrentGeneration(old.generation))
+            var posted = false
+            assertFalse(store.runIfCurrentGeneration(old.generation) { posted = true })
+            assertFalse(posted)
+            store.upsert(completed)
+            val fresh = awaitItem()
+            assertEquals(completed, fresh.job)
+            assertTrue(fresh.generation > old.generation)
+            assertTrue(store.isCurrentGeneration(fresh.generation))
         }
     }
 
