@@ -130,6 +130,9 @@ func TestFakeSigtermLeavesPartAndResumes(t *testing.T) {
 			break
 		}
 	}
+	if err := sc.Err(); err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
 	started := time.Now()
 	_ = cmd.Process.Signal(syscall.SIGTERM)
 	_ = cmd.Wait()
