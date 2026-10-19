@@ -42,6 +42,8 @@ def parse(argv):
             opts["version"] = True
         elif a in ("-U", "--update"):
             opts["update"] = True
+        elif a == "--replace-in-metadata":
+            i += 3  # field, regex, replacement (real yt-dlp handles normalization)
         elif a in VALUE_OPTS and i + 1 < len(argv):
             v = argv[i + 1]
             i += 1

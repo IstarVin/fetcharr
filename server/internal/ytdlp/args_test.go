@@ -20,6 +20,7 @@ func TestBuildArgsFull(t *testing.T) {
 		"--merge-output-format", "mp4",
 		"--progress-template", "download:%(progress)j",
 		"--print", "after_move:filepath",
+		"--replace-in-metadata", "video:ext", "(?i)^matroska$", "mkv",
 		"-o", "/data/work/job1/media.%(ext)s",
 		"--add-header", "Cookie: a=b",
 		"--add-header", "Referer: https://example.com",

@@ -57,6 +57,19 @@ func TestEndToEndRealYtdlp(t *testing.T) {
 		t.Skip("ffmpeg not available")
 	}
 	video := makeMP4(t)
+	mp4 := filepath.Join(t.TempDir(), "source.mp4")
+	if err := os.WriteFile(mp4, video, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mkv := filepath.Join(t.TempDir(), "source.mkv")
+	if out, err := exec.CommandContext(t.Context(), "ffmpeg", "-nostdin", "-loglevel", "error", "-y",
+		"-i", mp4, "-c", "copy", mkv).CombinedOutput(); err != nil {
+		t.Fatalf("ffmpeg cannot generate Matroska: %v: %s", err, out)
+	}
+	matroska, err := os.ReadFile(mkv)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	var rejected atomicCount
 	media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +81,14 @@ func TestEndToEndRealYtdlp(t *testing.T) {
 		switch r.URL.Path {
 		case "/media/ep2.mp4", "/media/film.mp4":
 			http.ServeContent(w, r, "video.mp4", time.Time{}, bytes.NewReader(video))
+		case "/media/matroska":
+			// Some sources use video/matroska instead of video/x-matroska.
+			// An extensionless URL makes yt-dlp infer the extension from it.
+			w.Header().Set("Content-Type", "video/matroska")
+			http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(matroska))
+		case "/media/blocked.matroska.exe":
+			w.Header().Set("Content-Type", "video/matroska")
+			http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(matroska))
 		case "/subs/ep2.en.vtt", "/subs/film.en.vtt":
 			w.Header().Set("Content-Type", "text/vtt")
 			_, _ = io.WriteString(w, vttSample)
@@ -135,7 +156,7 @@ func TestEndToEndRealYtdlp(t *testing.T) {
 		}
 		return out["id"].(string)
 	}
-	waitDone := func(id string) map[string]any {
+	waitStatus := func(id, status string) map[string]any {
 		t.Helper()
 		deadline := time.Now().Add(60 * time.Second)
 		for {
@@ -143,10 +164,11 @@ func TestEndToEndRealYtdlp(t *testing.T) {
 			if code != http.StatusOK {
 				t.Fatalf("GET job = %d", code)
 			}
-			switch job["status"] {
-			case "completed":
+			if job["status"] == status {
 				return job
-			case "failed", "cancelled":
+			}
+			switch job["status"] {
+			case "completed", "failed", "cancelled":
 				t.Fatalf("job %s: %v: %v", job["status"], job["error_code"], job["error_message"])
 			}
 			if time.Now().After(deadline) {
@@ -168,24 +190,36 @@ func TestEndToEndRealYtdlp(t *testing.T) {
 		"headers":   hdr,
 		"subtitles": []map[string]string{{"url": media.URL + "/subs/film.en.vtt", "lang": "en"}},
 	})
+	matroskaID := create(map[string]any{
+		"url": media.URL + "/media/matroska", "category": "movies",
+		"title": "Matroska Film", "headers": hdr,
+		"subtitles": []map[string]string{{"url": media.URL + "/subs/film.en.vtt", "lang": "en"}},
+	})
+	unsafeID := create(map[string]any{
+		"url": media.URL + "/media/blocked.matroska.exe", "category": "movies",
+		"title": "Unsafe Extension", "headers": hdr,
+	})
 
 	type want struct {
 		id, root, rel string // rel: media path relative to the category root, no extension
 		topDir        string // first folder under the root
+		ext           string
+		media         []byte
 	}
 	cases := []want{
-		{tvID, f.root("tv"), filepath.Join("Severance (2022)", "Season 01", "Severance - S01E02 - Half Loop"), "Severance (2022)"},
-		{movieID, f.root("movies"), filepath.Join("Dune Part Two (2024)", "Dune Part Two (2024)"), "Dune Part Two (2024)"},
+		{tvID, f.root("tv"), filepath.Join("Severance (2022)", "Season 01", "Severance - S01E02 - Half Loop"), "Severance (2022)", ".mp4", video},
+		{movieID, f.root("movies"), filepath.Join("Dune Part Two (2024)", "Dune Part Two (2024)"), "Dune Part Two (2024)", ".mp4", video},
+		{matroskaID, f.root("movies"), filepath.Join("Matroska Film", "Matroska Film"), "Matroska Film", ".mkv", matroska},
 	}
 	for _, c := range cases {
-		job := waitDone(c.id)
+		job := waitStatus(c.id, "completed")
 		fp, _ := job["file_path"].(string)
-		wantPath := filepath.Join(c.root, c.rel+".mp4")
+		wantPath := filepath.Join(c.root, c.rel+c.ext)
 		if fp != wantPath {
 			t.Fatalf("file_path = %q, want %q", fp, wantPath)
 		}
-		if st, err := os.Stat(fp); err != nil || st.Size() != int64(len(video)) {
-			t.Errorf("media file: %v (size %v, want %d)", err, st, len(video))
+		if got := []byte(readFile(t, fp)); !bytes.Equal(got, c.media) {
+			t.Errorf("media file differs from source: got %d bytes, want %d", len(got), len(c.media))
 		}
 		srt := readFile(t, filepath.Join(c.root, c.rel+".en.srt"))
 		if !strings.Contains(srt, "00:00:01,000 --> 00:00:02,500") || strings.Contains(srt, "WEBVTT") {
@@ -204,6 +238,11 @@ func TestEndToEndRealYtdlp(t *testing.T) {
 		if job["finished_at"] == nil {
 			t.Error("finished_at not set")
 		}
+	}
+	unsafe := waitStatus(unsafeID, "failed")
+	message, _ := unsafe["error_message"].(string)
+	if unsafe["error_code"] != "download_failed" || !strings.Contains(message, "extension ('exe')") {
+		t.Errorf("unsafe extension should still be rejected: %v", unsafe)
 	}
 	if n := rejected.get(); n != 0 {
 		t.Errorf("%d requests reached the server without the custom header", n)

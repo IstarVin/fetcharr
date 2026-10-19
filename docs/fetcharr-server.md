@@ -167,6 +167,7 @@ yt-dlp runs as a subprocess in its own process group. It writes into the job's w
 
 - write to `<work_dir>/media.%(ext)s`;
 - pick the best video plus best audio, falling back to the best single format. When streams are merged, use `merge_format`. Single-file sources keep their original container;
+- normalize a detected `matroska` extension to `mkv` after format selection, before filename creation, while keeping yt-dlp's extension safety checks enabled;
 - disable playlist expansion;
 - emit one JSON progress line per update on stdout (`--newline`, `--progress-template`);
 - print the final file path after post-processing (`--print after_move:filepath`). If nothing is printed, the server falls back to the largest media file in the work directory;

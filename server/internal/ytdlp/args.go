@@ -34,6 +34,7 @@ type Spec struct {
 //	-f bv*+ba/b --merge-output-format <merge_format>
 //	--progress-template download:%(progress)j
 //	--print after_move:filepath
+//	--replace-in-metadata video:ext (?i)^matroska$ mkv
 //	-o <work_dir>/media.%(ext)s
 //	[--add-header "Name: value" ...]   (sorted by header name)
 //	<extra_args...> -- <url>
@@ -41,6 +42,10 @@ type Spec struct {
 // "--progress" is required in addition to "--newline": --print implies
 // --quiet in yt-dlp, which would otherwise suppress all progress output.
 // "--no-part" is intentionally absent so partial files allow resuming.
+// Normalize the Matroska container name some sources use as an extension.
+// The video stage runs after format selection and before filename creation;
+// the default pre_process stage can be overwritten by the selected format.
+// This preserves yt-dlp's extension safety checks for all other extensions.
 func BuildArgs(s Spec) []string {
 	args := []string{
 		"--newline", "--progress", "--no-playlist",
@@ -48,6 +53,7 @@ func BuildArgs(s Spec) []string {
 		"--merge-output-format", s.MergeFormat,
 		"--progress-template", ProgressTemplate,
 		"--print", "after_move:filepath",
+		"--replace-in-metadata", "video:ext", "(?i)^matroska$", "mkv",
 		"-o", filepath.Join(escapeTemplate(s.WorkDir), OutputName),
 	}
 	names := make([]string, 0, len(s.Headers))
