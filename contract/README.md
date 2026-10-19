@@ -1,6 +1,6 @@
 # Fetcharr contract fixtures
 
-Wire-format fixtures shared by the server and Android tests. Any change here is a contract change (implementation-plan §2). All timestamps are RFC 3339 UTC with millisecond precision. Jobs never contain `headers`.
+Wire-format fixtures shared by the server, Android and web tests. Any change here is a contract change (implementation-plan §2). All timestamps are RFC 3339 UTC with millisecond precision. Jobs never contain `headers`.
 
 | File | Represents | Spec |
 | --- | --- | --- |
@@ -10,7 +10,7 @@ Wire-format fixtures shared by the server and Android tests. Any change here is 
 | `job-<status>.json` (pending, downloading, processing, paused, completed, failed, cancelled) | One Job object per status | server §2.4, §6.2 |
 | `jobs-list.json` | `GET /api/jobs` (all 7 jobs, newest `created_at` first) | server §6.3 |
 | `batch-create-response.json` | `201` from `POST /api/jobs/batch` (2 created, 1 skipped) | server §6.3 |
-| `error-<code>.json` (invalid_request, unauthorized, not_found, invalid_state, duplicate, ytdlp_unmanaged, ytdlp_busy) | Error envelope | server §6.1 |
+| `error-<code>.json` (invalid_request, unauthorized, forbidden, not_found, invalid_state, duplicate, ytdlp_unmanaged, ytdlp_busy) | Error envelope | server §6.1 |
 | `ws-snapshot.json`, `ws-job_added.json`, `ws-job_updated.json`, `ws-job_removed.json` | WebSocket messages | server §7 |
 | `ytdlp-check.json` | `GET /api/system/ytdlp/check` | server §6.3 |
 | `ytdlp-update.json` | `POST /api/system/ytdlp/update` | server §6.3 |

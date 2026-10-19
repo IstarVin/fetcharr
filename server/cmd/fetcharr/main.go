@@ -28,6 +28,7 @@ import (
 	"github.com/istarvin/fetcharr/server/internal/service"
 	"github.com/istarvin/fetcharr/server/internal/settings"
 	"github.com/istarvin/fetcharr/server/internal/store"
+	"github.com/istarvin/fetcharr/server/internal/webui"
 	"github.com/istarvin/fetcharr/server/internal/ws"
 	"github.com/istarvin/fetcharr/server/internal/ytdlpmgr"
 )
@@ -183,6 +184,10 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 		},
 	})
 	defer hub.Close()
+	var webUI http.Handler
+	if cfg.Server.WebUI {
+		webUI = webui.Handler()
+	}
 	srv := &http.Server{
 		Handler: api.New(api.Options{
 			Config:    cfg,
@@ -192,6 +197,7 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 			Logger:    log,
 			WebSocket: hub,
 			Updater:   updater,
+			WebUI:     webUI,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -218,6 +219,15 @@ func TestGoldenErrors(t *testing.T) {
 	t.Run("unauthorized", func(t *testing.T) {
 		e := newEnv(t)
 		check(t, "error-unauthorized.json", e.requestWith("GET", "/api/jobs", nil, ""), 401)
+	})
+	t.Run("forbidden", func(t *testing.T) {
+		e := newEnv(t)
+		req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/jobs", strings.NewReader(`{}`))
+		req.Header.Set("Authorization", "Bearer "+testToken)
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		rec := httptest.NewRecorder()
+		e.h.ServeHTTP(rec, req)
+		check(t, "error-forbidden.json", resp{Code: rec.Code, Header: rec.Header(), Raw: rec.Body.Bytes()}, 403)
 	})
 	t.Run("not_found", func(t *testing.T) {
 		e := newEnv(t)

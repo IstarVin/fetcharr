@@ -16,6 +16,7 @@ import (
 // Error codes that only the HTTP layer produces (spec §6.1).
 const (
 	codeUnauthorized    = "unauthorized"
+	codeForbidden       = "forbidden"
 	codeYtdlpUnmanaged  = "ytdlp_unmanaged"
 	codeYtdlpBusy       = "ytdlp_busy"
 	codeInternal        = "internal"

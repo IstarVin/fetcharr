@@ -1,0 +1,17 @@
+# The image builds from the repository root (server/Dockerfile) so the web UI
+# can be compiled and embedded. Allowlist only what the build needs; .local/
+# holds Compose media and must never enter the build context.
+*
+!server/
+!web/
+server/**/*_test.go
+server/testdata
+server/scripts
+server/deploy
+server/README.md
+server/config.yaml
+server/data
+server/**/*.db
+server/bin
+server/internal/webui/dist/app
+web/node_modules

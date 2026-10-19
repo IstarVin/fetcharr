@@ -1,13 +1,26 @@
 # syntax=docker/dockerfile:1
+# Build from the repository root: docker build -f server/Dockerfile .
+
+# ---- web stage --------------------------------------------------------------
+# The browser UI is platform-independent, so it builds once on the build host.
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS web
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
+COPY web/ ./
+# Vite writes to ../server/internal/webui/dist/app.
+RUN npm run build
 
 # ---- build stage ------------------------------------------------------------
 FROM golang:1.26-bookworm AS build
 WORKDIR /src
 
-COPY go.mod go.sum ./
+COPY server/go.mod server/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
-COPY . .
+COPY server/ .
+# Embedded by internal/webui (go:embed).
+COPY --from=web /src/server/internal/webui/dist/app ./internal/webui/dist/app
 
 # VERSION is reported by GET /api/info (main.version).
 ARG VERSION=dev

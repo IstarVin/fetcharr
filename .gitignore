@@ -1,3 +1,7 @@
 # Local Docker Compose configuration and persistent files.
 /.env
 /.local/fetcharr/
+
+# Web UI dependencies and the build embedded into the server binary.
+/web/node_modules/
+/server/internal/webui/dist/app/

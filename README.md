@@ -1,10 +1,11 @@
 # Fetcharr
 
-An Android client and self-hosted download server. Share a media URL or send a
-`fetcharr://` request to Android; the server downloads it with yt-dlp, processes
-it with ffmpeg, and files it into movie, TV, or flat library folders. Android
-shows the live queue, history, and background notifications. Server settings
-and optional Jellyfin/Plex connections can be managed in the app.
+An Android client, a web UI and a self-hosted download server. Share a media URL
+or send a `fetcharr://` request to Android, or paste one into the web UI; the
+server downloads it with yt-dlp, processes it with ffmpeg, and files it into
+movie, TV, or flat library folders. Both clients show the live queue and
+history; Android adds background notifications. Server settings and optional
+Jellyfin/Plex connections can be managed in either client.
 
 Tap **Play** on a completed History item to stream the saved file in an external
 Android player. Both the app and server need the playback update. Seeking is
@@ -16,6 +17,27 @@ Follow the [server quick start](server/README.md) for Docker or a standalone
 binary. Configure a token when access needs authentication. Add the server URL
 and token in Android, then open **Settings → Server settings** to add writable
 library destinations.
+
+## Web UI
+
+The server serves a browser UI at `http://<server>:<port>/`, using the same API
+as Android. Sign in with the server's API token when one is configured. See the
+[web spec](docs/fetcharr-web.md). Set `server.web_ui: false` for an API-only
+server.
+
+## Build the web UI
+
+Use Node 24. The build is embedded into the server binary, so build it before
+building the server (the Docker image does both):
+
+```sh
+cd web
+npm ci
+npm run build    # writes server/internal/webui/dist/app
+```
+
+`npm run dev` serves a hot-reloading UI that proxies `/api` to a running server
+(`FETCHARR_URL`, default `http://localhost:8083`).
 
 ## Build Android
 
@@ -51,6 +73,10 @@ cd server
 go vet ./...
 go test -race ./...
 golangci-lint run
+
+cd ../web
+npm run check
+npm test
 ```
 
 Android tests use the shared [API fixtures](contract/README.md). The optional
@@ -61,12 +87,12 @@ running server; its source documents the required fake-download setup.
 
 Tags `android-vX.Y.Z` and `server-vX.Y.Z` trigger the separate release workflows.
 Prerelease suffixes such as `-rc.1` are supported. Android runs tests and lint,
-builds a signed APK, and verifies its signature before publishing. Configure
+builds a signed APK, and verifies its signature before publishing. The server image includes the web UI. Configure
 GitHub Actions secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
 `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD` first. The server runs vet and
 race tests before publishing its multi-platform container image.
 
-See the [Android spec](docs/fetcharr-android.md),
+See the [Android spec](docs/fetcharr-android.md), [web spec](docs/fetcharr-web.md),
 [intent guide](docs/fetcharr-android-intents.md),
 [server spec](docs/fetcharr-server.md), and [release audit](docs/release-audit.md)
 for behavior and validation details.

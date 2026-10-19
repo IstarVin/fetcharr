@@ -1,7 +1,8 @@
 services:
   fetcharr:
     build:
-      context: ./server
+      context: .
+      dockerfile: server/Dockerfile
     image: fetcharr-server:local
     user: "${FETCHARR_UID:-1000}:${FETCHARR_GID:-1000}"
     ports:

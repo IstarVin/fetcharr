@@ -1,6 +1,6 @@
 # Fetcharr Server
 
-A self-hosted download server. It accepts download jobs from the [Fetcharr Android app](fetcharr-android.md), downloads them with yt-dlp, reports live progress over WebSocket, and files finished media into a Plex/Jellyfin-compatible library.
+A self-hosted download server. It accepts download jobs from the [Fetcharr Android app](fetcharr-android.md) and its built-in [web UI](fetcharr-web.md), downloads them with yt-dlp, reports live progress over WebSocket, and files finished media into a Plex/Jellyfin-compatible library.
 
 **Stack:** Go · SQLite · yt-dlp · ffmpeg · HTTP + WebSocket
 
@@ -18,10 +18,11 @@ A self-hosted download server. It accepts download jobs from the [Fetcharr Andro
 - Push job changes to every connected client over WebSocket.
 - Optionally tell Jellyfin/Plex to rescan the affected folder.
 - Keep its own yt-dlp binary up to date.
+- Serve the browser frontend ([web UI](fetcharr-web.md)) at `/`.
 
 ### Non-goals
 
-- No web UI. The server serves only the API and WebSocket.
+- No server-rendered pages. The web UI is a static app embedded in the binary that uses the same public API as Android.
 - No built-in player, transcoding, metadata scraping or library management beyond placing files. Completed files can be streamed to an external player.
 - No multi-user model. One optional shared API token protects the whole server.
 
@@ -82,7 +83,7 @@ Pending jobs are dispatched in ascending `queued_at` order. `queued_at` is set w
 
 ## 3. Configuration
 
-The server reads deployment settings from one YAML file. Its path is given by `--config <path>` or `FETCHARR_CONFIG`, and defaults to `./config.yaml`. Host/port, authentication, log level, data directory, `ytdlp.binary`, and `downloads.extra_args` remain deployment-owned and require a restart.
+The server reads deployment settings from one YAML file. Its path is given by `--config <path>` or `FETCHARR_CONFIG`, and defaults to `./config.yaml`. Host/port, authentication, log level, the web UI switch, data directory, `ytdlp.binary`, and `downloads.extra_args` remain deployment-owned and require a restart.
 
 The remaining settings are managed through Android or `/api/system/settings`, persisted in SQLite, and applied live. Existing YAML values are imported once when the database has no settings document; after that the database is authoritative for editable values. The full legacy example below remains valid for that initial import. New installations can use `server/config.minimal.yaml` and add categories in Android.
 
@@ -92,6 +93,7 @@ server:
   port: 8080
   auth_token: ""            # empty = no auth; otherwise required as a Bearer token
   log_level: info           # debug | info | warn | error
+  web_ui: true              # serve the browser UI at / (false = API only)
 
 data_dir: /data             # SQLite DB, per-job work dirs, managed yt-dlp binary
 
@@ -244,7 +246,8 @@ Example:
 ### 6.1 Conventions
 
 - **Base URL:** `http://<host>:<port>/api`. Bodies are JSON (`application/json`).
-- **Auth:** when `server.auth_token` is set, every endpoint except `/api/health` and the signed media stream requires `Authorization: Bearer <token>`. The WebSocket upgrade request also needs it. A missing or wrong token returns `401 unauthorized`. Tokens are compared in constant time. The media endpoint requires its job-scoped playback signature, even when API authentication is disabled.
+- **Auth:** when `server.auth_token` is set, every endpoint except `/api/health`, `/api/session` and the signed media stream requires `Authorization: Bearer <token>` or a browser session cookie (see `POST /api/session`). The WebSocket upgrade request also needs one of them. A missing or wrong credential returns `401 unauthorized`; a wrong Bearer header is rejected even when a valid cookie is present. Tokens are compared in constant time. The media endpoint requires its job-scoped playback signature, even when API authentication is disabled.
+- **Cross-origin requests:** unsafe methods (`POST`, `PUT`, `DELETE`) sent by a browser from another origin are rejected with `403 forbidden`, detected with `Sec-Fetch-Site` or by comparing `Origin` with `Host`. Clients that send neither header, such as Android, are unaffected. There is no CORS support.
 - **Times:** RFC 3339 in UTC with millisecond precision, e.g. `2026-10-14T14:30:00.123Z`. The precision keeps `finished_after` catch-up from skipping jobs that finish in the same second.
 - **Errors:** every non-2xx response has this shape:
 
@@ -256,6 +259,7 @@ Example:
 | --- | --- | --- |
 | 400 | `invalid_request` | Validation failed |
 | 401 | `unauthorized` | Missing or wrong token |
+| 403 | `forbidden` | Cross-origin browser request to an unsafe method |
 | 404 | `not_found` | Job or batch not found |
 | 409 | `invalid_state` | Action not allowed in the current status |
 | 409 | `duplicate` | The same URL is already `pending`, `downloading`, `processing` or `paused` |
@@ -307,6 +311,11 @@ Returned by every endpoint that returns jobs. **Request headers are never includ
 
 #### `GET /api/health`
 No auth. Returns `200 {"status":"ok"}`. For container health checks.
+
+#### `POST /api/session` · `DELETE /api/session`
+Browser sign-in for the web UI; browsers cannot send a Bearer header on a WebSocket upgrade. `POST` takes `{"token": "<auth_token>"}` and returns `204` with an `HttpOnly`, `SameSite=Strict` cookie `fetcharr_session` (30 days; `Secure` when the request arrived over HTTPS or with `X-Forwarded-Proto: https`). The cookie has no `Path` attribute, so it is scoped to the API directory, including behind a reverse-proxy prefix. A wrong token returns `401 unauthorized`. Without a configured `auth_token` the call returns `204` and sets no cookie.
+
+The cookie holds an expiry and an HMAC keyed by the token. It survives restarts and becomes invalid when the token changes or it expires. It never contains the token and is never logged. `DELETE` clears it and returns `204`; it needs no valid session.
 
 #### `GET /api/info`
 Returns server details and the category list. Clients use this for "Test connection" and to build category pickers.
@@ -504,7 +513,7 @@ WebSocket upgrade. See §7.
 
 ## 7. WebSocket
 
-`GET /api/ws`, authenticated the same way as REST. Messages go from server to client only; anything a client sends is ignored. Every message is a JSON object with a `type`.
+`GET /api/ws`, authenticated the same way as REST (Bearer or the browser session cookie). The upgrade's `Origin`, when present, must match `Host`; reverse proxies must forward the original `Host` header. Messages go from server to client only; anything a client sends is ignored. Every message is a JSON object with a `type`.
 
 | `type` | Payload | When |
 | --- | --- | --- |
@@ -538,6 +547,7 @@ The current version is shown in `GET /api/info`.
 
 - Request headers are stored in SQLite so retry can reuse them. They are never returned by the API, sent over WebSocket, or logged. The database file is created with `0600` permissions.
 - URLs are logged without their query string.
+- The web UI is served with a strict `Content-Security-Policy` (same-origin scripts, API, WebSocket and media only), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and framing disabled. Static UI files need no authentication; every API call does.
 - Logs are structured (`log/slog`) and go to stdout. At `info` the server logs startup, job created/started/completed/failed, WebSocket connect/disconnect, yt-dlp updates and media-server refresh failures.
 - A panic inside a worker is recovered. That job fails with `processing_failed` and the worker keeps running.
 
@@ -567,3 +577,7 @@ services:
 ### Bare metal (alternative)
 
 Requirements: the `fetcharr` binary, plus `ffmpeg` and `ffprobe` on `PATH`. Run `fetcharr --config /etc/fetcharr/config.yaml`. For a long-running install, use a systemd unit with `Restart=on-failure` that runs as a user who can write to `data_dir` and every category path.
+
+### Reverse proxy
+
+The web UI uses relative URLs and hash routing, so it works at the root or under a path prefix such as `https://home.example/fetcharr/`. Forward WebSocket upgrades for `/api/ws` and keep the original `Host` header (nginx: `proxy_set_header Host $host;`); otherwise the WebSocket origin check fails. Set `X-Forwarded-Proto: https` when TLS terminates at the proxy so the session cookie is marked `Secure`.

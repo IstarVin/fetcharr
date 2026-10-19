@@ -17,6 +17,7 @@ server:
   port: 8080                # the Docker HEALTHCHECK probes 8080; keep it and remap with `ports:` instead
   auth_token: ""            # empty = no auth; otherwise required as a Bearer token
   log_level: info           # debug | info | warn | error
+  web_ui: true              # serve the browser UI at http://<host>:<port>/
 
 # SQLite database, per-job work dirs and the managed yt-dlp binary live here.
 # Must exist and be writable by the user running the server.

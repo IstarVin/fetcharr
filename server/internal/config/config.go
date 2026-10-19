@@ -40,6 +40,7 @@ type Server struct {
 	Port      int    `yaml:"port"`
 	AuthToken string `yaml:"auth_token"` // empty = no auth
 	LogLevel  string `yaml:"log_level"`  // debug | info | warn | error
+	WebUI     bool   `yaml:"web_ui"`     // serve the browser frontend at /
 }
 
 // Downloads is the `downloads:` section.
@@ -103,7 +104,7 @@ func ResolvePath(flagValue string) string {
 // first-run category setup through the app.
 func Default() *Config {
 	return &Config{
-		Server:    Server{Host: "0.0.0.0", Port: 8080, LogLevel: "info"},
+		Server:    Server{Host: "0.0.0.0", Port: 8080, LogLevel: "info", WebUI: true},
 		DataDir:   "/data",
 		Downloads: Downloads{Concurrency: 2, MergeFormat: "mp4", MinFreeSpace: ByteSize(5 * 1000 * 1000 * 1000)},
 		Ytdlp:     Ytdlp{AutoUpdate: true},

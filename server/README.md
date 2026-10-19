@@ -1,6 +1,6 @@
 # Fetcharr server
 
-Self-hosted download server. The Fetcharr Android app (or any HTTP client) sends it a URL plus a target category; the server downloads it with yt-dlp, post-processes it with ffmpeg and files it into your media library using Jellyfin/Plex-friendly names, then optionally asks your media server to rescan.
+Self-hosted download server. The Fetcharr Android app, the built-in web UI (or any HTTP client) sends it a URL plus a target category; the server downloads it with yt-dlp, post-processes it with ffmpeg and files it into your media library using Jellyfin/Plex-friendly names, then optionally asks your media server to rescan.
 
 It is a single static Go binary (no CGO, SQLite embedded). At runtime it needs `ffmpeg` and `ffprobe` on `PATH`. yt-dlp is downloaded and kept up to date by the server itself unless you point it at your own binary.
 
@@ -48,11 +48,11 @@ Full behaviour and the HTTP/WebSocket API are specified in [`docs/fetcharr-serve
 
 3. Check it: `curl http://localhost:8080/api/health`. The first start downloads yt-dlp into `/data/bin` and aborts if that download fails, so the container needs internet access on first start (or set `ytdlp.binary` to a binary you mount in).
 
-4. Connect Android using the server URL and optional token, then open **Settings → Server settings**. Add categories using container paths such as `/media/movies`. Configure download limits, history retention, automatic yt-dlp updates, and Jellyfin/Plex connections there. Until a category is added, the API remains available but cannot accept downloads.
+4. Open `http://localhost:8080/` in a browser (sign in with the token if one is set), or connect Android using the server URL and optional token. Then open **Settings → Server settings**. Add categories using container paths such as `/media/movies`. Configure download limits, history retention, automatic yt-dlp updates, and Jellyfin/Plex connections there. Until a category is added, the API remains available but cannot accept downloads.
 
 The image is Debian-based (glibc) so the standalone yt-dlp release binary runs without Python. It includes a `HEALTHCHECK` on `/api/health` at port 8080. If you change `server.port` in the config, keep it at 8080 inside the container and remap with `ports:` (or override the healthcheck).
 
-Build locally with `docker build -t fetcharr-server server/` (optional `--build-arg VERSION=1.2.3`, reported by `GET /api/info`).
+Build locally from the repository root with `docker build -f server/Dockerfile -t fetcharr-server .` (optional `--build-arg VERSION=1.2.3`, reported by `GET /api/info`). The build context is the repository root so the web UI in `web/` can be compiled and embedded; the root `.dockerignore` keeps everything else (including `.local/`) out of it.
 
 ## Configuration
 
@@ -64,15 +64,16 @@ Existing full YAML files remain supported: their routine settings are imported i
 
 The server validates deployment settings before opening the database and validates effective categories afterward. It refuses startup if effective category paths are missing or unwritable, `data_dir` is unwritable, or `ffmpeg`/`ffprobe` are missing. Zero categories is a valid setup state. Details: [spec section 3](../docs/fetcharr-server.md#3-configuration).
 
-Set `server.auth_token` if the server is reachable by anyone you do not trust; clients then send `Authorization: Bearer <token>`.
+Set `server.auth_token` if the server is reachable by anyone you do not trust; clients then send `Authorization: Bearer <token>`, and the web UI asks for the token once and keeps an `HttpOnly` session cookie. `server.web_ui: false` turns the browser UI off. Behind a reverse proxy, forward the WebSocket and the original `Host` header ([spec §10](../docs/fetcharr-server.md#reverse-proxy)).
 
 Server settings use the same authentication as job operations. There is no separate administrator role. Older Android versions keep working with the server; newer Android versions show an upgrade message when connected to a server without settings support.
 
 ## Bare metal
 
-Requirements: Go (version in `go.mod`) to build, plus `ffmpeg` and `ffprobe` on `PATH` at runtime.
+Requirements: Go (version in `go.mod`) and Node 24 to build, plus `ffmpeg` and `ffprobe` on `PATH` at runtime. Without the web build the server still works and serves a short notice at `/`.
 
 ```sh
+(cd web && npm ci && npm run build)
 cd server
 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o fetcharr ./cmd/fetcharr
 ./fetcharr --config /etc/fetcharr/config.yaml

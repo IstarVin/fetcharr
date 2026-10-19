@@ -25,6 +25,7 @@ It closes the gap between a streaming app on the phone and the media library on 
 - Live job state comes over WebSocket; background notifications cover progress and results while the app is closed.
 - Server connection is a URL plus optional token, configured in Settings. Library destinations, and optional Jellyfin/Plex connections, are managed from Settings → Server settings.
 - History items can be played in an external Android player through temporary playback links.
+- The server also ships a browser UI with the same Queue, History, Add and Settings features (no intents or notifications); see `docs/fetcharr-web.md`. It follows the same brand tokens and principles.
 
 ## Capabilities and Constraints
 

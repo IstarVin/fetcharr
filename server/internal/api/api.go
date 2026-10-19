@@ -3,8 +3,6 @@ package api
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -73,6 +71,11 @@ type Options struct {
 	// YtdlpVersion overrides how the yt-dlp version is probed (tests). The
 	// default runs `<binary> --version`.
 	YtdlpVersion func(ctx context.Context, binary string) (string, error)
+	// WebUI, when set, serves the browser frontend for every path outside
+	// /api. It is static code and is mounted without authentication.
+	WebUI http.Handler
+	// Now overrides the clock used for session expiry (tests).
+	Now func() time.Time
 }
 
 type server struct {
@@ -85,11 +88,13 @@ type server struct {
 	maxBody     int64
 	ytdlp       *versionCache
 	playbackKey [32]byte
+	clock       func() time.Time
 }
 
 // New returns the HTTP handler for the whole API (everything lives under
-// /api). Middleware order, outermost first: request logging, panic recovery,
-// routing and endpoint authentication.
+// /api) and, when configured, the web UI. Middleware order, outermost first:
+// request logging, panic recovery, cross-origin protection, routing and
+// endpoint authentication.
 func New(opts Options) http.Handler {
 	s := &server{
 		settings: opts.Settings,
@@ -99,6 +104,7 @@ func New(opts Options) http.Handler {
 		updater:  opts.Updater,
 		log:      opts.Logger,
 		maxBody:  opts.MaxBodyBytes,
+		clock:    opts.Now,
 	}
 	if s.updater == nil {
 		s.updater = unimplementedUpdater{}
@@ -149,15 +155,19 @@ func New(opts Options) http.Handler {
 	// Players cannot reliably send custom headers. Only this read-only route
 	// accepts a signed, expiring link instead of the server's Bearer token.
 	mux.HandleFunc("GET /api/jobs/{id}/media", s.handleMedia)
+	// The token in the body is the credential, and signing out must work
+	// with a stale cookie, so neither route is behind authenticate.
+	mux.HandleFunc("POST /api/session", s.handleCreateSession)
+	mux.HandleFunc("DELETE /api/session", s.handleDeleteSession)
 	// The catch-all also receives requests whose path exists but whose method
 	// does not (a method-less pattern for those paths would conflict with
 	// "GET /api/jobs/{id}"). Probe the mux to tell 405 from 404.
-	mux.Handle("/", s.authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	fallback := s.authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var allow []string
 		for _, m := range []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodDelete} {
 			probe := r.Clone(r.Context())
 			probe.Method = m
-			if _, pattern := mux.Handler(probe); pattern != "" && pattern != "/" {
+			if _, pattern := mux.Handler(probe); pattern != "" && pattern != "/" && pattern != "/api/" {
 				allow = append(allow, m)
 			}
 		}
@@ -167,39 +177,50 @@ func New(opts Options) http.Handler {
 			return
 		}
 		writeError(w, http.StatusNotFound, codeNotFound, "no such endpoint")
-	})))
+	}))
+	mux.Handle("/api/", fallback)
+	if opts.WebUI != nil {
+		mux.Handle("/", opts.WebUI)
+	} else {
+		mux.Handle("/", fallback)
+	}
 
-	return s.logRequests(s.recoverPanics(mux))
+	// Browsers attach the session cookie to cross-site requests only under
+	// SameSite rules; this also rejects unsafe cross-origin browser requests
+	// outright (Sec-Fetch-Site / Origin). Requests without those headers,
+	// such as the Android client, are unaffected.
+	csrf := http.NewCrossOriginProtection()
+	csrf.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, http.StatusForbidden, codeForbidden, "cross-origin request rejected")
+	}))
+	return s.logRequests(s.recoverPanics(csrf.Handler(mux)))
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// authenticate enforces the Bearer token on API endpoints except /api/health.
-// The signed media stream is registered separately. With no token configured
-// this middleware is a pass-through.
+// authenticate enforces the Bearer token or a browser session cookie on API
+// endpoints except /api/health. The signed media stream and the session
+// routes are registered separately. With no token configured this
+// middleware is a pass-through.
 func (s *server) authenticate(next http.Handler) http.Handler {
 	token := s.cfg.Server.AuthToken
 	if token == "" {
 		return next
 	}
-	want := sha256.Sum256([]byte(token))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/health" {
 			next.ServeHTTP(w, r)
 			return
 		}
 		got, ok := bearerToken(r)
-		sum := sha256.Sum256([]byte(got))
-		// Comparing fixed-length digests in constant time hides the token
-		// length as well as its content.
-		if !ok || subtle.ConstantTimeCompare(want[:], sum[:]) != 1 {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="fetcharr"`)
-			writeError(w, http.StatusUnauthorized, codeUnauthorized, "missing or invalid bearer token")
+		if ok && tokenMatches(token, got) || !ok && s.validSession(r, token) {
+			next.ServeHTTP(w, r)
 			return
 		}
-		next.ServeHTTP(w, r)
+		w.Header().Set("WWW-Authenticate", `Bearer realm="fetcharr"`)
+		writeError(w, http.StatusUnauthorized, codeUnauthorized, "missing or invalid bearer token")
 	})
 }
 
