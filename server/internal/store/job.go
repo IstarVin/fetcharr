@@ -67,7 +67,8 @@ type Job struct {
 	Warnings     []string
 
 	// Overwrite replaces an existing library file (retry with overwrite:true).
-	Overwrite bool
+	ResetWorkDir bool // durable: remove old attempt files before using a replacement source
+	Overwrite    bool
 	// Placing is true once file placement started; cancel is refused (D7).
 	Placing bool
 	// WorkDir is <data_dir>/work/<id>/, "" until assigned.

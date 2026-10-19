@@ -92,8 +92,12 @@ class JobActions @Inject constructor(
         }
     }
 
-    private suspend fun job(jobId: String, call: suspend (FetcharrApi) -> JobDto): ActionOutcome {
-        val session = session() ?: return ActionOutcome.NotConfigured
+    suspend fun replaceSource(session: FetcharrApiSession, jobId: String, request: RetryRequest): ActionOutcome =
+        job(jobId, session) { it.retryJobWithBody(jobId, request) }
+
+    private suspend fun job(jobId: String, session: FetcharrApiSession? = session(), call: suspend (FetcharrApi) -> JobDto): ActionOutcome {
+        session ?: return ActionOutcome.NotConfigured
+        if (!apiProvider.isCurrent(session)) return serverChanged()
         val result = safeApiCall { call(session.api) }
         if (!apiProvider.isCurrent(session)) return serverChanged()
         return when (result) {

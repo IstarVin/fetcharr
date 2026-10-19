@@ -343,11 +343,9 @@ func TestPauseThenImmediateResume(t *testing.T) {
 }
 
 func TestCancelRetryWhileOldWorkerIsInPrecheck(t *testing.T) {
-	for _, lowDisk := range []bool{false, true} {
-		name := "claim"
-		if lowDisk {
-			name = "precheck-failure"
-		}
+	for _, scenario := range []string{"claim", "precheck-failure", "replace-claim", "replace-precheck-failure"} {
+		lowDisk := strings.Contains(scenario, "failure")
+		name := scenario
 		t.Run(name, func(t *testing.T) {
 			setDuration(t, "0")
 			entered, unblock := make(chan struct{}), make(chan struct{})
@@ -380,11 +378,18 @@ func TestCancelRetryWhileOldWorkerIsInPrecheck(t *testing.T) {
 			if _, err := g.svc.Cancel(t.Context(), j.ID); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := g.svc.Retry(t.Context(), j.ID, service.RetryOptions{}); err != nil {
+			opts := service.RetryOptions{}
+			if strings.HasPrefix(scenario, "replace") {
+				opts.Source = &service.ReplacementSource{URL: "https://fresh.example/video", HeadersMode: "clear", Subtitles: []service.SubtitleInput{}}
+			}
+			if _, err := g.svc.Retry(t.Context(), j.ID, opts); err != nil {
 				t.Fatal(err)
 			}
 			release()
-			g.waitStatus(j.ID, jobs.StatusProcessing)
+			done := g.waitStatus(j.ID, jobs.StatusProcessing)
+			if opts.Source != nil && done.URL != opts.Source.URL {
+				t.Fatal("stale worker used old URL")
+			}
 			if !exists(filepath.Join(g.workDir(j.ID), "media.mp4")) {
 				t.Error("the retried execution lost its downloaded file")
 			}

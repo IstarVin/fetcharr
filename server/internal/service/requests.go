@@ -65,8 +65,43 @@ type BatchResult struct {
 	Skipped []SkippedEpisode
 }
 
+// ReplacementSource is a complete new source for a single retry. Headers stay private.
+type ReplacementSource struct {
+	URL         string            `json:"url"`
+	HeadersMode string            `json:"headers_mode"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	Subtitles   []SubtitleInput   `json:"subtitles"`
+}
+
+func (s *ReplacementSource) validate() error {
+	if err := validateHTTPURL("source.url", s.URL); err != nil {
+		return err
+	}
+	if s.Subtitles == nil {
+		return invalid("source.subtitles must be an array")
+	}
+	switch s.HeadersMode {
+	case "clear", "keep":
+		if s.Headers != nil {
+			return invalid("source.headers is only accepted in replace mode")
+		}
+	case "replace":
+		if s.Headers == nil {
+			return invalid("source.headers must be an object in replace mode")
+		}
+		if err := validateHeaders("source.headers", s.Headers); err != nil {
+			return err
+		}
+	default:
+		return invalid("source.headers_mode must be clear, keep or replace")
+	}
+	_, err := normalizeSubtitles("source.subtitles", s.Subtitles)
+	return err
+}
+
 // RetryOptions are the optional parameters of retry.
 type RetryOptions struct {
+	Source *ReplacementSource
 	// Overwrite replaces an existing library file (spec §6.3 retry).
 	Overwrite bool
 }

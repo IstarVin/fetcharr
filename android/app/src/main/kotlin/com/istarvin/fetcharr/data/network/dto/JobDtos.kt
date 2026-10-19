@@ -81,7 +81,15 @@ data class ClearHistoryResponse(val deleted: Int)
 
 /** Optional body of `POST /api/jobs/{id}/retry`. */
 @Serializable
-data class RetryRequest(val overwrite: Boolean? = null)
+data class RetryRequest(val overwrite: Boolean? = null, val source: ReplacementSourceDto? = null)
+
+@Serializable
+data class ReplacementSourceDto(
+    val url: String,
+    @SerialName("headers_mode") val headersMode: String,
+    val subtitles: List<SubtitleDto>,
+    val headers: Map<String, String>? = null,
+)
 
 @Serializable
 data class SkippedEpisodeDto(val episode: Int, val reason: String)

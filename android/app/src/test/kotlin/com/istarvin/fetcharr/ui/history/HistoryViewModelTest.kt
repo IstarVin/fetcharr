@@ -49,6 +49,7 @@ class HistoryViewModelTest {
     private val server = MockWebServer()
     private lateinit var vm: HistoryViewModel
     private lateinit var settings: SettingsRepository
+    private lateinit var categoryRepository: CategoryRepository
 
     /** What `GET /api/jobs` returns. */
     @Volatile
@@ -118,7 +119,8 @@ class HistoryViewModelTest {
         val provider = FetcharrApiProvider(factory, settings, ioScope)
         val store = ActiveJobsStore()
         val history = HistoryRepository(provider, settings, store, ioScope)
-        vm = HistoryViewModel(settings, history, JobActions(provider, store), CategoryRepository(factory, settings, ioScope), provider)
+        categoryRepository = CategoryRepository(factory, settings, ioScope)
+        vm = HistoryViewModel(settings, history, JobActions(provider, store), categoryRepository, provider)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.state.collect { } }
         // DataStore emits from a real thread: wait for the state instead of running the test scheduler by hand.
         vm.state.first { it.historyLoaded && it.groups.sumOf { g -> g.items.size } == jobs.size }
@@ -370,4 +372,110 @@ class HistoryViewModelTest {
         // The 401 body is empty here, so only the status decides.
         assertEquals(HistoryEvent.Snackbar("Wrong API token", openSettings = true), vm.events.first())
     }
+    private suspend fun enableReplacement() {
+        categoryRepository.acceptServerInfo(settings.config.value!!,
+            com.istarvin.fetcharr.data.network.dto.InfoDto(version = "test", sourceReplacementSupported = true))
+        vm.state.first { state -> state.groups.flatMap { it.items }.any { HistoryAction.ReplaceSource in it.actions } }
+    }
+
+    @Test fun sourceReplacementIsGatedAndPrefillsOnlyPublicInputs() = runTest {
+        build(listOf(failed, cancelled, completed))
+        vm.replaceSource("failed")
+        assertNull(vm.replacement.value)
+        enableReplacement()
+        vm.replaceSource("done")
+        assertNull(vm.replacement.value)
+        vm.replaceSource("failed")
+        val draft = vm.replacement.value!!
+        assertEquals(failed.url, draft.url)
+        assertEquals(failed.subtitles.map { it.url }, draft.subtitles.map { it.url })
+        assertEquals("clear", draft.headersMode)
+        assertTrue(draft.headers.isEmpty())
+        vm.dismissSource()
+        vm.replaceSource("cancelled")
+        assertEquals("cancelled", vm.replacement.value!!.jobId)
+    }
+
+    @Test fun replacementSubmitsOnceAndRemovesHistoryOnlyAfterSuccess() = runTest {
+        build(listOf(failed))
+        enableReplacement()
+        vm.replaceSource("failed")
+        vm.editSource { it.copy(url = "https://new.example/video", subtitles = emptyList()) }
+        vm.submitSource()
+        vm.submitSource()
+        val event = vm.events.first() as HistoryEvent.Snackbar
+        assertEquals("Added to queue", event.message)
+        assertTrue(vm.isCurrentEvent(event))
+        vm.state.first { it.groups.isEmpty() }
+        assertNull(vm.replacement.value)
+        val request = nextAction()
+        assertEquals("/api/jobs/failed/retry", request.path)
+        val body = request.body.readUtf8()
+        assertTrue(body.contains("https://new.example/video"))
+        assertTrue(body.contains("\"headers_mode\":\"clear\""))
+        assertTrue(body.contains("\"subtitles\":[]"))
+        assertEquals(2, server.requestCount)
+        settings.setServer(server.url("/").toString().trimEnd('/'), "new-token")
+        settings.config.first { it?.token == "new-token" }
+        assertTrue(!vm.isCurrentEvent(event))
+    }
+
+    @Test fun replacementFailureKeepsDraftAndOverwriteNeedsConfirmation() = runTest {
+        build(listOf(alreadyExists))
+        enableReplacement()
+        vm.replaceSource("exists")
+        vm.editSource { it.copy(url = "https://new.example/video") }
+        vm.submitSource()
+        assertTrue(vm.replacement.value!!.confirmOverwrite)
+        assertEquals(1, server.requestCount)
+        failWith = 503
+        vm.submitSource(true)
+        val draft = vm.replacement.first { it?.error != null }!!
+        assertEquals("https://new.example/video", draft.url)
+        assertTrue(!draft.submitting)
+        assertTrue(nextAction().body.readUtf8().contains("\"overwrite\":true"))
+        assertEquals(listOf("exists"), ids())
+    }
+
+    @Test fun changingCredentialsDiscardsTheDraftAndCannotSubmitIt() = runTest {
+        build(listOf(failed))
+        enableReplacement()
+        vm.replaceSource("failed")
+        settings.setServer(server.url("/").toString().trimEnd('/'), "new-token")
+        settings.config.first { it?.token == "new-token" }
+        vm.replacement.first { it == null }
+        vm.submitSource()
+        assertTrue(server.requestCount <= 2) // history may refresh on the new session; no POST
+    }
+
+    @Test fun lateReplacementResponseCannotAffectTheNewConnection() = runTest {
+        build(listOf(failed))
+        enableReplacement()
+        vm.replaceSource("failed")
+        val entered = CountDownLatch(1)
+        val gate = CountDownLatch(1)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                if (request.method == "POST") {
+                    entered.countDown()
+                    check(gate.await(10, TimeUnit.SECONDS))
+                    return json(200, Fixtures.text("job-pending.json"))
+                }
+                return json(200, FetcharrJson.encodeToString(JobListDto(jobs = listOf(failed), total = 1)))
+            }
+        }
+        vm.submitSource()
+        testScheduler.runCurrent()
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            settings.setServer(server.url("/").toString().trimEnd('/'), "different-token")
+            settings.config.first { it?.token == "different-token" }
+            vm.replacement.first { it == null }
+            gate.countDown()
+            vm.state.first { state -> state.historyLoaded && state.groups.flatMap { it.items }.any { it.id == "failed" } }
+            assertNull(vm.replacement.value)
+            assertEquals(listOf("failed"), ids())
+        } finally { gate.countDown() }
+    }
+
 }

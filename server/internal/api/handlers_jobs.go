@@ -124,7 +124,8 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 
 // retryBody is the optional body of the retry endpoints.
 type retryBody struct {
-	Overwrite bool `json:"overwrite"`
+	Overwrite bool                       `json:"overwrite"`
+	Source    *service.ReplacementSource `json:"source"`
 }
 
 func (s *server) handleAction(action string) http.HandlerFunc {
@@ -146,7 +147,7 @@ func (s *server) handleAction(action string) http.HandlerFunc {
 			if !s.decodeJSON(w, r, &body, true) {
 				return
 			}
-			j, err = s.svc.Retry(r.Context(), id, service.RetryOptions{Overwrite: body.Overwrite})
+			j, err = s.svc.Retry(r.Context(), id, service.RetryOptions{Overwrite: body.Overwrite, Source: body.Source})
 		}
 		if err != nil {
 			s.fail(w, r, err)
@@ -166,6 +167,10 @@ func (s *server) handleBatchAction(action string) http.HandlerFunc {
 		if action == "retry" {
 			var body retryBody
 			if !s.decodeJSON(w, r, &body, true) {
+				return
+			}
+			if body.Source != nil {
+				badRequest(w, "source replacement is only supported for individual jobs")
 				return
 			}
 			opts.Overwrite = body.Overwrite

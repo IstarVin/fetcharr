@@ -103,14 +103,15 @@ type CategoryDTO struct {
 
 // InfoDTO is the body of GET /api/info.
 type InfoDTO struct {
-	SettingsSupported bool          `json:"settings_supported"`
-	SetupRequired     bool          `json:"setup_required"`
-	Version           string        `json:"version"`
-	YtdlpVersion      string        `json:"ytdlp_version"`
-	YtdlpManaged      bool          `json:"ytdlp_managed"`
-	Concurrency       int           `json:"concurrency"`
-	AuthRequired      bool          `json:"auth_required"`
-	Categories        []CategoryDTO `json:"categories"`
+	SourceReplacementSupported bool          `json:"source_replacement_supported"`
+	SettingsSupported          bool          `json:"settings_supported"`
+	SetupRequired              bool          `json:"setup_required"`
+	Version                    string        `json:"version"`
+	YtdlpVersion               string        `json:"ytdlp_version"`
+	YtdlpManaged               bool          `json:"ytdlp_managed"`
+	Concurrency                int           `json:"concurrency"`
+	AuthRequired               bool          `json:"auth_required"`
+	Categories                 []CategoryDTO `json:"categories"`
 }
 
 // ListDTO is the body of GET /api/jobs.

@@ -1,0 +1,8 @@
+{
+  "overwrite": false,
+  "source": {
+    "url": "https://media.example.com/refreshed/video.m3u8",
+    "headers_mode": "clear",
+    "subtitles": []
+  }
+}

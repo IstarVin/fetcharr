@@ -127,6 +127,11 @@ private const val LOAD_MORE_THRESHOLD = 8
 @Composable
 fun HistoryScreen(onOpenSettings: () -> Unit, viewModel: HistoryViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val replacement by viewModel.replacement.collectAsStateWithLifecycle()
+    replacement?.let { draft ->
+        SourceReplacementEditor(draft, viewModel::editSource, viewModel::addSourceHeader, viewModel::addSourceSubtitle,
+            { viewModel.submitSource() }, { viewModel.submitSource(true) }, viewModel::dismissSource)
+    }
     val snackbar = LocalSnackbarHostState.current
     val context = LocalContext.current
     val settingsLabel = stringResource(R.string.queue_snackbar_settings)
@@ -138,6 +143,7 @@ fun HistoryScreen(onOpenSettings: () -> Unit, viewModel: HistoryViewModel = hilt
         viewModel.events.collect { event ->
             when (event) {
                 is HistoryEvent.Snackbar -> {
+                    if (!viewModel.isCurrentEvent(event)) return@collect
                     snackbar.currentSnackbarData?.dismiss()
                     launch {
                         val result = snackbar.showSnackbar(
@@ -190,6 +196,7 @@ fun HistoryScreen(onOpenSettings: () -> Unit, viewModel: HistoryViewModel = hilt
                 HistoryAction.Play -> viewModel.play(id)
                 HistoryAction.CopyPath -> viewModel.copyPath(id)
                 HistoryAction.Retry -> viewModel.retry(id)
+                HistoryAction.ReplaceSource -> viewModel.replaceSource(id)
                 HistoryAction.Details -> viewModel.showDetails(id)
                 HistoryAction.Delete -> viewModel.requestDelete(id)
             }
@@ -563,6 +570,11 @@ private fun HistoryDetailSheet(
                             Text(stringResource(R.string.history_retry), Modifier.padding(start = 8.dp))
                         }
                     }
+                    if (HistoryAction.ReplaceSource in row.actions) {
+                        OutlinedButton(onClick = { onAction(HistoryAction.ReplaceSource) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text(stringResource(R.string.source_replace_action))
+                        }
+                    }
                     if (HistoryAction.CopyPath in row.actions) {
                         OutlinedButton(onClick = { onAction(HistoryAction.CopyPath) }, modifier = Modifier.heightIn(min = 48.dp)) {
                             Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -624,6 +636,7 @@ private val HistoryAction.labelRes: Int
         HistoryAction.Play -> R.string.history_play
         HistoryAction.CopyPath -> R.string.history_copy_path
         HistoryAction.Retry -> R.string.history_retry
+        HistoryAction.ReplaceSource -> R.string.source_replace_action
         HistoryAction.Details -> R.string.history_details
         HistoryAction.Delete -> R.string.history_delete
     }
@@ -633,6 +646,7 @@ private val HistoryAction.icon: ImageVector
         HistoryAction.Play -> Icons.Outlined.PlayArrow
         HistoryAction.CopyPath -> Icons.Outlined.ContentCopy
         HistoryAction.Retry -> Icons.Outlined.Replay
+        HistoryAction.ReplaceSource -> Icons.Outlined.Refresh
         HistoryAction.Details -> Icons.Outlined.Info
         HistoryAction.Delete -> Icons.Outlined.Delete
     }

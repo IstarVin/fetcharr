@@ -15,6 +15,11 @@ import com.istarvin.fetcharr.data.network.dto.CategoryDto
 import com.istarvin.fetcharr.data.network.dto.JobStatus
 import com.istarvin.fetcharr.data.sync.ActionOutcome
 import com.istarvin.fetcharr.data.sync.JobActions
+import com.istarvin.fetcharr.data.network.dto.RetryRequest
+import com.istarvin.fetcharr.data.network.dto.ReplacementSourceDto
+import com.istarvin.fetcharr.data.network.dto.SubtitleDto
+import com.istarvin.fetcharr.ui.add.HeaderRow
+import com.istarvin.fetcharr.ui.add.SubtitleRow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -71,7 +76,7 @@ data class HistoryUiState(
 /** One-shot UI events. */
 sealed interface HistoryEvent {
     /** @param openSettings offer a "Settings" action (wrong token or no server). */
-    data class Snackbar(val message: String, val openSettings: Boolean = false) : HistoryEvent
+    data class Snackbar(val message: String, val openSettings: Boolean = false, val session: FetcharrApiSession? = null) : HistoryEvent
 
     /** The screen puts [path] on the clipboard. */
     data class CopyPath(val path: String) : HistoryEvent
@@ -88,6 +93,11 @@ class HistoryViewModel @Inject constructor(
     categoryRepository: CategoryRepository,
     private val apiProvider: FetcharrApiProvider,
 ) : ViewModel() {
+
+    private val sourceDraft = MutableStateFlow<SourceDraft?>(null)
+    val replacement: StateFlow<SourceDraft?> = sourceDraft
+    private var sourceSession: FetcharrApiSession? = null
+    private var nextSourceRow = 1
 
     private val categories: StateFlow<List<CategoryDto>> =
         categoryRepository.categories.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -107,6 +117,14 @@ class HistoryViewModel @Inject constructor(
         categories,
     ) { hasServer, state, categories ->
         Triple(hasServer, state, buildHistoryGroups(state.items, categories, System.currentTimeMillis(), ZoneId.systemDefault()))
+    }.combine(categoryRepository.info) { (hasServer, state, groups), info ->
+        Triple(hasServer, state, groups.map { group ->
+            group.copy(items = group.items.map { row ->
+                if (info?.sourceReplacementSupported == true && row.status in listOf(JobStatus.FAILED, JobStatus.CANCELLED))
+                    row.copy(actions = row.actions + HistoryAction.ReplaceSource)
+                else row
+            })
+        })
     }
 
     val state: StateFlow<HistoryUiState> = combine(content, refreshing, dialog, preparingPlayback, deletingJobs) { (hasServer, repo, groups), isRefreshing, open, preparing, deleting ->
@@ -125,6 +143,13 @@ class HistoryViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryUiState())
 
     init {
+        viewModelScope.launch {
+            configProvider.config.collect {
+                sourceSession?.let { session ->
+                    if (!apiProvider.isCurrent(session)) { sourceDraft.value = null; sourceSession = null }
+                }
+            }
+        }
         // First visit, and again whenever the server is set up or changed (the repository drops the old server's rows).
         viewModelScope.launch {
             configProvider.config.map { it?.baseUrl }.distinctUntilChanged().collect { url ->
@@ -237,6 +262,71 @@ class HistoryViewModel @Inject constructor(
         val job = rowFor(jobId) ?: return
         val message = job.detailsText ?: return
         dialog.value = HistoryDialog.Details(job.heading, message)
+    }
+
+    fun isCurrentEvent(event: HistoryEvent.Snackbar): Boolean = event.session?.let(apiProvider::isCurrent) ?: true
+
+    fun replaceSource(jobId: String) {
+        val row = state.value.groups.flatMap { it.items }.firstOrNull { it.id == jobId } ?: return
+        if (HistoryAction.ReplaceSource !in row.actions || sourceDraft.value?.submitting == true || "source:$jobId" in inFlight) return
+        val job = history.state.value.items.firstOrNull { it.id == jobId } ?: return
+        val session = apiProvider.captureSession() ?: return
+        sourceSession = session
+        sourceDraft.value = SourceDraft(
+            jobId = jobId, name = row.heading, url = job.url,
+            subtitles = job.subtitles.map { SubtitleRow(nextSourceRow++, it.url, it.lang.orEmpty()) },
+            needsOverwrite = job.errorCode == ALREADY_EXISTS,
+        )
+    }
+
+    fun editSource(transform: (SourceDraft) -> SourceDraft) {
+        sourceDraft.update { it?.takeUnless { draft -> draft.submitting }?.let(transform)?.copy(error = null) ?: it }
+    }
+
+    fun addSourceHeader() = editSource { it.copy(headers = it.headers + HeaderRow(nextSourceRow++)) }
+    fun addSourceSubtitle() = editSource { it.copy(subtitles = it.subtitles + SubtitleRow(nextSourceRow++)) }
+    fun dismissSource() { sourceDraft.value = null; sourceSession = null }
+
+    fun submitSource(overwriteConfirmed: Boolean = false) {
+        val draft = sourceDraft.value ?: return
+        val session = sourceSession ?: return
+        if (!draft.canSubmit || !apiProvider.isCurrent(session)) return
+        if (draft.needsOverwrite && !overwriteConfirmed) {
+            sourceDraft.value = draft.copy(confirmOverwrite = true)
+            return
+        }
+        if (!inFlight.add("source:${draft.jobId}")) return
+        sourceDraft.value = draft.copy(submitting = true, error = null, confirmOverwrite = false)
+        val request = RetryRequest(
+            overwrite = draft.needsOverwrite,
+            source = ReplacementSourceDto(
+                url = draft.url.trim(), headersMode = draft.headersMode,
+                headers = if (draft.headersMode == "replace") draft.headers.associate { it.name.trim() to it.value } else null,
+                subtitles = draft.subtitles.filter { it.url.isNotBlank() }.map { SubtitleDto(it.url.trim(), it.lang) },
+            ),
+        )
+        viewModelScope.launch {
+            val outcome = try { actions.replaceSource(session, draft.jobId, request) }
+                finally { inFlight.remove("source:${draft.jobId}") }
+            apiProvider.withCurrentSession(session) {
+                when (outcome) {
+                    ActionOutcome.Ok -> {
+                        history.remove(draft.jobId)
+                        if (sourceSession === session && sourceDraft.value?.jobId == draft.jobId) dismissSource()
+                        eventChannel.trySend(HistoryEvent.Snackbar("Added to queue", session = session))
+                    }
+                    else -> {
+                        val message = when (outcome) {
+                            is ActionOutcome.Failed -> outcome.message
+                            is ActionOutcome.Changed -> outcome.message
+                            else -> "Server not set up"
+                        }
+                        if (sourceSession === session && sourceDraft.value?.jobId == draft.jobId)
+                            sourceDraft.value = sourceDraft.value?.copy(submitting = false, error = message)
+                    }
+                }
+            }
+        }
     }
 
     // --- Clear history -----------------------------------------------------------------------------------------

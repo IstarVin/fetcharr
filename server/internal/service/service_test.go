@@ -165,11 +165,8 @@ func (c *gatedController) Stop(id string, reason StopReason) {
 // Hold the stop hook after the state commit, then schedule the competing
 // action until it blocks. Its pending state must wait for that stop hook.
 func TestLifecycleActionsWaitForStopHook(t *testing.T) {
-	for _, cancel := range []bool{false, true} {
-		name := "pause-resume"
-		if cancel {
-			name = "cancel-retry"
-		}
+	for _, name := range []string{"pause-resume", "cancel-retry", "cancel-replace"} {
+		cancel := name != "pause-resume"
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				svc, st, rec, _ := newSvc(t)
@@ -193,7 +190,11 @@ func TestLifecycleActionsWaitForStopHook(t *testing.T) {
 				go func() {
 					var err error
 					if cancel {
-						_, err = svc.Retry(t.Context(), j.ID, RetryOptions{})
+						opts := RetryOptions{}
+						if name == "cancel-replace" {
+							opts.Source = &ReplacementSource{URL: "https://a/fresh", HeadersMode: "clear", Subtitles: []SubtitleInput{}}
+						}
+						_, err = svc.Retry(t.Context(), j.ID, opts)
 					} else {
 						_, err = svc.Resume(t.Context(), j.ID)
 					}

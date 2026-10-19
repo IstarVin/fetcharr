@@ -23,6 +23,7 @@ data class CategoryDto(
 @Serializable
 data class InfoDto(
     val version: String,
+    @SerialName("source_replacement_supported") val sourceReplacementSupported: Boolean = false,
     @SerialName("ytdlp_version") val ytdlpVersion: String? = null,
     @SerialName("ytdlp_managed") val ytdlpManaged: Boolean = false,
     val concurrency: Int? = null,

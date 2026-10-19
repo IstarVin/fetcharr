@@ -304,6 +304,11 @@ func (s *Service) Cancel(ctx context.Context, id string) (*store.Job, error) {
 // Retry requeues a failed or cancelled job. Errors: not_found, invalid_state,
 // duplicate (another active job has the same URL).
 func (s *Service) Retry(ctx context.Context, id string, opts RetryOptions) (*store.Job, error) {
+	if opts.Source != nil {
+		if err := opts.Source.validate(); err != nil {
+			return nil, err
+		}
+	}
 	return s.apply(ctx, id, jobs.EventRetry, opts)
 }
 
@@ -312,6 +317,9 @@ func (s *Service) Retry(ctx context.Context, id string, opts RetryOptions) (*sto
 // returns the updated jobs in queue order. Error: not_found for an unknown
 // batch.
 func (s *Service) BatchAction(ctx context.Context, batchID string, ev jobs.Event, opts RetryOptions) ([]*store.Job, error) {
+	if opts.Source != nil {
+		return nil, invalid("source replacement is only supported for individual jobs")
+	}
 	switch ev {
 	case jobs.EventPause, jobs.EventResume, jobs.EventCancel, jobs.EventRetry:
 	default:
@@ -388,6 +396,25 @@ func (s *Service) apply(ctx context.Context, id string, ev jobs.Event, opts Retr
 				return nil, wrapValidation("", err)
 			}
 			update.DestinationRoot = store.Set(cat.Path)
+			if source := opts.Source; source != nil {
+				update.URL = store.Set(source.URL)
+				headers := map[string]string{}
+				switch source.HeadersMode {
+				case "keep":
+					headers = cur.Headers
+				case "replace":
+					headers = source.Headers
+				}
+				update.Headers = store.Set(headers)
+				subs, err := normalizeSubtitles("source.subtitles", source.Subtitles)
+				if err != nil {
+					return nil, err
+				}
+				update.Subtitles = store.Set(subs)
+				update.ResetWorkDir = store.Set(true)
+				update.WorkDir = store.Set("")
+				update.FilePath = store.Set[*string](nil)
+			}
 		}
 		j, err := s.store.UpdateGuarded(ctx, id, guard, update)
 		switch {
@@ -399,7 +426,11 @@ func (s *Service) apply(ctx context.Context, id string, ev jobs.Event, opts Retr
 		case errors.Is(err, store.ErrNotFound):
 			return nil, notFound("job", id)
 		case errors.Is(err, store.ErrDuplicate):
-			return nil, duplicateErr(err, cur.URL)
+			url := cur.URL
+			if opts.Source != nil {
+				url = opts.Source.URL
+			}
+			return nil, duplicateErr(err, url)
 		default:
 			return nil, err
 		}

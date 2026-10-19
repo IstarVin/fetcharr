@@ -15,6 +15,7 @@ Wire-format fixtures shared by the server and Android tests. Any change here is 
 | `ytdlp-check.json` | `GET /api/system/ytdlp/check` | server §6.3 |
 | `ytdlp-update.json` | `POST /api/system/ytdlp/update` | server §6.3 |
 | `create-job-movie.json`, `create-job-tv.json`, `create-job-flat.json` | `POST /api/jobs` bodies, one per layout | server §2.1, §6.3 |
+| `retry-source.json` | Replacement source body for individual job retry; optional overwrite, explicit header mode and subtitle list | server §6.3 |
 | `create-batch.json` | `POST /api/jobs/batch` body (episode 3 is the duplicate that gets skipped) | server §6.3 |
 | `intent/` | Decoded Android intent payloads, see `intent/README.md` | intent guide |
 

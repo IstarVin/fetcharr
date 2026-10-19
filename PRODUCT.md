@@ -31,7 +31,7 @@ It closes the gap between a streaming app on the phone and the media library on 
 - The server is the source of truth. No offline queue, no device-side job database; if the server is unreachable a submit fails and the user retries.
 - The app never downloads media itself and has no built-in player or local media management.
 - Runs of single-episode intents for the same show and season are merged into one confirmation.
-- Job actions: pause, resume, cancel, retry; History actions: play, retry, copy path, delete, clear.
+- Job actions: pause, resume, cancel, retry; History actions: play, retry, replace source and retry, copy path, delete, clear.
 - The receive-and-confirm flow (Incoming sheet) is the core interaction and must stay fast and low-friction.
 - Terminology: Queue, History, Settings, Incoming sheet, category, job, library.
 

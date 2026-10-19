@@ -18,7 +18,7 @@ import (
 
 const jobColumns = `id, batch_id, category, url, headers, title, show_name, season, episode, year,
  subtitles, status, progress, file_path, error_code, error_message, warnings,
- overwrite, placing, work_dir, created_at, queued_at, started_at, finished_at, destination_root`
+ overwrite, placing, work_dir, created_at, queued_at, started_at, finished_at, destination_root, reset_work_dir`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -31,11 +31,11 @@ func scanJob(r rowScanner) (*Job, error) {
 		progress, filePath, errCode, errMsg sql.NullString
 		status, created, queued             string
 		started, finished                   sql.NullString
-		overwrite, placing                  int
+		overwrite, placing, resetWorkDir    int
 	)
 	err := r.Scan(&j.ID, &batchID, &j.Category, &j.URL, &headers, &title, &showName, &season, &episode, &year,
 		&subtitles, &status, &progress, &filePath, &errCode, &errMsg, &warnings,
-		&overwrite, &placing, &j.WorkDir, &created, &queued, &started, &finished, &j.DestinationRoot)
+		&overwrite, &placing, &j.WorkDir, &created, &queued, &started, &finished, &j.DestinationRoot, &resetWorkDir)
 	if err != nil {
 		return nil, err
 	}
@@ -49,6 +49,7 @@ func scanJob(r rowScanner) (*Job, error) {
 	j.ErrorCode = nullStr(errCode)
 	j.ErrorMessage = nullStr(errMsg)
 	j.Status = jobs.Status(status)
+	j.ResetWorkDir = resetWorkDir != 0
 	j.Overwrite = overwrite != 0
 	j.Placing = placing != 0
 
@@ -208,12 +209,12 @@ func insertJob(ctx context.Context, x execer, j *Job) error {
 	if err != nil {
 		return err
 	}
-	_, err = x.ExecContext(ctx, `INSERT INTO jobs (`+jobColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err = x.ExecContext(ctx, `INSERT INTO jobs (`+jobColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		j.ID, optStr(j.BatchID), j.Category, j.URL, string(headers), optStr(j.Title), optStr(j.ShowName),
 		optInt(j.Season), optInt(j.Episode), optInt(j.Year), string(subs), string(j.Status), prog,
 		optStr(j.FilePath), optStr(j.ErrorCode), optStr(j.ErrorMessage), string(warns),
 		b2i(j.Overwrite), b2i(j.Placing), j.WorkDir,
-		timefmt.Format(j.CreatedAt), timefmt.Format(j.QueuedAt), optTime(j.StartedAt), optTime(j.FinishedAt), j.DestinationRoot)
+		timefmt.Format(j.CreatedAt), timefmt.Format(j.QueuedAt), optTime(j.StartedAt), optTime(j.FinishedAt), j.DestinationRoot, b2i(j.ResetWorkDir))
 	if err != nil {
 		return wrapConstraint(ctx, x, err, j.URL)
 	}
@@ -417,6 +418,10 @@ func Set[T any](v T) Opt[T] { return Opt[T]{Set: true, Value: v} }
 // Update is a partial update of a job: only fields with Set == true are
 // written. Nullable columns use pointer values: Set[*string](nil) writes NULL.
 type Update struct {
+	URL             Opt[string]
+	Headers         Opt[map[string]string]
+	Subtitles       Opt[[]Subtitle]
+	ResetWorkDir    Opt[bool]
 	Status          Opt[jobs.Status]
 	Progress        Opt[*Progress]
 	FilePath        Opt[*string]
@@ -484,6 +489,26 @@ func (s *Store) update(ctx context.Context, id string, g UpdateGuard, u Update) 
 	add := func(col string, v any) {
 		sets = append(sets, col+" = ?")
 		args = append(args, v)
+	}
+	if u.URL.Set {
+		add("url", u.URL.Value)
+	}
+	if u.Headers.Set {
+		b, err := json.Marshal(u.Headers.Value)
+		if err != nil {
+			return nil, err
+		}
+		add("headers", string(b))
+	}
+	if u.Subtitles.Set {
+		b, err := json.Marshal(u.Subtitles.Value)
+		if err != nil {
+			return nil, err
+		}
+		add("subtitles", string(b))
+	}
+	if u.ResetWorkDir.Set {
+		add("reset_work_dir", b2i(u.ResetWorkDir.Value))
 	}
 	if u.Status.Set {
 		if !jobs.IsValid(u.Status.Value) {
@@ -577,6 +602,9 @@ func (s *Store) update(ctx context.Context, id string, g UpdateGuard, u Update) 
 		url := ""
 		if gerr == nil {
 			url = cur.URL
+			if u.URL.Set {
+				url = u.URL.Value
+			}
 		}
 		return nil, wrapConstraint(ctx, s.db, err, url)
 	}

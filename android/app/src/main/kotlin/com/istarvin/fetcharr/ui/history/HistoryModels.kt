@@ -13,7 +13,7 @@ import java.util.Locale
 
 // Pure presentation mapping for the History screen (app spec §5.4). No Android or Compose types, so it is unit-tested.
 
-enum class HistoryAction { Play, CopyPath, Retry, Details, Delete }
+enum class HistoryAction { Play, CopyPath, Retry, ReplaceSource, Details, Delete }
 
 /** What one history row shows. */
 data class HistoryRowModel(

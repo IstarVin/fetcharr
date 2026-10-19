@@ -448,6 +448,37 @@ Apply the transition (§2.4). Return `200` with the updated Job.
 #### `POST /api/jobs/{id}/retry`
 Requeues a `failed` or `cancelled` job with the same URL, headers and subtitles. A cancelled job starts from scratch, because its work directory was deleted. A failed job reuses whatever its work directory still holds. It clears `error_*`, `warnings` and `progress`. Optional body: `{ "overwrite": true }` replaces an existing library file (see `already_exists`). Returns `200` with the Job.
 
+**Replace source and retry.** The optional body also accepts `source`:
+
+```json
+{"overwrite": false, "source": {"url": "https://media.example/fresh.m3u8", "headers_mode": "clear", "subtitles": []}}
+```
+
+`source` is a complete replacement for one failed or cancelled job. Its HTTP(S)
+`url`, `headers_mode` and `subtitles` array are required. `headers_mode` is `clear`
+(discard saved headers), `keep` (reuse private saved headers), or `replace`
+(require a `headers` object replacing the saved map). Only `replace` accepts
+`headers`. Subtitle entries use creation validation and language normalization;
+`[]` removes all subtitles. Headers remain absent from responses, events and logs.
+
+Source replacement preserves job/batch identity, creation time and naming metadata,
+revalidates the current category/destination, and queues at the end. It atomically
+updates source fields, resets retry state and marks partial files for deletion.
+The runner must successfully delete the old work directory before downloading;
+this requirement survives restart, cleanup failure and subsequent ordinary retries.
+Cleanup failure uses `download_failed`. Library destination files are untouched
+unless the usual explicit overwrite option is used during placement.
+
+Invalid input returns `400 invalid_request`, unknown jobs `404 not_found`,
+ineligible states `409 invalid_state`, and an already-active replacement URL
+`409 duplicate`. Rejected requests leave the previous source and partial files
+intact. Batch retry rejects `source` with `400 invalid_request`. Omitting `source`
+retains ordinary retry behavior, including partial-file reuse.
+
+`GET /api/info` advertises `source_replacement_supported: true`; clients treat a
+missing capability as false. Deploy the updated server before enabling the Android
+feature. Responses retain the existing Job shape with updated public source fields.
+
 #### `DELETE /api/jobs/{id}`
 Removes a finished job's record. Returns `204`.
 

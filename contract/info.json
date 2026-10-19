@@ -1,4 +1,5 @@
 {
+  "source_replacement_supported": true,
   "settings_supported": true,
   "setup_required": false,
   "version": "1.0.0",

@@ -33,6 +33,11 @@ func (r *Runner) work(ctx context.Context, e *entry, j *store.Job) {
 			w.onPanic(p)
 		}
 	}()
+	current, err := r.st.Get(ctx, j.ID)
+	if err != nil || current.Status != jobs.StatusPending {
+		return
+	}
+	w.job = current
 	w.execute()
 }
 
@@ -59,9 +64,26 @@ func (w *run) execute() {
 		return // paused or cancelled while queued
 	}
 	w.status, w.job = jobs.StatusDownloading, row
+	j = row
 	r.log.Info("job started", "job", row)
 
 	workDir := r.workDir(j.ID)
+	if j.ResetWorkDir {
+		if err := os.RemoveAll(workDir); err != nil {
+			w.fail(CodeDownloadFailed, "cannot reset the work directory")
+			return
+		}
+		updated, err := r.st.UpdateIf(w.ctx, j.ID, []jobs.Status{jobs.StatusDownloading}, store.Update{ResetWorkDir: store.Set(false)})
+		if err != nil {
+			if w.ctx.Err() != nil {
+				w.stopped()
+			} else if !errors.Is(err, store.ErrStatusMismatch) && !errors.Is(err, store.ErrNotFound) {
+				w.fail(CodeDownloadFailed, "cannot record work directory reset")
+			}
+			return
+		}
+		w.job, j = updated, updated
+	}
 	if err := os.MkdirAll(workDir, 0o750); err != nil {
 		w.fail(CodeDownloadFailed, "cannot create the work directory: "+err.Error())
 		return

@@ -237,6 +237,22 @@ About
 - A URL entered without a scheme gets `http://` added. A trailing slash is removed.
 - **Update now** calls `POST /api/system/ytdlp/update` and shows the new version. On `409 ytdlp_busy` it shows "Downloads are running — try again when they finish".
 
+**Replace source & retry** is available in each failed/cancelled History item's
+details when the current server advertises `source_replacement_supported`.
+The dedicated editor keeps metadata read-only, prefills the URL and subtitle
+links, and offers Clear saved headers (default), Keep saved headers, or Replace
+headers. Saved credentials are never fetched or displayed. Subtitles can be
+edited, added or removed. The pinned action explains that previous partial files
+will be discarded and shows announced submission errors without losing the draft.
+Jobs reporting `already_exists` require overwrite confirmation before submitting.
+
+Drafts survive rotation in ViewModel memory only and are discarded on process
+recreation or connection changes. Submission and resulting events are bound to
+the captured connection session. Repeated submissions are disabled. Back remains
+responsive and asks before leaving during submission, explaining that the server
+may still apply the request. Success closes the editor, removes the History row
+and shows “Added to queue”; ordinary Retry remains available with existing behavior.
+
 **Server settings** opens a separate editor for download concurrency, merge format, minimum free space (decimal GB), history retention, managed yt-dlp auto-update, categories, and Jellyfin/Plex connections with optional path mappings. Save applies the whole document through `PUT /api/system/settings`. The app generates category IDs automatically and keeps them fixed across edits; existing IDs are preserved and no ID field is shown. Users enter a label, server/container destination path, and layout. Saving a new category creates missing folders, including parents. Destinations must be writable; changing an existing category's path requires an existing folder. Docker mounts are configured on the host. Saved credentials are never displayed; blank fields retain them and typed values replace them.
 
 The editor loads from the saved connection, keeps drafts and secrets in memory only, and discards them when that connection changes. Back and Reload prompt before discarding unsaved edits. Errors preserve the draft; stale revisions require a reload. Successful saves refresh categories and clear defaults that no longer match the available layouts. A server without `settings_supported` shows an upgrade message and receives no settings request. Connection settings, default categories, and the existing manual yt-dlp update remain available as before.
