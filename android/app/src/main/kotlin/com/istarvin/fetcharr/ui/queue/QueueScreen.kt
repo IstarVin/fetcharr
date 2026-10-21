@@ -507,7 +507,8 @@ private fun ProgressRow(progress: Float?, indeterminate: Boolean, percentLabel: 
     val description = if (indeterminate || progress == null) {
         stringResource(R.string.queue_cd_finishing)
     } else {
-        stringResource(R.string.queue_cd_progress, percentInt(progress))
+        val percent = percentInt(progress)
+        pluralStringResource(R.plurals.queue_cd_progress, percent, percent)
     }
     val barModifier = Modifier.height(8.dp).clip(CircleShape)
     val track = MaterialTheme.colorScheme.surfaceContainerHighest

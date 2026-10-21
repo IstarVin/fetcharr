@@ -63,7 +63,7 @@ class DtoFixturesTest {
         assertEquals(412L, job.startedAt!! % 1000)
         assertNull(job.finishedAt)
         assertEquals(42.7, job.progress!!.percent!!, 0.0001)
-        assertEquals(132L, job.progress!!.etaSeconds)
+        assertEquals(132L, job.progress.etaSeconds)
         assertEquals(1, job.subtitles.size)
         assertEquals("en", job.subtitles[0].lang)
         assertEquals(2, job.season)

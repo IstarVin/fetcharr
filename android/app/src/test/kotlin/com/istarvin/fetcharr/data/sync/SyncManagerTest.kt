@@ -331,8 +331,8 @@ class SyncManagerTest {
                 env.store.upsert(oldJob)
             }
         }
-        var setter: kotlinx.coroutines.Deferred<Unit>? = null
-        var replacement: kotlinx.coroutines.Deferred<Unit>? = null
+        val setter: kotlinx.coroutines.Deferred<Unit>
+        val replacement: kotlinx.coroutines.Deferred<Unit>
         try {
             assertTrue(applying.await(5, TimeUnit.SECONDS))
             setter = async(Dispatchers.IO) { env.config.config.value = b }
@@ -350,8 +350,8 @@ class SyncManagerTest {
             release.countDown()
         }
         oldEffect.await()
-        setter?.await()
-        replacement?.await()
+        setter.await()
+        replacement.await()
         assertTrue(env.store.jobs.value.isEmpty())
         assertFalse(env.store.hasSnapshot.value)
     }

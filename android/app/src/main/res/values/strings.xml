@@ -60,14 +60,13 @@
     <string name="queue_section_active">Active</string>
     <string name="queue_section_queued">Queued</string>
     <string name="queue_section_paused">Paused</string>
-    <string name="queue_action_pause">Pause</string>
-    <string name="queue_action_resume">Resume</string>
-    <string name="queue_action_cancel">Cancel</string>
     <string name="queue_cd_pause">Pause %1$s</string>
     <string name="queue_cd_resume">Resume %1$s</string>
-    <string name="queue_cd_cancel">Cancel %1$s</string>
     <string name="queue_cancel_download">Cancel download</string>
-    <string name="queue_cd_progress">%1$d percent</string>
+    <plurals name="queue_cd_progress">
+        <item quantity="one">%1$d percent</item>
+        <item quantity="other">%1$d percent</item>
+    </plurals>
     <string name="queue_cd_finishing">Finishing</string>
     <string name="queue_cd_banner">Connection: %1$s</string>
     <plurals name="queue_episode_count">
@@ -97,7 +96,10 @@
     <string name="incoming_receiving">Receiving episodes…</string>
     <string name="incoming_cancel">Cancel</string>
     <string name="incoming_download">Download (%1$d)</string>
-    <string name="incoming_select_all">%1$d of %2$d selected</string>
+    <plurals name="incoming_select_all">
+        <item quantity="one">%1$d of %2$d selected</item>
+        <item quantity="other">%1$d of %2$d selected</item>
+    </plurals>
     <string name="incoming_no_categories">No categories yet. Test the connection in Settings to load them.</string>
     <string name="incoming_no_server_title">Server not set up</string>
     <string name="incoming_no_server_body">Add your Fetcharr server in Settings. Your download request is kept until then.</string>
@@ -180,7 +182,6 @@
     <string name="settings_ytdlp_checking">Checking…</string>
     <string name="settings_ytdlp_latest">Latest version</string>
     <string name="settings_ytdlp_available">Version %1$s is available</string>
-    <string name="settings_ytdlp_updated">Updated to %1$s</string>
     <string name="settings_ytdlp_updated_unknown">yt-dlp updated</string>
     <string name="settings_ytdlp_unknown">Unknown</string>
     <string name="settings_app_version">App version</string>

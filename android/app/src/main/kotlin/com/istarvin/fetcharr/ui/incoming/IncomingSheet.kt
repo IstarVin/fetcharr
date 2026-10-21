@@ -210,7 +210,7 @@ internal fun LazyListScope.episodeChecklist(
                     onClick = null,
                 )
                 Text(
-                    stringResource(R.string.incoming_select_all, selected, episodes.size),
+                    pluralStringResource(R.plurals.incoming_select_all, selected, selected, episodes.size),
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f).padding(start = 12.dp),
                 )
