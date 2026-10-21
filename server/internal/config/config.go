@@ -49,6 +49,8 @@ type Downloads struct {
 	MergeFormat  string   `yaml:"merge_format"`
 	MinFreeSpace ByteSize `yaml:"min_free_space"` // 0 disables the guard
 	ExtraArgs    []string `yaml:"extra_args"`
+	// PixeldrainAPIKey authenticates downloads from pixeldrain.com; empty = anonymous.
+	PixeldrainAPIKey string `yaml:"pixeldrain_api_key"`
 }
 
 // Ytdlp is the `ytdlp:` section.

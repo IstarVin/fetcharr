@@ -90,15 +90,16 @@ func (w *run) execute() {
 	}
 
 	pt := &progressTracker{w: w}
+	headers := ytdlp.WithPixeldrainAuth(j.URL, j.Headers, cfg.Downloads.PixeldrainAPIKey)
 	res, err := ytdlp.Run(w.ctx, r.binary, ytdlp.BuildArgs(ytdlp.Spec{
 		URL:         j.URL,
-		Headers:     j.Headers,
+		Headers:     headers,
 		WorkDir:     workDir,
 		MergeFormat: cfg.Downloads.MergeFormat,
 		ExtraArgs:   cfg.Downloads.ExtraArgs,
 	}), ytdlp.Options{
 		Dir:        workDir,
-		Secrets:    ytdlp.HeaderValues(j.Headers),
+		Secrets:    append(ytdlp.HeaderValues(headers), cfg.Downloads.PixeldrainAPIKey),
 		KillGrace:  r.killGrace,
 		OnProgress: pt.on,
 	})

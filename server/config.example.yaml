@@ -29,6 +29,7 @@ downloads:
   min_free_space: 5GB       # disk-space guard, e.g. 500MB, 5GB; 0 disables
   # Direct downloads use aria2c (bundled in Docker); HLS/DASH stay native.
   # Use ["--downloader", "native"] to use yt-dlp's native downloader for all downloads.
+  pixeldrain_api_key: ""    # sent as HTTP Basic auth on pixeldrain.com links; empty = anonymous
   extra_args: []            # extra yt-dlp arguments appended to every run, e.g. ["--limit-rate", "5M"]
 
 ytdlp:

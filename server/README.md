@@ -6,6 +6,8 @@ It is a single static Go binary (no CGO, SQLite embedded). At runtime it needs `
 
 Direct downloads use aria2c by default, with yt-dlp handling extraction, headers, cookies and post-processing. HLS and DASH use yt-dlp's native downloader. With aria2c, live progress, speed and ETA may remain unavailable until the transfer finishes. To use yt-dlp's native downloader for all downloads, set `downloads.extra_args: ["--downloader", "native"]` in your deployment YAML and restart the server. To tune aria2c, use e.g. `downloads.extra_args: ["--downloader-args", "aria2c:-x8 -s8"]`.
 
+For Pixeldrain links, set `downloads.pixeldrain_api_key` in your deployment YAML and restart the server; it is sent as HTTP Basic auth (empty username, API key as password) on `pixeldrain.com` URLs only. A job-supplied `Authorization` header takes precedence.
+
 Full behaviour and the HTTP/WebSocket API are specified in [`docs/fetcharr-server.md`](../docs/fetcharr-server.md).
 
 ## Quick start (Docker)

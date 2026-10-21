@@ -53,3 +53,24 @@ func TestBuildArgsEscapesPercentInWorkDir(t *testing.T) {
 		t.Fatalf("-o = %q", got[i+1])
 	}
 }
+
+func TestWithPixeldrainAuth(t *testing.T) {
+	const want = "Basic " + "OmtleTEyMw==" // base64(":key123")
+	got := WithPixeldrainAuth("https://pixeldrain.com/u/abc", map[string]string{"Referer": "x"}, "key123")
+	if got["Authorization"] != want || got["Referer"] != "x" {
+		t.Fatalf("got %v", got)
+	}
+	if h := WithPixeldrainAuth("https://example.com/u/abc", nil, "key123"); h != nil {
+		t.Fatalf("non-pixeldrain URL got headers %v", h)
+	}
+	if h := WithPixeldrainAuth("https://notpixeldrain.com/u/abc", nil, "key123"); h != nil {
+		t.Fatalf("lookalike host got headers %v", h)
+	}
+	if h := WithPixeldrainAuth("https://pixeldrain.com/u/abc", nil, ""); h != nil {
+		t.Fatalf("empty key got headers %v", h)
+	}
+	own := map[string]string{"authorization": "Bearer z"}
+	if h := WithPixeldrainAuth("https://pixeldrain.com/u/abc", own, "key123"); len(h) != 1 || h["authorization"] != "Bearer z" {
+		t.Fatalf("job Authorization overridden: %v", h)
+	}
+}

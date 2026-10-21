@@ -83,7 +83,7 @@ Pending jobs are dispatched in ascending `queued_at` order. `queued_at` is set w
 
 ## 3. Configuration
 
-The server reads deployment settings from one YAML file. Its path is given by `--config <path>` or `FETCHARR_CONFIG`, and defaults to `./config.yaml`. Host/port, authentication, log level, the web UI switch, data directory, `ytdlp.binary`, and `downloads.extra_args` remain deployment-owned and require a restart.
+The server reads deployment settings from one YAML file. Its path is given by `--config <path>` or `FETCHARR_CONFIG`, and defaults to `./config.yaml`. Host/port, authentication, log level, the web UI switch, data directory, `ytdlp.binary`, `downloads.pixeldrain_api_key`, and `downloads.extra_args` remain deployment-owned and require a restart.
 
 The remaining settings are managed through Android or `/api/system/settings`, persisted in SQLite, and applied live. Existing YAML values are imported once when the database has no settings document; after that the database is authoritative for editable values. The full legacy example below remains valid for that initial import. New installations can use `server/config.minimal.yaml` and add categories in Android.
 
@@ -101,6 +101,7 @@ downloads:
   concurrency: 2            # simultaneous downloads (≥1)
   merge_format: mp4         # container used when yt-dlp merges separate video/audio streams
   min_free_space: 5GB       # disk-space guard; 0 disables
+  pixeldrain_api_key: ""    # HTTP Basic auth for pixeldrain.com links; empty = anonymous
   extra_args: []            # extra yt-dlp arguments appended to every run
 
 ytdlp:

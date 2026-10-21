@@ -1,6 +1,8 @@
 package ytdlp
 
 import (
+	"encoding/base64"
+	"net/url"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -82,5 +84,36 @@ func HeaderValues(h map[string]string) []string {
 			out = append(out, v)
 		}
 	}
+	return out
+}
+
+// IsPixeldrain reports whether rawURL points at pixeldrain.com or a subdomain.
+func IsPixeldrain(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	h := strings.ToLower(u.Hostname())
+	return h == "pixeldrain.com" || strings.HasSuffix(h, ".pixeldrain.com")
+}
+
+// WithPixeldrainAuth returns headers plus Pixeldrain's HTTP Basic credentials
+// (empty username, API key as password) when rawURL is a Pixeldrain link and
+// apiKey is set. An Authorization header already on the job wins. The input
+// map is never modified.
+func WithPixeldrainAuth(rawURL string, headers map[string]string, apiKey string) map[string]string {
+	if apiKey == "" || !IsPixeldrain(rawURL) {
+		return headers
+	}
+	for k := range headers {
+		if strings.EqualFold(k, "Authorization") {
+			return headers
+		}
+	}
+	out := make(map[string]string, len(headers)+1)
+	for k, v := range headers {
+		out[k] = v
+	}
+	out["Authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(":"+apiKey))
 	return out
 }
