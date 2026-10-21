@@ -45,7 +45,7 @@ func makeMP4(t *testing.T) []byte {
 }
 
 // TestEndToEndRealYtdlp runs the whole server stack (HTTP API, service, bus,
-// runner, processor) with the real yt-dlp and ffmpeg against a local
+// runner, processor) with the real yt-dlp, aria2c and ffmpeg against a local
 // httptest server that insists on a custom request header. It never touches
 // the network.
 func TestEndToEndRealYtdlp(t *testing.T) {
@@ -56,6 +56,25 @@ func TestEndToEndRealYtdlp(t *testing.T) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		t.Skip("ffmpeg not available")
 	}
+	aria2c, err := exec.LookPath("aria2c")
+	if err != nil {
+		t.Skip("aria2c not available")
+	}
+	// Record real download invocations so a silent fallback to yt-dlp's
+	// native downloader cannot make this test pass.
+	binDir := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "aria2c.calls")
+	if err := os.WriteFile(filepath.Join(binDir, "aria2c"), []byte(`#!/bin/sh
+if [ "$1" != "-v" ]; then
+  printf '%s\n' download >> "$FETCHARR_TEST_ARIA2C_CALLS"
+fi
+exec "$FETCHARR_TEST_ARIA2C" "$@"
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FETCHARR_TEST_ARIA2C", aria2c)
+	t.Setenv("FETCHARR_TEST_ARIA2C_CALLS", marker)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	video := makeMP4(t)
 	mp4 := filepath.Join(t.TempDir(), "source.mp4")
 	if err := os.WriteFile(mp4, video, 0o600); err != nil {
@@ -246,6 +265,9 @@ func TestEndToEndRealYtdlp(t *testing.T) {
 	}
 	if n := rejected.get(); n != 0 {
 		t.Errorf("%d requests reached the server without the custom header", n)
+	}
+	if calls := strings.Fields(readFile(t, marker)); len(calls) != len(cases) {
+		t.Errorf("aria2c downloads = %d, want %d", len(calls), len(cases))
 	}
 
 	for _, c := range cases {

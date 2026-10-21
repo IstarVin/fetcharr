@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -253,7 +254,7 @@ func TestParseEmptyDocument(t *testing.T) {
 
 func TestLoadDeploymentWithMinimalYAML(t *testing.T) {
 	bin := t.TempDir()
-	for _, name := range []string{"ffmpeg", "ffprobe"} {
+	for _, name := range []string{"aria2c", "ffmpeg", "ffprobe"} {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -270,6 +271,18 @@ func TestLoadDeploymentWithMinimalYAML(t *testing.T) {
 }
 
 func TestEnvironmentValidation(t *testing.T) {
+	t.Run("aria2c missing", func(t *testing.T) {
+		f := newFixture(t)
+		_, err := LoadWithOptions(write(t, f.root, f.yaml("")), Options{LookPath: func(name string) (string, error) {
+			if name == "aria2c" {
+				return "", exec.ErrNotFound
+			}
+			return okLook(name)
+		}})
+		if err == nil || !strings.Contains(err.Error(), "aria2c not found on PATH") {
+			t.Fatalf("err = %v", err)
+		}
+	})
 	t.Run("category path missing", func(t *testing.T) {
 		f := newFixture(t)
 		mustDo(t, os.Remove(f.tv))

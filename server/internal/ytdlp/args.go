@@ -31,6 +31,7 @@ type Spec struct {
 // BuildArgs returns the yt-dlp argument vector for spec (spec §4.2):
 //
 //	--newline --progress --no-playlist
+//	--downloader aria2c --downloader dash,m3u8:native
 //	-f bv*+ba/b --merge-output-format <merge_format>
 //	--progress-template download:%(progress)j
 //	--print after_move:filepath
@@ -49,6 +50,7 @@ type Spec struct {
 func BuildArgs(s Spec) []string {
 	args := []string{
 		"--newline", "--progress", "--no-playlist",
+		"--downloader", "aria2c", "--downloader", "dash,m3u8:native",
 		"-f", formatSelector,
 		"--merge-output-format", s.MergeFormat,
 		"--progress-template", ProgressTemplate,

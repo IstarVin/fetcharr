@@ -281,7 +281,7 @@ func (c *Config) Validate() error {
 
 // ValidateEnvironment runs the checks that touch the system: every category
 // path exists and is writable, data_dir is writable (its work/ and bin/
-// subfolders are created), ffmpeg and ffprobe are on PATH, and a configured
+// subfolders are created), aria2c, ffmpeg and ffprobe are on PATH, and a configured
 // ytdlp.binary exists and is executable. A managed yt-dlp binary (empty
 // ytdlp.binary) is downloaded later by the yt-dlp manager, not checked here.
 func (c *Config) ValidateEnvironment(opts Options) error {
@@ -308,7 +308,7 @@ func (c *Config) ValidateEnvironment(opts Options) error {
 		}
 	}
 
-	for _, tool := range []string{"ffmpeg", "ffprobe"} {
+	for _, tool := range []string{"aria2c", "ffmpeg", "ffprobe"} {
 		if _, err := lookPath(tool); err != nil {
 			add("%s not found on PATH", tool)
 		}

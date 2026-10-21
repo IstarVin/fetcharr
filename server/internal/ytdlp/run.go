@@ -286,7 +286,7 @@ func FallbackFile(dir string) string {
 			continue
 		}
 		switch strings.ToLower(filepath.Ext(e.Name())) {
-		case ".part", ".ytdl", ".temp", ".tmp", ".srt", ".vtt", ".ass", ".json", ".jpg", ".jpeg", ".png", ".webp", ".txt", ".description":
+		case ".part", ".aria2", ".ytdl", ".temp", ".tmp", ".srt", ".vtt", ".ass", ".json", ".jpg", ".jpeg", ".png", ".webp", ".txt", ".description":
 			continue
 		}
 		info, err := e.Info()

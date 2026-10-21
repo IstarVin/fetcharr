@@ -27,6 +27,8 @@ downloads:
   concurrency: 2            # simultaneous downloads (>= 1)
   merge_format: mp4         # container used when yt-dlp merges separate video/audio streams
   min_free_space: 5GB       # disk-space guard, e.g. 500MB, 5GB; 0 disables
+  # Direct downloads use aria2c (bundled in Docker); HLS/DASH stay native.
+  # Use ["--downloader", "native"] to use yt-dlp's native downloader for all downloads.
   extra_args: []            # extra yt-dlp arguments appended to every run, e.g. ["--limit-rate", "5M"]
 
 ytdlp:

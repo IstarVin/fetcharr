@@ -146,7 +146,7 @@ The server refuses to start, logging a clear error, when any of these checks fai
 - Zero categories is a valid setup state; `/api/info` reports `setup_required: true`, and submissions are rejected until a category exists. Category `id`s must be unique and match `^[a-z0-9_]+$`, and `layout` must be `movie`, `tv` or `flat`.
 - Every category `path` must exist and be writable.
 - `data_dir` must be writable. Its subfolders are created if missing.
-- `ffmpeg` and `ffprobe` must be on `PATH`.
+- `aria2c`, `ffmpeg` and `ffprobe` must be on `PATH`.
 - yt-dlp must be usable. If `ytdlp.binary` is empty and no managed binary exists yet, the server downloads one first (see §8).
 - `min_free_space` accepts byte sizes such as `500MB`, `5GB` or `0`.
 
@@ -168,6 +168,7 @@ yt-dlp runs as a subprocess in its own process group. It writes into the job's w
 - write to `<work_dir>/media.%(ext)s`;
 - pick the best video plus best audio, falling back to the best single format. When streams are merged, use `merge_format`. Single-file sources keep their original container;
 - normalize a detected `matroska` extension to `mkv` after format selection, before filename creation, while keeping yt-dlp's extension safety checks enabled;
+- use aria2c for direct downloads (`--downloader aria2c`), keeping HLS and DASH on yt-dlp's native downloader (`--downloader dash,m3u8:native`). Deployment `extra_args` can override this with `--downloader native` or tune connections with `--downloader-args "aria2c:-x8 -s8"`;
 - disable playlist expansion;
 - emit one JSON progress line per update on stdout (`--newline`, `--progress-template`);
 - print the final file path after post-processing (`--print after_move:filepath`). If nothing is printed, the server falls back to the largest media file in the work directory;
@@ -175,7 +176,7 @@ yt-dlp runs as a subprocess in its own process group. It writes into the job's w
 - keep partial files (no `--no-part`), so a resume continues where the download stopped;
 - append `extra_args`, then `--`, then the URL. The `--` stops a URL from being read as an option.
 
-**Progress.** Parse `downloaded_bytes`, `total_bytes` (or `total_bytes_estimate`), `speed` and `eta`. Store them on the job and broadcast at most one update per second per job.
+**Progress.** aria2c transfers currently emit structured progress only at completion, so live percent, speed and ETA can remain unavailable during those transfers. Native HLS/DASH downloads retain live progress. Parse `downloaded_bytes`, `total_bytes` (or `total_bytes_estimate`), `speed` and `eta`. Store them on the job and broadcast at most one update per second per job.
 
 **Failure.** If yt-dlp exits non-zero, the job fails with `download_failed`. `error_message` holds the last `ERROR:` lines from stderr, with header values redacted.
 
@@ -558,7 +559,7 @@ The current version is shown in `GET /api/info`.
 
 ### Docker (primary)
 
-The image contains the server binary, `ffmpeg` and `ffprobe`. yt-dlp is managed in the `/data` volume. The container exposes port `8080` and has a health check on `/api/health`.
+The image contains the server binary, `aria2c`, `ffmpeg` and `ffprobe`. yt-dlp is managed in the `/data` volume. The container exposes port `8080` and has a health check on `/api/health`.
 
 ```yaml
 services:
@@ -577,7 +578,7 @@ services:
 
 ### Bare metal (alternative)
 
-Requirements: the `fetcharr` binary, plus `ffmpeg` and `ffprobe` on `PATH`. Run `fetcharr --config /etc/fetcharr/config.yaml`. For a long-running install, use a systemd unit with `Restart=on-failure` that runs as a user who can write to `data_dir` and every category path.
+Requirements: the `fetcharr` binary, plus `aria2c`, `ffmpeg` and `ffprobe` on `PATH`. Run `fetcharr --config /etc/fetcharr/config.yaml`. For a long-running install, use a systemd unit with `Restart=on-failure` that runs as a user who can write to `data_dir` and every category path.
 
 ### Reverse proxy
 

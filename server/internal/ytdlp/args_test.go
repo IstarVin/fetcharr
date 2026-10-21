@@ -16,6 +16,7 @@ func TestBuildArgsFull(t *testing.T) {
 	})
 	want := []string{
 		"--newline", "--progress", "--no-playlist",
+		"--downloader", "aria2c", "--downloader", "dash,m3u8:native",
 		"-f", "bv*+ba/b",
 		"--merge-output-format", "mp4",
 		"--progress-template", "download:%(progress)j",

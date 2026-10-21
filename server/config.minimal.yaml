@@ -12,5 +12,7 @@ data_dir: /data
 # Optional deployment-only overrides:
 # ytdlp:
 #   binary: /usr/local/bin/yt-dlp   # omit to use the managed binary
+# Direct downloads use aria2c (bundled in Docker); HLS/DASH stay native.
 # downloads:
 #   extra_args: ["--limit-rate", "5M"]
+#   # Or use ["--downloader", "native"] for yt-dlp's native downloader throughout.

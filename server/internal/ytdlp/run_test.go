@@ -270,6 +270,7 @@ func TestFallbackFile(t *testing.T) {
 		}
 	}
 	write("media.mkv.part", 9000)
+	write("media.mkv.part.aria2", 10000)
 	write("media.en.vtt", 8000)
 	write("small.mp4", 10)
 	write("big.mkv", 100)

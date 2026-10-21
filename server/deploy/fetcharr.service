@@ -10,7 +10,7 @@
 #
 # In /etc/fetcharr/config.yaml set data_dir: /var/lib/fetcharr (created by
 # StateDirectory below) and use real host paths for the categories.
-# ffmpeg and ffprobe must be installed and on PATH.
+# aria2c, ffmpeg and ffprobe must be installed and on PATH.
 
 [Unit]
 Description=Fetcharr download server

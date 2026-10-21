@@ -2,7 +2,9 @@
 
 Self-hosted download server. The Fetcharr Android app, the built-in web UI (or any HTTP client) sends it a URL plus a target category; the server downloads it with yt-dlp, post-processes it with ffmpeg and files it into your media library using Jellyfin/Plex-friendly names, then optionally asks your media server to rescan.
 
-It is a single static Go binary (no CGO, SQLite embedded). At runtime it needs `ffmpeg` and `ffprobe` on `PATH`. yt-dlp is downloaded and kept up to date by the server itself unless you point it at your own binary.
+It is a single static Go binary (no CGO, SQLite embedded). At runtime it needs `aria2c`, `ffmpeg` and `ffprobe` on `PATH`; the Docker image includes them. yt-dlp is downloaded and kept up to date by the server itself unless you point it at your own binary.
+
+Direct downloads use aria2c by default, with yt-dlp handling extraction, headers, cookies and post-processing. HLS and DASH use yt-dlp's native downloader. With aria2c, live progress, speed and ETA may remain unavailable until the transfer finishes. To use yt-dlp's native downloader for all downloads, set `downloads.extra_args: ["--downloader", "native"]` in your deployment YAML and restart the server. To tune aria2c, use e.g. `downloads.extra_args: ["--downloader-args", "aria2c:-x8 -s8"]`.
 
 Full behaviour and the HTTP/WebSocket API are specified in [`docs/fetcharr-server.md`](../docs/fetcharr-server.md).
 
@@ -62,7 +64,7 @@ Routine settings are saved in `<data_dir>/fetcharr.db` and apply live. Lowering 
 
 Existing full YAML files remain supported: their routine settings are imported into SQLite once, on the first successful startup after upgrading. Afterward, SQLite is authoritative for those fields, so editing the old YAML does not reset changes made in Android. You can reduce the YAML to the deployment fields after import. Keep and back up the data directory; the database also stores integration credentials with the same private file permissions as job headers. Integration credentials can be replaced in Android but are never returned by the API. The config mount can be read-only.
 
-The server validates deployment settings before opening the database and validates effective categories afterward. It refuses startup if effective category paths are missing or unwritable, `data_dir` is unwritable, or `ffmpeg`/`ffprobe` are missing. Zero categories is a valid setup state. Details: [spec section 3](../docs/fetcharr-server.md#3-configuration).
+The server validates deployment settings before opening the database and validates effective categories afterward. It refuses startup if effective category paths are missing or unwritable, `data_dir` is unwritable, or `aria2c`/`ffmpeg`/`ffprobe` are missing. Zero categories is a valid setup state. Details: [spec section 3](../docs/fetcharr-server.md#3-configuration).
 
 Set `server.auth_token` if the server is reachable by anyone you do not trust; clients then send `Authorization: Bearer <token>`, and the web UI asks for the token once and keeps an `HttpOnly` session cookie. `server.web_ui: false` turns the browser UI off. Behind a reverse proxy, forward the WebSocket and the original `Host` header ([spec §10](../docs/fetcharr-server.md#reverse-proxy)).
 
@@ -70,7 +72,7 @@ Server settings use the same authentication as job operations. There is no separ
 
 ## Bare metal
 
-Requirements: Go (version in `go.mod`) and Node 24 to build, plus `ffmpeg` and `ffprobe` on `PATH` at runtime. Without the web build the server still works and serves a short notice at `/`.
+Requirements: Go (version in `go.mod`) and Node 24 to build, plus `aria2c`, `ffmpeg` and `ffprobe` on `PATH` at runtime. Without the web build the server still works and serves a short notice at `/`.
 
 ```sh
 (cd web && npm ci && npm run build)
@@ -98,7 +100,7 @@ go test ./...
 golangci-lint run        # config in .golangci.yml
 ```
 
-Tests never touch the real yt-dlp. [`testdata/fake-ytdlp`](testdata/README.md) is a python3 stand-in; set `ytdlp.binary` to it (unmanaged mode) to run the server locally without network access, with `FAKE_YTDLP_DURATION` controlling how long a fake download takes.
+Most tests use a fake yt-dlp. The end-to-end download test uses real yt-dlp, aria2c and ffmpeg when installed, against a local HTTP server without external network access. [`testdata/fake-ytdlp`](testdata/README.md) is a python3 stand-in; set `ytdlp.binary` to it (unmanaged mode) to run the server locally without network access, with `FAKE_YTDLP_DURATION` controlling how long a fake download takes.
 
 ## Release
 
