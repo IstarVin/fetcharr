@@ -2,6 +2,8 @@
   import ConfirmHost from './components/ConfirmHost.svelte'
   import Icon, { type IconName } from './components/Icon.svelte'
   import Snackbar from './components/Snackbar.svelte'
+  import './lib/browserNotify.svelte'
+  import { titleProgress } from './lib/format'
   import { href, router, type Route } from './lib/router.svelte'
   import { live, session } from './lib/store.svelte'
   import Add from './routes/Add.svelte'
@@ -21,8 +23,20 @@
   const tabOf = (r: Route): Route => (r === 'server-settings' ? 'settings' : r === 'add' ? 'queue' : r)
   const activeCount = $derived(live.jobs.size)
 
+  const PAGE_TITLE: Record<Route, string> = {
+    queue: 'Queue',
+    history: 'History',
+    add: 'Add download',
+    settings: 'Settings',
+    'server-settings': 'Server settings',
+  }
+  // Running downloads show in the tab title, e.g. "(2) 43% · Queue · Fetcharr".
+  const title = $derived(session.status === 'ready' ? `${titleProgress([...live.jobs.values()])}${PAGE_TITLE[router.route]} · Fetcharr` : 'Fetcharr')
+
   void session.boot()
 </script>
+
+<svelte:head><title>{title}</title></svelte:head>
 
 {#if session.status === 'loading'}
   <div class="center" aria-busy="true"><span class="visually-hidden">Loading</span><div class="spinner"></div></div>
@@ -74,7 +88,7 @@
     {:else if router.route === 'history'}
       <History />
     {:else if router.route === 'add'}
-      <Add />
+      {#key router.query}<Add />{/key}
     {:else if router.route === 'settings'}
       <Settings />
     {:else if router.route === 'server-settings'}

@@ -130,6 +130,7 @@ func newRig(t *testing.T, ro rigOpts) *rig {
 	cfg.DataDir = filepath.Join(dir, "data")
 	cfg.Ytdlp.Binary = bin
 	cfg.Downloads.MinFreeSpace = 0
+	cfg.Downloads.AutoRetries = 0 // tests of automatic retries opt in
 	cfg.Downloads.Concurrency = max(ro.concurrency, 1)
 	media := filepath.Join(dir, "media")
 	for _, c := range []struct {

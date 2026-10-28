@@ -82,6 +82,12 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.graphics.Color
 import com.istarvin.fetcharr.ui.common.screenGutter
 import com.istarvin.fetcharr.ui.theme.MonoStyle
@@ -110,6 +116,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.istarvin.fetcharr.R
 import com.istarvin.fetcharr.data.network.ApiError
 import com.istarvin.fetcharr.data.network.dto.JobStatus
+import com.istarvin.fetcharr.data.history.HistoryFilter
 import com.istarvin.fetcharr.ui.LocalSnackbarHostState
 import com.istarvin.fetcharr.ui.common.EmptyState
 import com.istarvin.fetcharr.ui.common.IconTile
@@ -203,6 +210,8 @@ fun HistoryScreen(onOpenSettings: () -> Unit, viewModel: HistoryViewModel = hilt
         },
         onDeleteSwiped = viewModel::requestDelete,
         onClear = viewModel::requestClear,
+        onFilter = viewModel::setFilter,
+        onSearch = viewModel::setSearch,
     )
 
     when (val dialog = state.dialog) {
@@ -241,22 +250,18 @@ internal fun HistoryContent(
     onAction: (HistoryAction, String) -> Unit,
     onDeleteSwiped: (String) -> Unit,
     onClear: () -> Unit,
+    onFilter: (HistoryFilter) -> Unit = {},
+    onSearch: (String) -> Unit = {},
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    var filter by rememberSaveable { mutableStateOf(HistoryFilter.All) }
     var openRowId by rememberSaveable { mutableStateOf<String?>(null) }
     val openRow = openRowId?.let { id -> state.groups.firstNotNullOfOrNull { g -> g.items.firstOrNull { it.id == id } } }
     // The row can vanish under the sheet (deleted, retried, cleared): close it rather than show stale details.
     LaunchedEffect(openRow == null, state.historyLoaded) {
         if (openRow == null && state.historyLoaded) openRowId = null
     }
-    val visibleGroups = remember(state.groups, filter) {
-        if (filter == HistoryFilter.All) {
-            state.groups
-        } else {
-            state.groups.map { g -> g.copy(items = g.items.filter { filter.accepts(it.status) }) }.filter { it.items.isNotEmpty() }
-        }
-    }
+    // The server applies the filter and search, so every loaded page matches.
+    val visibleGroups = state.groups
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
@@ -320,13 +325,20 @@ internal fun HistoryContent(
                                     !state.historyLoaded && state.error != null ->
                                         item(key = "error") { ErrorState(state.error.userMessage, onRefresh) }
                                     !state.historyLoaded -> item(key = "loading") { LoadingState() }
-                                    state.isEmpty -> item(key = "empty") { EmptyHistory() }
+                                    state.isEmpty && !state.filtered -> item(key = "empty") { EmptyHistory() }
                                     else -> {
-                                        item(key = "filters") { FilterBar(filter) { filter = it } }
+                                        if (state.searchSupported) {
+                                            item(key = "search") { SearchField(state.search, onSearch) }
+                                        }
+                                        item(key = "filters") { FilterBar(state.filter, onFilter) }
                                         if (visibleGroups.isEmpty()) {
                                             item(key = "filter-empty") {
                                                 Text(
-                                                    stringResource(R.string.history_filter_empty),
+                                                    if (state.search.isNotBlank()) {
+                                                        stringResource(R.string.history_search_empty, state.search.trim())
+                                                    } else {
+                                                        stringResource(R.string.history_filter_empty)
+                                                    },
                                                     style = MaterialTheme.typography.bodyMedium,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                     textAlign = TextAlign.Center,
@@ -605,17 +617,34 @@ private fun DetailBlock(label: String, text: String, container: Color, content: 
     }
 }
 
-private enum class HistoryFilter(val labelRes: Int) {
-    All(R.string.history_filter_all),
-    Completed(R.string.history_filter_completed),
-    Failed(R.string.history_filter_failed),
-    ;
-
-    fun accepts(status: JobStatus): Boolean = when (this) {
-        All -> true
-        Completed -> status == JobStatus.COMPLETED
-        Failed -> status == JobStatus.FAILED || status == JobStatus.CANCELLED
+private val HistoryFilter.labelRes: Int
+    get() = when (this) {
+        HistoryFilter.All -> R.string.history_filter_all
+        HistoryFilter.Completed -> R.string.history_filter_completed
+        HistoryFilter.Failed -> R.string.history_filter_failed
     }
+
+@Composable
+private fun SearchField(text: String, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = text,
+        onValueChange = onChange,
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        placeholder = { Text(stringResource(R.string.history_search_hint)) },
+        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+        trailingIcon = if (text.isNotEmpty()) {
+            {
+                IconButton(onClick = { onChange("") }) {
+                    Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.history_search_clear))
+                }
+            }
+        } else {
+            null
+        },
+        singleLine = true,
+        shape = CircleShape,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+    )
 }
 
 @Composable

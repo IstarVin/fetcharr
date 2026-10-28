@@ -24,3 +24,5 @@ Behaviour:
 - SIGTERM/SIGINT: exits immediately with code 143, leaving the `.part` file.
 - Failure: if the URL (last positional, normally after `--`) contains `fail`, prints
   `ERROR: [generic] simulated failure` to stderr and exits 1.
+- Transient failure: if the URL contains `flaky`, the first run in a work directory fails the
+  same way (leaving a `flaky-attempted` marker there) and later runs succeed.

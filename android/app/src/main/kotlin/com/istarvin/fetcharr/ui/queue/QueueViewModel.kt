@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.istarvin.fetcharr.data.CategoryRepository
 import com.istarvin.fetcharr.data.network.ApiError
+import com.istarvin.fetcharr.data.network.dto.DownloadWindowDto
+import com.istarvin.fetcharr.data.network.dto.Rfc3339
 import com.istarvin.fetcharr.data.settings.SettingsRepository
 import com.istarvin.fetcharr.data.sync.ActionOutcome
 import com.istarvin.fetcharr.data.sync.ActiveJobsStore
@@ -48,7 +50,16 @@ data class QueueUiState(
     val isRefreshing: Boolean = false,
     val connecting: Boolean = false,
     val pendingCancel: CancelRequest? = null,
+    /** Epoch ms when queued downloads start, while the server's download window is closed. */
+    val windowOpensAt: Long? = null,
 )
+
+/** When a closed download window opens, if it is still in the future at [nowMs]; else null. */
+internal fun windowOpensAt(window: DownloadWindowDto?, nowMs: Long): Long? {
+    if (window == null || window.open) return null
+    val at = window.opensAt?.let { runCatching { Rfc3339.parse(it) }.getOrNull() } ?: return null
+    return at.takeIf { it > nowMs }
+}
 
 /** One-shot UI events. */
 sealed interface QueueEvent {
@@ -76,7 +87,14 @@ class QueueViewModel @Inject constructor(
         settings.settings.map { it.serverUrl.isNotBlank() }.distinctUntilChanged(),
         store.jobs,
         categoryRepository.categories,
-    ) { hasServer, jobs, categories -> hasServer to buildQueueSections(jobs, categories) }
+        categoryRepository.info,
+    ) { hasServer, jobs, categories, info ->
+        QueueSnapshot(
+            hasServer,
+            buildQueueSections(jobs, categories, prioritySupported = info?.queuePrioritySupported == true),
+            windowOpensAt(info?.downloadWindow, System.currentTimeMillis()),
+        )
+    }
 
     val state: StateFlow<QueueUiState> = combine(
         content,
@@ -84,7 +102,7 @@ class QueueViewModel @Inject constructor(
         syncManager.state,
         refreshing,
         pendingCancel,
-    ) { (hasServer, sections), hasSnapshot, connection, isRefreshing, cancel ->
+    ) { (hasServer, sections, opensAt), hasSnapshot, connection, isRefreshing, cancel ->
         QueueUiState(
             loaded = true,
             hasServer = hasServer,
@@ -94,12 +112,17 @@ class QueueViewModel @Inject constructor(
             isRefreshing = isRefreshing,
             connecting = connection == ConnectionState.Connecting,
             pendingCancel = cancel,
+            windowOpensAt = opensAt,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), QueueUiState())
 
     fun pause(jobId: String) = run("pause:$jobId") { actions.pause(jobId) }
 
     fun resume(jobId: String) = run("resume:$jobId") { actions.resume(jobId) }
+
+    fun downloadNext(jobId: String) = run("next:$jobId") { actions.downloadNext(jobId) }
+
+    fun downloadNextAll(batchId: String) = run("nextAll:$batchId") { actions.downloadNextAll(batchId) }
 
     fun pauseAll(batchId: String) = run("pauseAll:$batchId") { actions.pauseAll(batchId) }
 
@@ -167,6 +190,8 @@ class QueueViewModel @Inject constructor(
         }
         if (event != null) eventChannel.trySend(event)
     }
+
+    private data class QueueSnapshot(val hasServer: Boolean, val sections: List<QueueSection>, val windowOpensAt: Long?)
 
     private companion object {
         const val REFRESH_TIMEOUT_MS = 5_000L

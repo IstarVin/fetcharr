@@ -4,6 +4,7 @@ import com.istarvin.fetcharr.data.network.ApiResult
 import com.istarvin.fetcharr.data.network.FetcharrApiFactory
 import com.istarvin.fetcharr.data.network.ServerConfig
 import com.istarvin.fetcharr.data.network.dto.InfoDto
+import com.istarvin.fetcharr.data.network.dto.NotificationTestRequest
 import com.istarvin.fetcharr.data.network.dto.ServerSettingsDto
 import com.istarvin.fetcharr.data.network.safeApiCall
 import javax.inject.Inject
@@ -20,4 +21,8 @@ class ServerSettingsRepository @Inject constructor(private val factory: Fetcharr
 
     suspend fun save(connection: ServerConfig, document: ServerSettingsDto): ApiResult<ServerSettingsDto> =
         safeApiCall { factory.create(connection).saveServerSettings(document) }
+
+    /** Sends a test message to the saved notification target [id]; a failed delivery carries the server's reason. */
+    suspend fun testNotification(connection: ServerConfig, id: String): ApiResult<Unit> =
+        safeApiCall { factory.create(connection).testNotification(NotificationTestRequest(id)) }
 }

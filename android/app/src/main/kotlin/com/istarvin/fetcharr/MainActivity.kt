@@ -5,7 +5,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
+import com.istarvin.fetcharr.data.settings.SettingsRepository
 import com.istarvin.fetcharr.data.sync.SyncManager
 import com.istarvin.fetcharr.notifications.BackgroundController
 import com.istarvin.fetcharr.notifications.NotificationIntents
@@ -15,6 +19,8 @@ import com.istarvin.fetcharr.ui.navigation.NavigationEvents
 import com.istarvin.fetcharr.ui.navigation.OpenTarget
 import com.istarvin.fetcharr.ui.theme.FetcharrTheme
 import javax.inject.Inject
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -30,6 +36,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var navigationEvents: NavigationEvents
 
+    @Inject
+    lateinit var settingsRepository: SettingsRepository
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -37,7 +46,9 @@ class MainActivity : ComponentActivity() {
         // intent would be delivered again and must not be handled twice.
         if (savedInstanceState == null) handle(intent)
         setContent {
-            FetcharrTheme {
+            val dynamicColorFlow = remember { settingsRepository.settings.map { it.dynamicColor }.distinctUntilChanged() }
+            val dynamicColor by dynamicColorFlow.collectAsStateWithLifecycle(initialValue = true)
+            FetcharrTheme(dynamicColor = dynamicColor) {
                 FetcharrAppUi(navigationEvents.events)
             }
         }

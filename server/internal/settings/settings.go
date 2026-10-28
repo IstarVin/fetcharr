@@ -35,6 +35,10 @@ type Downloads struct {
 	Concurrency  int    `json:"concurrency"`
 	MergeFormat  string `json:"merge_format"`
 	MinFreeSpace int64  `json:"min_free_space"` // bytes
+	RateLimit    int64  `json:"rate_limit"`     // bytes per second per download; 0 = unlimited
+	WindowStart  string `json:"window_start"`   // "HH:MM" server time; "" = any time
+	WindowEnd    string `json:"window_end"`
+	AutoRetries  int    `json:"auto_retries"`
 }
 
 // History configures retention of finished job records.
@@ -66,14 +70,27 @@ type Integration struct {
 	HasCredential bool              `json:"has_credential"`
 }
 
+// Notification is a push-notification target. Credential is an optional
+// write-only access token: omitted keeps the saved one, "" removes it.
+type Notification struct {
+	ID            string  `json:"id"`
+	Type          string  `json:"type"`
+	URL           string  `json:"url"`
+	OnCompleted   bool    `json:"on_completed"`
+	OnFailed      bool    `json:"on_failed"`
+	Credential    *string `json:"credential,omitempty"`
+	HasCredential bool    `json:"has_credential"`
+}
+
 // Document deliberately cannot represent deployment settings or extra args.
 type Document struct {
-	Revision     int64             `json:"revision"`
-	Downloads    Downloads         `json:"downloads"`
-	History      History           `json:"history"`
-	Ytdlp        Ytdlp             `json:"ytdlp"`
-	Categories   []config.Category `json:"categories"`
-	MediaServers []Integration     `json:"media_servers"`
+	Revision      int64             `json:"revision"`
+	Downloads     Downloads         `json:"downloads"`
+	History       History           `json:"history"`
+	Ytdlp         Ytdlp             `json:"ytdlp"`
+	Categories    []config.Category `json:"categories"`
+	MediaServers  []Integration     `json:"media_servers"`
+	Notifications []Notification    `json:"notifications"`
 }
 
 // Manager validates, persists and publishes live settings atomically.
@@ -89,9 +106,13 @@ type Manager struct {
 
 func fromConfig(c *config.Config) Document {
 	d := Document{
-		Downloads: Downloads{c.Downloads.Concurrency, c.Downloads.MergeFormat, int64(c.Downloads.MinFreeSpace)},
-		History:   History{c.History.RetentionDays}, Ytdlp: Ytdlp{c.Ytdlp.AutoUpdate},
-		Categories: append([]config.Category{}, c.Categories...), MediaServers: []Integration{},
+		Downloads: Downloads{
+			Concurrency: c.Downloads.Concurrency, MergeFormat: c.Downloads.MergeFormat, MinFreeSpace: int64(c.Downloads.MinFreeSpace),
+			RateLimit: int64(c.Downloads.RateLimit), WindowStart: c.Downloads.WindowStart, WindowEnd: c.Downloads.WindowEnd,
+			AutoRetries: c.Downloads.AutoRetries,
+		},
+		History: History{c.History.RetentionDays}, Ytdlp: Ytdlp{c.Ytdlp.AutoUpdate},
+		Categories: append([]config.Category{}, c.Categories...), MediaServers: []Integration{}, Notifications: []Notification{},
 	}
 	for _, s := range c.MediaServers {
 		credential := s.APIKey
@@ -111,6 +132,9 @@ func effective(base *config.Config, d Document) *config.Config {
 	c := base.Clone()
 	c.Downloads.Concurrency, c.Downloads.MergeFormat = d.Downloads.Concurrency, d.Downloads.MergeFormat
 	c.Downloads.MinFreeSpace = config.ByteSize(d.Downloads.MinFreeSpace)
+	c.Downloads.RateLimit = config.ByteSize(d.Downloads.RateLimit)
+	c.Downloads.WindowStart, c.Downloads.WindowEnd = d.Downloads.WindowStart, d.Downloads.WindowEnd
+	c.Downloads.AutoRetries = d.Downloads.AutoRetries
 	c.History.RetentionDays, c.Ytdlp.AutoUpdate = d.History.RetentionDays, d.Ytdlp.AutoUpdate
 	c.Categories = d.Categories
 	c.MediaServers = nil
@@ -124,6 +148,14 @@ func effective(base *config.Config, d Document) *config.Config {
 			}
 		}
 		c.MediaServers = append(c.MediaServers, ms)
+	}
+	c.Notifications = nil
+	for _, n := range d.Notifications {
+		cn := config.Notification{Type: n.Type, URL: n.URL, OnCompleted: n.OnCompleted, OnFailed: n.OnFailed}
+		if n.Credential != nil {
+			cn.Token = *n.Credential
+		}
+		c.Notifications = append(c.Notifications, cn)
 	}
 	return c
 }
@@ -139,9 +171,14 @@ func Open(ctx context.Context, cfg *config.Config, st *store.Store) (*Manager, e
 	if importing {
 		d = fromConfig(cfg)
 	} else {
+		// Documents saved before a field existed keep its default.
+		d.Downloads.AutoRetries = cfg.Downloads.AutoRetries
 		if err := json.Unmarshal(body, &d); err != nil {
 			return nil, fmt.Errorf("read saved settings: %w", err)
 		}
+	}
+	if d.Notifications == nil {
+		d.Notifications = []Notification{}
 	}
 	c := effective(cfg, d)
 	if err := c.Validate(); err != nil {
@@ -185,6 +222,13 @@ func cloneDocument(d Document) Document {
 			s.Credential = &value
 		}
 	}
+	d.Notifications = slices.Clone(d.Notifications)
+	for i := range d.Notifications {
+		if n := &d.Notifications[i]; n.Credential != nil {
+			value := *n.Credential
+			n.Credential = &value
+		}
+	}
 	return d
 }
 
@@ -197,7 +241,32 @@ func public(d Document) Document {
 		out.MediaServers[i].HasCredential = out.MediaServers[i].Credential != nil && *out.MediaServers[i].Credential != ""
 		out.MediaServers[i].Credential = nil
 	}
+	for i := range out.Notifications {
+		n := &out.Notifications[i]
+		n.HasCredential = n.Credential != nil && *n.Credential != ""
+		n.Credential = nil
+	}
 	return out
+}
+
+// Current returns the current document, as Get, for filling in fields that an
+// older client omitted from a save.
+func (m *Manager) Current() Document { return m.Get() }
+
+// Notification returns the saved target with id, including its credential.
+func (m *Manager) Notification(id string) (config.Notification, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, n := range m.doc.Notifications {
+		if n.ID == id {
+			cn := config.Notification{Type: n.Type, URL: n.URL, OnCompleted: n.OnCompleted, OnFailed: n.OnFailed}
+			if n.Credential != nil {
+				cn.Token = *n.Credential
+			}
+			return cn, true
+		}
+	}
+	return config.Notification{}, false
 }
 
 // Get returns a private copy of the current document with credentials removed.
@@ -218,6 +287,30 @@ func (m *Manager) Save(ctx context.Context, d Document) (Document, error) {
 	bad := func(message string) (Document, error) { return Document{}, &ValidationError{message} }
 	if d.Categories == nil || d.MediaServers == nil {
 		return bad("categories and media_servers must be arrays")
+	}
+	if d.Notifications == nil {
+		// Clients that predate notifications omit the array: keep the saved targets.
+		d.Notifications = cloneDocument(m.doc).Notifications
+	}
+	oldNotifications := map[string]Notification{}
+	for _, n := range m.doc.Notifications {
+		oldNotifications[n.ID] = n
+	}
+	seenNotifications := map[string]bool{}
+	for i := range d.Notifications {
+		n := &d.Notifications[i]
+		if n.ID == "" || seenNotifications[n.ID] {
+			return bad("notifications: IDs must be nonempty and unique")
+		}
+		seenNotifications[n.ID] = true
+		n.URL = strings.TrimSpace(n.URL)
+		if previous, ok := oldNotifications[n.ID]; ok && n.Credential == nil && previous.Type == n.Type {
+			n.Credential = previous.Credential
+		}
+		if n.Credential != nil && *n.Credential == "" {
+			n.Credential = nil
+		}
+		n.HasCredential = false
 	}
 	old := map[string]Integration{}
 	for _, s := range m.doc.MediaServers {

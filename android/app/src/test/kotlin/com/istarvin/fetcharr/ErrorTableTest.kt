@@ -109,7 +109,7 @@ class ErrorTableTest {
                 null,
             )
             for (payload in payloads) {
-                val hub = IncomingHub(scope)
+                val hub = IncomingHub(scope, com.istarvin.fetcharr.data.settings.PairingRequests())
                 hub.handleIntent("android.intent.action.VIEW", "fetcharr://download", null, payload)
                 val event = runBlocking { withTimeout(2_000) { hub.events.first() } }
                 assertEquals("payload=$payload", HubEvent.Snackbar("Couldn't read the download request"), event)

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import settings from '../../../contract/server-settings.json'
 import update from '../../../contract/update-server-settings.json'
-import { fromDocument, newCategory, newCategoryId, newIntegration, normalizeUrl, toDocument, uuid, validate } from './serverSettings'
+import { fromDocument, newCategory, newCategoryId, newIntegration, newNotification, normalizeUrl, toDocument, uuid, validate } from './serverSettings'
 import type { ServerSettings } from './types'
 
 const doc = settings as ServerSettings
@@ -20,7 +20,41 @@ describe('server settings draft', () => {
     d.retentionDays = '30'
     d.autoUpdate = false
     d.integrations[0]!.credential = ' example-replacement-key '
+    d.rateMb = '5'
+    d.windowStart = '23:00'
+    d.windowEnd = '06:00'
+    d.autoRetries = '2'
+    d.notifications![0]!.credential = 'example-ntfy-token'
     expect(toDocument(d)).toEqual(update)
+  })
+
+  it('omits fields an older server does not know', () => {
+    const old = structuredClone(doc)
+    delete old.notifications
+    for (const k of ['rate_limit', 'window_start', 'window_end', 'auto_retries'] as const) delete old.downloads[k]
+    const d = fromDocument(old)
+    expect(d.downloadControls).toBe(false)
+    expect(d.notifications).toBeNull()
+    expect(toDocument(d)).toEqual(old)
+  })
+
+  it('validates download controls and notifications', () => {
+    const d = fromDocument(doc)
+    d.rateMb = 'fast'
+    d.windowStart = '23:00'
+    d.autoRetries = '9'
+    d.notifications!.push({ ...newNotification(), url: 'ntfy.sh/topic' })
+    expect(Object.keys(validate(d)).sort()).toEqual(['autoRetries', 'notification.1.url', 'rateMb', 'window'])
+    d.windowEnd = '23:00'
+    expect(validate(d).window).toBe('Start and end must differ.')
+  })
+
+  it('removes or replaces a notification token', () => {
+    const d = fromDocument(doc)
+    d.notifications![0]!.removeCredential = true
+    expect(toDocument(d).notifications![0]!.credential).toBe('')
+    d.notifications![0]!.credential = 'new'
+    expect(toDocument(d).notifications![0]!.credential).toBe('new')
   })
 
   it('validates fields', () => {

@@ -84,7 +84,7 @@ export const api = {
 
   info: () => request<Info>('GET', 'info'),
 
-  listJobs: (q: { status?: JobStatus[]; category?: string; batch_id?: string; finished_after?: string; limit?: number; offset?: number } = {}) =>
+  listJobs: (q: { status?: JobStatus[]; category?: string; batch_id?: string; finished_after?: string; q?: string; limit?: number; offset?: number } = {}) =>
     request<JobList>('GET', 'jobs', undefined, { ...q, status: q.status?.join(',') }),
   getJob: (id: string) => request<Job>('GET', `jobs/${encodeURIComponent(id)}`),
   createJob: (body: CreateJob) => request<Job>('POST', 'jobs', body),
@@ -92,8 +92,9 @@ export const api = {
 
   jobAction: (id: string, action: 'pause' | 'resume' | 'cancel') => request<Job>('POST', `jobs/${encodeURIComponent(id)}/${action}`),
   retry: (id: string, body?: RetryBody) => request<Job>('POST', `jobs/${encodeURIComponent(id)}/retry`, body),
-  batchAction: (batchId: string, action: 'pause' | 'resume' | 'cancel' | 'retry') =>
+  batchAction: (batchId: string, action: 'pause' | 'resume' | 'cancel' | 'retry' | 'prioritize') =>
     request<{ jobs: Job[] }>('POST', `batches/${encodeURIComponent(batchId)}/${action}`),
+  prioritize: (id: string) => request<Job>('POST', `jobs/${encodeURIComponent(id)}/prioritize`),
 
   deleteJob: (id: string, deleteFile: boolean) =>
     request<void>('DELETE', `jobs/${encodeURIComponent(id)}`, undefined, { delete_file: deleteFile || undefined }),
@@ -106,6 +107,7 @@ export const api = {
 
   getSettings: () => request<ServerSettings>('GET', 'system/settings'),
   saveSettings: (doc: ServerSettings) => request<ServerSettings>('PUT', 'system/settings', doc),
+  testNotification: (id: string) => request<void>('POST', 'system/notifications/test', { id }),
 }
 
 /** Resolves a playback link (relative to the API root) to an absolute URL. */

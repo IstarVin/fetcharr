@@ -32,6 +32,23 @@ type Config struct {
 	History      History       `yaml:"history"`
 	Categories   []Category    `yaml:"categories"`
 	MediaServers []MediaServer `yaml:"media_servers"`
+	// Notifications are managed only through the settings API.
+	Notifications []Notification `yaml:"-"`
+}
+
+// Notification target types.
+const (
+	NotificationNtfy    = "ntfy"
+	NotificationWebhook = "webhook"
+)
+
+// Notification is one push-notification target for finished jobs.
+type Notification struct {
+	Type        string // ntfy | webhook
+	URL         string
+	Token       string // optional; sent as a Bearer token
+	OnCompleted bool
+	OnFailed    bool
 }
 
 // Server is the `server:` section.
@@ -49,6 +66,15 @@ type Downloads struct {
 	MergeFormat  string   `yaml:"merge_format"`
 	MinFreeSpace ByteSize `yaml:"min_free_space"` // 0 disables the guard
 	ExtraArgs    []string `yaml:"extra_args"`
+	// RateLimit caps each download's speed in bytes per second; 0 = unlimited.
+	RateLimit ByteSize `yaml:"rate_limit"`
+	// WindowStart and WindowEnd ("HH:MM", server local time) restrict when
+	// new downloads may start; both empty = any time.
+	WindowStart string `yaml:"window_start"`
+	WindowEnd   string `yaml:"window_end"`
+	// AutoRetries is how many times a failed yt-dlp run is retried
+	// automatically before the job fails (0-5).
+	AutoRetries int `yaml:"auto_retries"`
 	// PixeldrainAPIKey authenticates downloads from pixeldrain.com; empty = anonymous.
 	PixeldrainAPIKey string `yaml:"pixeldrain_api_key"`
 }
@@ -108,7 +134,7 @@ func Default() *Config {
 	return &Config{
 		Server:    Server{Host: "0.0.0.0", Port: 8080, LogLevel: "info", WebUI: true},
 		DataDir:   "/data",
-		Downloads: Downloads{Concurrency: 2, MergeFormat: "mp4", MinFreeSpace: ByteSize(5 * 1000 * 1000 * 1000)},
+		Downloads: Downloads{Concurrency: 2, MergeFormat: "mp4", MinFreeSpace: ByteSize(5 * 1000 * 1000 * 1000), AutoRetries: 1},
 		Ytdlp:     Ytdlp{AutoUpdate: true},
 	}
 }
@@ -235,6 +261,23 @@ func (c *Config) Validate() error {
 	}
 	if c.Downloads.MinFreeSpace < 0 {
 		add("downloads.min_free_space: must not be negative")
+	}
+	if c.Downloads.RateLimit < 0 {
+		add("downloads.rate_limit: must not be negative")
+	}
+	if c.Downloads.AutoRetries < 0 || c.Downloads.AutoRetries > MaxAutoRetries {
+		add("downloads.auto_retries: %d must be between 0 and %d", c.Downloads.AutoRetries, MaxAutoRetries)
+	}
+	if err := c.Downloads.validateWindow(); err != nil {
+		add("downloads: %v", err)
+	}
+	for i, n := range c.Notifications {
+		if n.Type != NotificationNtfy && n.Type != NotificationWebhook {
+			add("notifications[%d]: type %q must be ntfy or webhook", i, n.Type)
+		}
+		if u, err := url.Parse(n.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			add("notifications[%d]: url must be an http(s) URL", i)
+		}
 	}
 	if c.History.RetentionDays < 0 {
 		add("history.retention_days: %d must not be negative", c.History.RetentionDays)

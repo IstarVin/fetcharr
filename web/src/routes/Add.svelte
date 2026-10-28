@@ -19,7 +19,8 @@
   }
 
   let mode = $state<Mode>('single')
-  let url = $state('')
+  // Prefilled by `#/add?url=…` (bookmark, share target or another page).
+  let url = $state(router.params.get('url') ?? '')
   let categoryId = $state<string | null>(null)
   let title = $state('')
   let showName = $state('')
@@ -174,7 +175,6 @@
   }
 </script>
 
-<svelte:head><title>Add download · Fetcharr</title></svelte:head>
 
 <div class="page-head">
   <h1>Add download</h1>

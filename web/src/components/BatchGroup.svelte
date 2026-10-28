@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { batchAction } from '../lib/actions'
+  import { batchAction, downloadNext } from '../lib/actions'
   import { categoryLabel, percentLabel, type SectionKind } from '../lib/format'
   import { session } from '../lib/store.svelte'
   import type { Job } from '../lib/types'
@@ -7,16 +7,25 @@
   import JobCard from './JobCard.svelte'
   import ProgressBar from './ProgressBar.svelte'
 
-  let { batchId, title, jobs, progress, section }: { batchId: string; title: string; jobs: Job[]; progress: number | null; section: SectionKind } = $props()
+  let {
+    batchId,
+    title,
+    jobs,
+    progress,
+    section,
+    first = false,
+  }: { batchId: string; title: string; jobs: Job[]; progress: number | null; section: SectionKind; first?: boolean } = $props()
 
   let expanded = $state(false)
   let busy = $state(false)
   const uid = $props.id()
 
-  async function run(action: 'pause' | 'resume' | 'cancel') {
+  const canPrioritize = $derived(section === 'queued' && !first && session.info?.queue_priority_supported === true)
+
+  async function run(action: 'pause' | 'resume' | 'cancel' | 'next') {
     busy = true
     try {
-      await batchAction(batchId, title, action)
+      await (action === 'next' ? downloadNext({ batchId }) : batchAction(batchId, title, action))
     } finally {
       busy = false
     }
@@ -42,6 +51,9 @@
     </div>
   {/if}
   <div class="row-actions">
+    {#if canPrioritize}
+      <button class="btn small" disabled={busy} onclick={() => run('next')}><Icon name="next" size={16} />Download next</button>
+    {/if}
     {#if section === 'paused'}
       <button class="btn small" disabled={busy} onclick={() => run('resume')}><Icon name="play" size={16} />Resume all</button>
     {:else}
@@ -52,7 +64,7 @@
   {#if expanded}
     <div id="{uid}-episodes" class="episodes">
       {#each jobs as j (j.id)}
-        <JobCard job={j} nested />
+        <JobCard job={j} nested first={!canPrioritize} />
       {/each}
     </div>
   {/if}

@@ -3,11 +3,12 @@
   import ConnectionBanner from '../components/ConnectionBanner.svelte'
   import Icon from '../components/Icon.svelte'
   import JobCard from '../components/JobCard.svelte'
-  import { buildQueueSections, SECTION_LABEL } from '../lib/format'
+  import { buildQueueSections, SECTION_LABEL, windowHint, windowOpensAt } from '../lib/format'
   import { href } from '../lib/router.svelte'
   import { live, session } from '../lib/store.svelte'
 
   const sections = $derived(buildQueueSections([...live.jobs.values()]))
+  const opensAt = $derived(windowOpensAt(session.info?.download_window))
 
   function refresh() {
     live.reconnect()
@@ -15,7 +16,6 @@
   }
 </script>
 
-<svelte:head><title>Queue · Fetcharr</title></svelte:head>
 
 <div class="page-head">
   <h1>Queue</h1>
@@ -44,13 +44,14 @@
       <h2 class="section-title" id="sec-{s.kind}">
         <span>{SECTION_LABEL[s.kind]}</span>
         {#if s.speedLabel}<span class="speed">{s.speedLabel}</span>{/if}
+        {#if s.kind === 'queued' && opensAt}<span class="window"><Icon name="schedule" size={16} />{windowHint(opensAt)}</span>{/if}
       </h2>
       <div class="list">
-        {#each s.items as item (item.key)}
+        {#each s.items as item, i (item.key)}
           {#if item.kind === 'job'}
-            <JobCard job={item.job} />
+            <JobCard job={item.job} first={s.kind === 'queued' && i === 0} />
           {:else}
-            <BatchGroup batchId={item.batchId} title={item.title} jobs={item.jobs} progress={item.progress} section={s.kind} />
+            <BatchGroup batchId={item.batchId} title={item.title} jobs={item.jobs} progress={item.progress} section={s.kind} first={s.kind === 'queued' && i === 0} />
           {/if}
         {/each}
       </div>
@@ -62,6 +63,15 @@
   .list {
     display: grid;
     gap: 10px;
+  }
+
+  .window {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--fg-muted);
   }
 
   .speed {

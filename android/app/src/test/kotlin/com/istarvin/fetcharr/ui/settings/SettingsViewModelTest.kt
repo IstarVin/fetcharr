@@ -43,6 +43,7 @@ class SettingsViewModelTest {
     private lateinit var settings: SettingsRepository
     private lateinit var vm: SettingsViewModel
     private lateinit var factory: FetcharrApiFactory
+    private val pairing = com.istarvin.fetcharr.data.settings.PairingRequests()
 
     @Before
     fun setUp() {
@@ -61,7 +62,7 @@ class SettingsViewModelTest {
     private fun newVm(): SettingsViewModel {
         val provider = FetcharrApiProvider(factory, settings)
         val categories = CategoryRepository(factory, settings, scope)
-        return SettingsViewModel(settings, categories, SystemRepository(provider), ConnectionTester(factory))
+        return SettingsViewModel(settings, categories, SystemRepository(provider), ConnectionTester(factory), pairing)
     }
 
     /** Saves the mock server as the configured one and builds a VM that has loaded `/api/info` (managed yt-dlp). */
@@ -78,6 +79,39 @@ class SettingsViewModelTest {
 
     private fun ytdlpResult(v: SettingsViewModel): YtdlpUpdateStatus =
         await { v.uiState.first { it.ytdlpUpdate !is YtdlpUpdateStatus.Idle && it.ytdlpUpdate !is YtdlpUpdateStatus.Running && it.ytdlpUpdate !is YtdlpUpdateStatus.Checking } }.ytdlpUpdate
+
+    @Test
+    fun pairingLinkIsSavedOnlyAfterTheUserAccepts() {
+        pairing.offer(com.istarvin.fetcharr.data.settings.PairingRequest("http://$hostPort", "paired-token"))
+        val offered = await { vm.uiState.first { it.loaded && it.pairing != null } }
+        assertEquals("http://$hostPort", offered.pairing?.url)
+        assertEquals("", await { settings.settings.first() }.serverUrl)
+
+        server.enqueue(MockResponse().setResponseCode(200).setBody(infoJson()))
+        server.enqueue(MockResponse().setResponseCode(200).setBody(infoJson()))
+        vm.acceptPairing()
+        val saved = await { settings.settings.first { it.serverUrl.isNotEmpty() } }
+        assertEquals("http://$hostPort", saved.serverUrl)
+        assertEquals("paired-token", saved.token)
+        assertEquals(null, pairing.pending.value)
+        assertEquals("Bearer paired-token", server.takeRequest(4, TimeUnit.SECONDS)?.getHeader("Authorization"))
+    }
+
+    @Test
+    fun dismissingPairingKeepsTheSavedServer() {
+        pairing.offer(com.istarvin.fetcharr.data.settings.PairingRequest("http://other.example", ""))
+        await { vm.uiState.first { it.pairing != null } }
+        vm.dismissPairing()
+        await { vm.uiState.first { it.pairing == null } }
+        assertEquals("", await { settings.settings.first() }.serverUrl)
+    }
+
+    @Test
+    fun dynamicColorDefaultsOnAndCanBeTurnedOff() {
+        assertTrue(await { vm.uiState.first { it.loaded } }.dynamicColor)
+        vm.onDynamicColor(false)
+        assertFalse(await { settings.settings.first { !it.dynamicColor } }.dynamicColor)
+    }
 
     @Test
     fun aboutAndYtdlpShowInfo() {

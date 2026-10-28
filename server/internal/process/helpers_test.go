@@ -85,6 +85,7 @@ func newFixture(t *testing.T, mod func(*Options)) *fixture {
 	cfg := config.Default()
 	cfg.DataDir = filepath.Join(dir, "data")
 	cfg.Downloads.MinFreeSpace = 0
+	cfg.Downloads.AutoRetries = 0
 	media := filepath.Join(dir, "media")
 	for _, c := range []struct {
 		id     string

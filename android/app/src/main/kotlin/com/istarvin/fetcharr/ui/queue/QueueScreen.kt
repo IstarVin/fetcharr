@@ -38,6 +38,7 @@ import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Timer
@@ -72,6 +73,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
@@ -138,6 +140,8 @@ fun QueueScreen(onOpenSettings: () -> Unit, onAdd: () -> Unit, viewModel: QueueV
         onPauseAll = viewModel::pauseAll,
         onResumeAll = viewModel::resumeAll,
         onRequestCancelAll = viewModel::requestCancelAll,
+        onDownloadNext = viewModel::downloadNext,
+        onDownloadNextAll = viewModel::downloadNextAll,
     )
 
     state.pendingCancel?.let { request ->
@@ -158,7 +162,10 @@ internal fun QueueContent(
     onPauseAll: (String) -> Unit,
     onResumeAll: (String) -> Unit,
     onRequestCancelAll: (BatchGroup) -> Unit,
+    onDownloadNext: (String) -> Unit = {},
+    onDownloadNextAll: (String) -> Unit = {},
 ) {
+    val windowHint = state.windowOpensAt?.let { stringResource(R.string.queue_window_hint, formatClockTime(LocalContext.current, it)) }
     var expandedBatchIds by rememberSaveable { mutableStateOf(listOf<String>()) }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val listState = rememberLazyListState()
@@ -210,7 +217,12 @@ internal fun QueueContent(
                                 } else {
                                     for (section in state.sections) {
                                         item(key = "header:${section.kind.name}") {
-                                            SectionHeader(section.kind, section.items.sumOf { it.jobCount }, section.speedLabel, Modifier.animateItem())
+                                            SectionHeader(
+                                                section.kind,
+                                                section.items.sumOf { it.jobCount },
+                                                section.speedLabel ?: windowHint.takeIf { section.kind == QueueSectionKind.Queued },
+                                                Modifier.animateItem(),
+                                            )
                                         }
                                         for (item in section.items) {
                                             when (item) {
@@ -220,6 +232,8 @@ internal fun QueueContent(
                                                         onPause = { onPause(item.job.id) },
                                                         onResume = { onResume(item.job.id) },
                                                         onCancel = { onRequestCancel(item.job) },
+                                                        onDownloadNext = { onDownloadNext(item.job.id) },
+                                                        pendingNote = windowHint,
                                                         modifier = Modifier.animateItem(),
                                                     )
                                                 }
@@ -239,6 +253,7 @@ internal fun QueueContent(
                                                             onPauseAll = { onPauseAll(item.batchId) },
                                                             onResumeAll = { onResumeAll(item.batchId) },
                                                             onCancelAll = { onRequestCancelAll(item) },
+                                                            onDownloadNext = { onDownloadNextAll(item.batchId) },
                                                             modifier = Modifier.animateItem(),
                                                         )
                                                     }
@@ -254,6 +269,7 @@ internal fun QueueContent(
                                                                     onResume = { onResume(job.id) },
                                                                     onCancel = { onRequestCancel(job) },
                                                                     showCategory = false,
+                                                                    pendingNote = windowHint,
                                                                 )
                                                             }
                                                         }
@@ -426,10 +442,12 @@ private fun JobCard(
     onPause: () -> Unit,
     onResume: () -> Unit,
     onCancel: () -> Unit,
+    onDownloadNext: () -> Unit,
+    pendingNote: String?,
     modifier: Modifier = Modifier,
 ) {
     AppCard(modifier = modifier.fillMaxWidth()) {
-        JobDetails(job, onPause, onResume, onCancel)
+        JobDetails(job, onPause, onResume, onCancel, onDownloadNext = onDownloadNext, pendingNote = pendingNote)
     }
 }
 
@@ -440,12 +458,15 @@ private fun JobDetails(
     onResume: () -> Unit,
     onCancel: () -> Unit,
     showCategory: Boolean = true,
+    onDownloadNext: () -> Unit = {},
+    /** Replaces "Waiting for a free slot" on queued jobs, e.g. while the download window is closed. */
+    pendingNote: String? = null,
 ) {
     val accent = statusAccent(job.status)
     val colors = MaterialTheme.colorScheme
     val meta = listOfNotNull(
         job.categoryLabel.takeIf { showCategory },
-        stringResource(R.string.queue_waiting).takeIf { job.status == JobStatus.PENDING },
+        (pendingNote ?: stringResource(R.string.queue_waiting)).takeIf { job.status == JobStatus.PENDING },
     ).joinToString(" · ")
     Column(Modifier.padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
@@ -459,7 +480,7 @@ private fun JobDetails(
                     Text(meta, style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) { JobActionButtons(job, onPause, onResume, onCancel) }
+            Row(verticalAlignment = Alignment.CenterVertically) { JobActionButtons(job, onPause, onResume, onCancel, onDownloadNext) }
         }
         val line = job.stats ?: job.statusLabel.takeIf { job.status == JobStatus.PROCESSING }
         if (job.showsProgressBar || line != null) {
@@ -471,9 +492,9 @@ private fun JobDetails(
     }
 }
 
-/** Pause or Resume as one tap; Cancel sits behind the overflow so a stray touch cannot stop a download. */
+/** Pause or Resume as one tap; Download next and Cancel sit behind the overflow so a stray touch cannot stop a download. */
 @Composable
-private fun JobActionButtons(job: JobCardModel, onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit) {
+private fun JobActionButtons(job: JobCardModel, onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit, onDownloadNext: () -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
     if (JobAction.Pause in job.actions) {
         IconButton(onClick = onPause) {
@@ -491,6 +512,13 @@ private fun JobActionButtons(job: JobCardModel, onPause: () -> Unit, onResume: (
                 Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.queue_batch_menu, job.heading))
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                if (JobAction.DownloadNext in job.actions) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.queue_download_next)) },
+                        leadingIcon = { Icon(Icons.Outlined.SkipNext, contentDescription = null) },
+                        onClick = { menuOpen = false; onDownloadNext() },
+                    )
+                }
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.queue_cancel_download), color = MaterialTheme.colorScheme.error) },
                     leadingIcon = { Icon(Icons.Outlined.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
@@ -541,6 +569,7 @@ private fun BatchGroupCard(
     onPauseAll: () -> Unit,
     onResumeAll: () -> Unit,
     onCancelAll: () -> Unit,
+    onDownloadNext: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -577,6 +606,13 @@ private fun BatchGroupCard(
                     Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.queue_batch_menu, group.title))
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    if (group.canDownloadNext) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.queue_download_next)) },
+                            leadingIcon = { Icon(Icons.Outlined.SkipNext, contentDescription = null) },
+                            onClick = { menuOpen = false; onDownloadNext() },
+                        )
+                    }
                     if (canPause) {
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.queue_batch_pause_all)) },
@@ -674,7 +710,7 @@ private fun ExpandedBatchPreview() {
                 item {
                     BatchGroupCard(
                         group = group, expanded = true, onToggleExpanded = {},
-                        onPauseAll = {}, onResumeAll = {}, onCancelAll = {},
+                        onPauseAll = {}, onResumeAll = {}, onCancelAll = {}, onDownloadNext = {},
                     )
                 }
                 items(group.jobs, key = { it.id }) { job ->
@@ -696,3 +732,7 @@ private fun SetupQueuePreview() { QueuePreview(QueueUiState(loaded = true)) }
 private fun UnavailableQueuePreview() {
     QueuePreview(QueueUiState(loaded = true, hasServer = true, banner = QueueBanner("Unable to connect to the server", false)))
 }
+
+/** A wall-clock time in the user's 12/24-hour format, e.g. "23:00" or "11:00 PM". */
+private fun formatClockTime(context: android.content.Context, epochMs: Long): String =
+    android.text.format.DateFormat.getTimeFormat(context).format(java.util.Date(epochMs))

@@ -134,7 +134,7 @@ private val AppShapes = Shapes(
 @Composable
 fun FetcharrTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Off by default: the app ships its own palette. Kept as a parameter for previews and experiments.
+    // MainActivity passes the user's setting (on by default); previews use the brand palette.
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {

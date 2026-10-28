@@ -1,7 +1,7 @@
 // Presentation mapping shared by Queue and History. Ported from the Android
 // app (util/Formatters.kt, ui/common/JobText.kt, ui/queue/QueueModels.kt,
 // ui/history/HistoryModels.kt) so both clients read the same.
-import type { Category, Job, JobStatus, Layout } from './types'
+import type { Category, DownloadWindow, Job, JobStatus, Layout } from './types'
 
 const UNITS = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
 
@@ -224,6 +224,19 @@ export function combinedProgress(members: Job[]): number | null {
   return fractions.length ? fractions.reduce((a, b) => a + b, 0) / fractions.length : null
 }
 
+/**
+ * The tab title prefix while downloads run: "(3) 42% · " with the combined
+ * progress of the downloading jobs, "(3) · " when it is unknown, "" when
+ * nothing is queued or running. Paused jobs do not count.
+ */
+export function titleProgress(jobs: Job[]): string {
+  const running = jobs.filter((j) => j.status === 'pending' || j.status === 'downloading' || j.status === 'processing')
+  if (running.length === 0) return ''
+  const downloading = running.filter((j) => j.status === 'downloading')
+  const p = downloading.length ? combinedProgress(downloading) : null
+  return p == null ? `(${running.length}) · ` : `(${running.length}) ${percentLabel(p)} · `
+}
+
 // ---- Add -------------------------------------------------------------------
 
 /** `Added N downloads`, or `Added N · M already in library · K already queued` when episodes were skipped. */
@@ -307,6 +320,35 @@ export function groupByDay(jobs: Job[], now: Date = new Date(), locale?: string)
 export function timeOfDay(iso: string | null, locale?: string): string {
   if (!iso) return ''
   return new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(new Date(iso))
+}
+
+// ---- Download window ---------------------------------------------------------
+
+/** When queued downloads will start, if the server's download window is closed now; else null. */
+export function windowOpensAt(w: DownloadWindow | null | undefined, now: number = Date.now()): Date | null {
+  if (!w || w.open || !w.opens_at) return null
+  const at = new Date(w.opens_at)
+  return at.getTime() > now ? at : null
+}
+
+/** "Downloads start at 11:00 PM" for a closed window. */
+export function windowHint(opensAt: Date, locale?: string): string {
+  return `Downloads start at ${new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(opensAt)}`
+}
+
+// ---- Speed limit in MB/s (server settings) ------------------------------------
+
+/** Bytes per second → decimal MB/s text; 0 (unlimited) → "". */
+export function rateToMb(bps: number): string {
+  return bps > 0 ? String(Math.round(bps / 1e4) / 100) : ''
+}
+
+/** Decimal MB/s text → bytes per second; blank → 0 (unlimited); null when invalid. */
+export function mbToRate(text: string): number | null {
+  const t = text.trim()
+  if (!t) return 0
+  if (!/^\d+(\.\d{0,2})?$/.test(t)) return null
+  return Math.round(Number(t) * 1e6)
 }
 
 // ---- Categories ------------------------------------------------------------

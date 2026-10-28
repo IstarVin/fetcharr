@@ -9,10 +9,17 @@ import (
 	"embed"
 	"errors"
 	"io/fs"
+	"mime"
 	"net/http"
 	"path"
 	"strings"
 )
+
+func init() {
+	// The web app manifest (installable app with a share target); Go's
+	// built-in table does not know the extension.
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
+}
 
 //go:embed all:dist
 var dist embed.FS

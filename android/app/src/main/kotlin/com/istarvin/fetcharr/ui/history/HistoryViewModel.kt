@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.istarvin.fetcharr.data.CategoryRepository
+import com.istarvin.fetcharr.data.history.HistoryFilter
+import com.istarvin.fetcharr.data.history.HistoryQuery
+import com.istarvin.fetcharr.data.history.HistoryState
 import com.istarvin.fetcharr.data.history.HistoryRepository
 import com.istarvin.fetcharr.data.network.ApiError
 import com.istarvin.fetcharr.data.network.ApiResult
@@ -20,7 +23,9 @@ import com.istarvin.fetcharr.data.network.dto.ReplacementSourceDto
 import com.istarvin.fetcharr.data.network.dto.SubtitleDto
 import com.istarvin.fetcharr.ui.add.HeaderRow
 import com.istarvin.fetcharr.ui.add.SubtitleRow
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -69,7 +74,14 @@ data class HistoryUiState(
     val dialog: HistoryDialog? = null,
     val preparingPlayback: Set<String> = emptySet(),
     val deletingJobs: Set<String> = emptySet(),
+    val filter: HistoryFilter = HistoryFilter.All,
+    /** The search box text, which may still be waiting for its debounce. */
+    val search: String = "",
+    /** The server can search titles; otherwise the search box is hidden. */
+    val searchSupported: Boolean = false,
 ) {
+    /** A filter or search is narrowing the list. */
+    val filtered: Boolean get() = filter != HistoryFilter.All || search.isNotBlank()
     val isEmpty: Boolean get() = historyLoaded && groups.isEmpty()
 }
 
@@ -108,6 +120,8 @@ class HistoryViewModel @Inject constructor(
     private val deletingJobs = MutableStateFlow<Set<String>>(emptySet())
     private val eventChannel = Channel<HistoryEvent>(Channel.BUFFERED)
     private val inFlight = mutableSetOf<String>()
+    private val searchText = MutableStateFlow(history.state.value.query.text)
+    private var searchJob: Job? = null
 
     val events: Flow<HistoryEvent> = eventChannel.receiveAsFlow()
 
@@ -118,16 +132,24 @@ class HistoryViewModel @Inject constructor(
     ) { hasServer, state, categories ->
         Triple(hasServer, state, buildHistoryGroups(state.items, categories, System.currentTimeMillis(), ZoneId.systemDefault()))
     }.combine(categoryRepository.info) { (hasServer, state, groups), info ->
-        Triple(hasServer, state, groups.map { group ->
+        Content(hasServer, state, groups.map { group ->
             group.copy(items = group.items.map { row ->
                 if (info?.sourceReplacementSupported == true && row.status in listOf(JobStatus.FAILED, JobStatus.CANCELLED))
                     row.copy(actions = row.actions + HistoryAction.ReplaceSource)
                 else row
             })
-        })
-    }
+        }, searchSupported = info?.historySearchSupported == true)
+    }.combine(searchText) { content, search -> content.copy(search = search) }
 
-    val state: StateFlow<HistoryUiState> = combine(content, refreshing, dialog, preparingPlayback, deletingJobs) { (hasServer, repo, groups), isRefreshing, open, preparing, deleting ->
+    private data class Content(
+        val hasServer: Boolean,
+        val repo: HistoryState,
+        val groups: List<HistoryGroup>,
+        val searchSupported: Boolean,
+        val search: String = "",
+    )
+
+    val state: StateFlow<HistoryUiState> = combine(content, refreshing, dialog, preparingPlayback, deletingJobs) { (hasServer, repo, groups, searchSupported, search), isRefreshing, open, preparing, deleting ->
         HistoryUiState(
             loaded = true,
             hasServer = hasServer,
@@ -139,6 +161,9 @@ class HistoryViewModel @Inject constructor(
             dialog = open,
             preparingPlayback = preparing,
             deletingJobs = deleting,
+            filter = repo.query.filter,
+            search = search,
+            searchSupported = searchSupported,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryUiState())
 
@@ -165,6 +190,34 @@ class HistoryViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 load(showErrors = true)
+            } finally {
+                refreshing.value = false
+            }
+        }
+    }
+
+    /** Shows only completed or only failed and cancelled downloads; the server filters, so every page matches. */
+    fun setFilter(filter: HistoryFilter) {
+        applyQuery { it.copy(filter = filter) }
+    }
+
+    /** Searches titles and show names after a short pause in typing. */
+    fun setSearch(text: String) {
+        searchText.value = text
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            delay(SEARCH_DEBOUNCE_MS)
+            applyQuery { it.copy(text = text.trim()) }
+        }
+    }
+
+    private fun applyQuery(change: (HistoryQuery) -> HistoryQuery) {
+        val next = change(history.state.value.query)
+        if (next == history.state.value.query) return
+        viewModelScope.launch {
+            refreshing.value = true
+            try {
+                history.setQuery(next)?.let { snackbar(it) }
             } finally {
                 refreshing.value = false
             }
@@ -405,5 +458,6 @@ class HistoryViewModel @Inject constructor(
 
     private companion object {
         const val ALREADY_EXISTS = "already_exists"
+        const val SEARCH_DEBOUNCE_MS = 300L
     }
 }

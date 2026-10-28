@@ -69,7 +69,7 @@ func newSvc(t *testing.T) (*Service, *store.Store, *recorder, *time.Time) {
 
 func seed(t *testing.T, st *store.Store, url string, status jobs.Status) *store.Job {
 	t.Helper()
-	j := &store.Job{Category: "misc", URL: url, Title: store.Ptr("t"), Status: status}
+	j := &store.Job{Category: "misc", URL: url, Title: store.Ptr("t " + url), Status: status}
 	if err := st.Insert(context.Background(), j); err != nil {
 		t.Fatal(err)
 	}

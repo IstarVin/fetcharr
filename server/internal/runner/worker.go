@@ -91,18 +91,37 @@ func (w *run) execute() {
 
 	pt := &progressTracker{w: w}
 	headers := ytdlp.WithPixeldrainAuth(j.URL, j.Headers, cfg.Downloads.PixeldrainAPIKey)
-	res, err := ytdlp.Run(w.ctx, r.binary, ytdlp.BuildArgs(ytdlp.Spec{
+	args := ytdlp.BuildArgs(ytdlp.Spec{
 		URL:         j.URL,
 		Headers:     headers,
 		WorkDir:     workDir,
 		MergeFormat: cfg.Downloads.MergeFormat,
+		RateLimit:   int64(cfg.Downloads.RateLimit),
 		ExtraArgs:   cfg.Downloads.ExtraArgs,
-	}), ytdlp.Options{
+	})
+	opts := ytdlp.Options{
 		Dir:        workDir,
 		Secrets:    append(ytdlp.HeaderValues(headers), cfg.Downloads.PixeldrainAPIKey),
 		KillGrace:  r.killGrace,
 		OnProgress: pt.on,
-	})
+	}
+	res, err := ytdlp.Run(w.ctx, r.binary, args, opts)
+	// A failed run is retried after a growing pause; partial files are kept,
+	// so the next run resumes. Only yt-dlp failures are retried, not a
+	// missing binary or a stop.
+	var ye *ytdlp.Error
+	for attempt := 1; attempt <= cfg.Downloads.AutoRetries && errors.As(err, &ye) && w.ctx.Err() == nil; attempt++ {
+		r.log.Info("download failed; retrying automatically", "job", j, "attempt", attempt, "of", cfg.Downloads.AutoRetries)
+		select {
+		case <-w.ctx.Done():
+		case <-time.After(r.retryDelay * time.Duration(attempt)):
+			res, err = ytdlp.Run(w.ctx, r.binary, args, opts)
+		}
+	}
+	if w.ctx.Err() != nil && err != nil {
+		w.stopped()
+		return
+	}
 	if err != nil {
 		w.downloadError(err)
 		return

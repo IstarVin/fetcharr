@@ -48,6 +48,9 @@ class JobActions @Inject constructor(
 
     suspend fun retry(jobId: String): ActionOutcome = job(jobId) { it.retryJob(jobId) }
 
+    /** Moves a queued job to the front of the queue. */
+    suspend fun downloadNext(jobId: String): ActionOutcome = job(jobId) { it.prioritizeJob(jobId) }
+
     /**
      * Retry with an explicit [overwrite] flag. `true` sends `{"overwrite":true}` and replaces an existing library
      * file (`already_exists`); `false` is the same as [retry] (no body).
@@ -76,6 +79,9 @@ class JobActions @Inject constructor(
     suspend fun cancelAll(batchId: String): ActionOutcome = batch(batchId) { it.cancelBatch(batchId).jobs }
 
     suspend fun retryAll(batchId: String): ActionOutcome = batch(batchId) { it.retryBatch(batchId).jobs }
+
+    /** Moves every queued episode of a batch to the front of the queue, keeping their order. */
+    suspend fun downloadNextAll(batchId: String): ActionOutcome = batch(batchId) { it.prioritizeBatch(batchId).jobs }
 
     /** [deleteFile] also removes the downloaded file (completed jobs only). */
     suspend fun delete(jobId: String, deleteFile: Boolean): ActionOutcome {

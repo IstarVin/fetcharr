@@ -11,6 +11,8 @@ import com.istarvin.fetcharr.data.network.ConnectionTester
 import com.istarvin.fetcharr.data.network.ServerConfig
 import com.istarvin.fetcharr.data.network.TestConnectionResult
 import com.istarvin.fetcharr.data.network.dto.CategoryDto
+import com.istarvin.fetcharr.data.settings.PairingRequest
+import com.istarvin.fetcharr.data.settings.PairingRequests
 import com.istarvin.fetcharr.data.settings.SettingsRepository
 import com.istarvin.fetcharr.data.settings.UrlNormalizer
 import javax.inject.Inject
@@ -68,6 +70,9 @@ data class SettingsUiState(
     /** False when the server didn't report yt-dlp as managed (or info is unknown): update controls are hidden. */
     val ytdlpManaged: Boolean = false,
     val ytdlpUpdate: YtdlpUpdateStatus = YtdlpUpdateStatus.Idle,
+    val dynamicColor: Boolean = true,
+    /** A server offered by a `fetcharr://connect` link, waiting for the user to accept it. */
+    val pairing: PairingRequest? = null,
 )
 
 @HiltViewModel
@@ -76,6 +81,7 @@ class SettingsViewModel @Inject constructor(
     private val categories: CategoryRepository,
     private val system: SystemRepository,
     private val connectionTester: ConnectionTester,
+    private val pairingRequests: PairingRequests,
 ) : ViewModel() {
 
     private data class Form(
@@ -92,7 +98,13 @@ class SettingsViewModel @Inject constructor(
     private var testJob: Job? = null
     private var ytdlpJob: Job? = null
 
-    val uiState: StateFlow<SettingsUiState> = combine(form, settings.settings, categories.info, ytdlpUpdate) { f, s, info, update ->
+    val uiState: StateFlow<SettingsUiState> = combine(
+        form,
+        settings.settings,
+        categories.info,
+        ytdlpUpdate,
+        pairingRequests.pending,
+    ) { f, s, info, update, pairing ->
         SettingsUiState(
             hasSavedServer = s.serverUrl.isNotBlank(),
             loaded = f.loaded,
@@ -116,6 +128,8 @@ class SettingsViewModel @Inject constructor(
             },
             ytdlpManaged = info?.ytdlpManaged == true && (update as? YtdlpUpdateStatus.Failed)?.error != ApiError.YtdlpUnmanaged,
             ytdlpUpdate = update,
+            dynamicColor = s.dynamicColor,
+            pairing = pairing,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
@@ -184,6 +198,22 @@ class SettingsViewModel @Inject constructor(
             if (result is TestConnectionResult.Connected) categories.refresh(config)
             form.update { it.copy(testStatus = TestStatus.Done(result)) }
         }
+    }
+
+    /** Fills in, saves and tests the server from the pending pairing link. */
+    fun acceptPairing() {
+        val request = pairingRequests.pending.value ?: return
+        pairingRequests.clear()
+        form.update { it.copy(url = request.url, token = request.token, urlInvalid = false, testStatus = TestStatus.Idle) }
+        if (save()) testConnection()
+    }
+
+    fun dismissPairing() {
+        pairingRequests.clear()
+    }
+
+    fun onDynamicColor(enabled: Boolean) {
+        viewModelScope.launch { settings.setDynamicColor(enabled) }
     }
 
     fun onDefaultMovieCategory(id: String?) {

@@ -261,4 +261,32 @@ class QueueModelsTest {
         assertEquals("53%", percentOf(0.53f))
         assertEquals("100%", percentOf(1.2f))
     }
+
+    @Test
+    fun downloadNextIsOfferedForEveryQueuedItemButTheFirst() {
+        val first = pending.copy(id = "first", batchId = null, queuedAt = 100)
+        val second = pending.copy(id = "second", batchId = null, queuedAt = 200)
+        val batched = episode(3, JobStatus.PENDING, queuedAt = 300)
+        val running = downloading.copy(batchId = null)
+        val all = buildQueueSections(listOf(first, second, batched, running), categories, prioritySupported = true)
+        val queued = all.single { it.kind == QueueSectionKind.Queued }
+        val items = queued.items
+        assertTrue(JobAction.DownloadNext !in (items[0] as JobItem).job.actions)
+        assertEquals(listOf(JobAction.DownloadNext, JobAction.Pause, JobAction.Cancel), (items[1] as JobItem).job.actions)
+        assertTrue((items[2] as BatchGroup).canDownloadNext)
+        assertTrue(all.single { it.kind == QueueSectionKind.Active }.cards().none { JobAction.DownloadNext in it.actions })
+
+        val unsupported = buildQueueSections(listOf(first, second), categories).single()
+        assertTrue(unsupported.cards().none { JobAction.DownloadNext in it.actions })
+    }
+
+    @Test
+    fun windowHintOnlyWhileClosedAndInTheFuture() {
+        val at = com.istarvin.fetcharr.data.network.dto.Rfc3339.parse("2026-10-14T23:00:00.000Z")
+        val closed = com.istarvin.fetcharr.data.network.dto.DownloadWindowDto("23:00", "06:00", open = false, opensAt = "2026-10-14T23:00:00.000Z")
+        assertEquals(at, windowOpensAt(closed, at - 1))
+        assertEquals(null, windowOpensAt(closed, at))
+        assertEquals(null, windowOpensAt(closed.copy(open = true, opensAt = null), 0))
+        assertEquals(null, windowOpensAt(null, 0))
+    }
 }

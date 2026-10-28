@@ -124,6 +124,7 @@ fun FetcharrAppUi(openTargets: Flow<OpenTarget> = emptyFlow()) {
                     snackbarHostState.currentSnackbarData?.dismiss()
                     launch { snackbarHostState.showSnackbar(event.message) }
                 }
+                HubEvent.OpenSettings -> openSettings()
                 is HubEvent.OpenAdd -> {
                     val onAdd = navController.currentBackStackEntry?.destination?.hasRoute(AddRoute::class) == true
                     when {

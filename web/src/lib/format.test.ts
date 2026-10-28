@@ -19,9 +19,14 @@ import {
   groupByDay,
   heading,
   historyStatusLine,
+  mbToRate,
+  rateToMb,
   speed,
   statsLine,
   tidyReleaseName,
+  titleProgress,
+  windowHint,
+  windowOpensAt,
 } from './format'
 
 const job = (j: unknown) => j as Job
@@ -134,5 +139,38 @@ describe('batchAddedMessage', () => {
     expect(batchAddedMessage(1, [])).toBe('Added 1 download')
     expect(batchAddedMessage(2, [{ reason: 'duplicate' }])).toBe('Added 2 · 1 already queued')
     expect(batchAddedMessage(4, [{ reason: 'already_exists' }, { reason: 'already_exists' }, { reason: 'duplicate' }])).toBe('Added 4 · 2 already in library · 1 already queued')
+  })
+})
+
+describe('tab title progress', () => {
+  it('counts running jobs and combines downloading progress', () => {
+    const d = job(downloading)
+    const a = { ...d, progress: { percent: 50, downloaded_bytes: 50, total_bytes: 100, speed_bps: 0, eta_seconds: 0 } }
+    expect(titleProgress([a, job(paused)])).toBe('(1) 50% · ')
+    expect(titleProgress([{ ...d, status: 'pending', progress: null }])).toBe('(1) · ')
+    expect(titleProgress([job(paused), job(completed)])).toBe('')
+  })
+})
+
+describe('download window', () => {
+  const now = Date.parse('2026-10-14T12:00:00.000Z')
+  it('reports when a closed window opens', () => {
+    const w = { start: '23:00', end: '06:00', open: false, opens_at: '2026-10-14T23:00:00.000Z' }
+    expect(windowOpensAt(w, now)?.toISOString()).toBe('2026-10-14T23:00:00.000Z')
+    expect(windowOpensAt({ ...w, open: true, opens_at: null }, now)).toBeNull()
+    expect(windowOpensAt(w, Date.parse('2026-10-14T23:30:00.000Z'))).toBeNull()
+    expect(windowOpensAt(null, now)).toBeNull()
+    expect(windowHint(new Date('2026-10-14T23:00:00.000Z'), 'en-GB')).toMatch(/^Downloads start at \d{1,2}:00/)
+  })
+})
+
+describe('speed limit', () => {
+  it('converts MB/s and bytes per second', () => {
+    expect(rateToMb(0)).toBe('')
+    expect(rateToMb(2_500_000)).toBe('2.5')
+    expect(mbToRate('')).toBe(0)
+    expect(mbToRate(' 2.5 ')).toBe(2_500_000)
+    expect(mbToRate('1.234')).toBeNull()
+    expect(mbToRate('-1')).toBeNull()
   })
 })

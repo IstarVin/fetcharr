@@ -3,7 +3,11 @@
   "downloads": {
     "concurrency": 3,
     "merge_format": "mp4",
-    "min_free_space": 5000000000
+    "min_free_space": 5000000000,
+    "rate_limit": 5000000,
+    "window_start": "23:00",
+    "window_end": "06:00",
+    "auto_retries": 2
   },
   "history": {
     "retention_days": 30
@@ -29,6 +33,17 @@
       },
       "has_credential": true,
       "credential": "example-replacement-key"
+    }
+  ],
+  "notifications": [
+    {
+      "id": "5b0f4a51-1f1c-4f5d-9a51-8c1fdc7d1e20",
+      "type": "ntfy",
+      "url": "https://ntfy.sh/fetcharr-example",
+      "on_completed": true,
+      "on_failed": true,
+      "has_credential": true,
+      "credential": "example-ntfy-token"
     }
   ]
 }

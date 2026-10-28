@@ -80,6 +80,10 @@ class SettingsRepository @Inject constructor(
         }
     }
 
+    suspend fun setDynamicColor(enabled: Boolean) {
+        dataStore.edit { it[DYNAMIC_COLOR] = enabled }
+    }
+
     suspend fun setLastSeenFinishedAt(epochMs: Long) {
         dataStore.edit { it[LAST_SEEN] = epochMs }
     }
@@ -109,6 +113,7 @@ class SettingsRepository @Inject constructor(
             }
         }.orEmpty(),
         lastSeenFinishedAt = this[LAST_SEEN],
+        dynamicColor = this[DYNAMIC_COLOR] ?: true,
     )
 
     private fun MutablePreferences.putOrRemove(
@@ -126,6 +131,7 @@ class SettingsRepository @Inject constructor(
         val CACHED_CATEGORIES = stringPreferencesKey("cached_categories")
         val LAST_SEEN = longPreferencesKey("last_seen_finished_at")
         val NOTIFICATION_PERMISSION_ASKED = booleanPreferencesKey("notification_permission_asked")
+        val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
         val CATEGORIES_SERIALIZER = ListSerializer(CategoryDto.serializer())
     }
 }

@@ -1,5 +1,7 @@
 package com.istarvin.fetcharr.ui.incoming
 
+import com.istarvin.fetcharr.data.settings.PairingRequest
+import com.istarvin.fetcharr.data.settings.PairingRequests
 import com.istarvin.fetcharr.di.ApplicationScope
 import com.istarvin.fetcharr.incoming.IncomingCoordinator
 import kotlinx.coroutines.CoroutineScope
@@ -17,6 +19,9 @@ sealed interface HubEvent {
 
     /** Navigate to the Add screen, pre-filled with [url] when non-null. */
     data class OpenAdd(val url: String?) : HubEvent
+
+    /** Navigate to Settings, where a pending pairing request is offered. */
+    data object OpenSettings : HubEvent
 }
 
 /**
@@ -28,9 +33,10 @@ sealed interface HubEvent {
 class IncomingHub internal constructor(
     val coordinator: IncomingCoordinator,
     private val router: IntentRouter,
+    private val pairing: PairingRequests = PairingRequests(),
 ) {
     @Inject
-    constructor(@ApplicationScope scope: CoroutineScope) : this(IncomingCoordinator(scope), IntentRouter())
+    constructor(@ApplicationScope scope: CoroutineScope, pairing: PairingRequests) : this(IncomingCoordinator(scope), IntentRouter(), pairing)
 
     private val channel = Channel<HubEvent>(Channel.UNLIMITED)
 
@@ -52,6 +58,11 @@ class IncomingHub internal constructor(
             is RouteDecision.ShowRequest -> coordinator.onRequest(decision.request)
             RouteDecision.Unreadable -> showMessage(MESSAGE_UNREADABLE)
             is RouteDecision.OpenAdd -> channel.trySend(HubEvent.OpenAdd(decision.url))
+            is RouteDecision.Connect -> {
+                pairing.offer(PairingRequest(decision.url, decision.token))
+                channel.trySend(HubEvent.OpenSettings)
+            }
+            RouteDecision.BadConnectLink -> showMessage(MESSAGE_BAD_CONNECT_LINK)
             RouteDecision.Ignore -> Unit
         }
     }
@@ -62,5 +73,6 @@ class IncomingHub internal constructor(
 
     companion object {
         const val MESSAGE_UNREADABLE = "Couldn't read the download request"
+        const val MESSAGE_BAD_CONNECT_LINK = "Couldn't read the connection code"
     }
 }

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/istarvin/fetcharr/server/internal/timefmt"
 	"github.com/istarvin/fetcharr/server/internal/ytdlp"
 )
 
@@ -105,6 +106,9 @@ func (s *server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	cfg := s.cfg.Current()
 	info := InfoDTO{
 		SourceReplacementSupported: true,
+		QueuePrioritySupported:     true,
+		HistorySearchSupported:     true,
+		NotificationsSupported:     s.settings != nil,
 		SettingsSupported:          s.settings != nil,
 		SetupRequired:              len(cfg.Categories) == 0,
 		Version:                    s.version,
@@ -113,6 +117,14 @@ func (s *server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		Concurrency:                cfg.Downloads.Concurrency,
 		AuthRequired:               s.cfg.AuthRequired(),
 		Categories:                 make([]CategoryDTO, 0, len(cfg.Categories)),
+	}
+	if d := cfg.Downloads; d.HasWindow() {
+		now := s.now().In(time.Local)
+		w := &DownloadWindowDTO{Start: d.WindowStart, End: d.WindowEnd, Open: d.WindowOpen(now)}
+		if !w.Open {
+			w.OpensAt = timefmt.New(d.NextWindowOpen(now))
+		}
+		info.DownloadWindow = w
 	}
 	for _, c := range cfg.Categories {
 		info.Categories = append(info.Categories, CategoryDTO{

@@ -19,13 +19,15 @@ The browser client built into the [Fetcharr server](fetcharr-server.md). It cove
 
 Header tabs **Queue**, **History** and **Settings**, plus **Add download**. Below 640 px the tabs become a bottom navigation bar and Add becomes an icon button. Routes are hash-based (`#/queue`, `#/history`, `#/add`, `#/settings`, `#/server-settings`). Light and dark themes follow the system and use the Android brand scheme.
 
-If `setup_required` is true, a banner links to Server settings.
+If `setup_required` is true, a banner links to Server settings. While downloads run, the tab title shows them, e.g. `(2) 43% · Queue · Fetcharr`.
+
+`#/add?url=…` opens Add download with the URL filled in. The page also accepts `?url=` or `?text=` (the first http(s) URL is used) and turns it into that route, which serves the **Send to Fetcharr** bookmark (Settings) and the installed web app's share target (`manifest.webmanifest`; installing needs HTTPS).
 
 ## 3. Screens
 
-**Queue.** Same sections, batch grouping, card content, actions and cancel confirmation as [Android §5.3](fetcharr-android.md#53-queue). The Active heading shows the combined speed. Refresh reconnects the WebSocket and reloads server info.
+**Queue.** Same sections, batch grouping, card content, actions and cancel confirmation as [Android §5.3](fetcharr-android.md#53-queue). The Active heading shows the combined speed. Queued jobs and batches other than the first offer **Download next**. While the server's download window is closed, the Queued heading and cards say when downloads start. Refresh reconnects the WebSocket and reloads server info.
 
-**History.** Same rows, error texts, day grouping and actions as [Android §5.4](fetcharr-android.md#54-history), with All / Completed / Failed filters and paging as the list scrolls. A row expands to show the saved path (with Copy path), the error message or warnings, and the source host and subtitles.
+**History.** Same rows, error texts, day grouping and actions as [Android §5.4](fetcharr-android.md#54-history), with All / Completed / Failed filters and a title search (`q`, when the server supports it), both applied by the server, and paging as the list scrolls. A row expands to show the saved path (with Copy path), the error message or warnings, and the source host and subtitles.
 
 - **Play** requests a signed link (`POST /api/jobs/{id}/playback`) and plays it in an in-page `<video>`. If the browser can't decode the container or codec, the dialog says so and offers **Copy link** and **Open** for an external player. The link never contains the API token.
 - **Replace source & retry** is shown for failed and cancelled jobs when the server advertises `source_replacement_supported`. The editor behaves like Android's: URL, Clear/Keep/Replace headers (saved headers are never shown), subtitle rows, overwrite confirmation for `already_exists`, and a leave confirmation while submitting.
@@ -38,9 +40,9 @@ If `setup_required` is true, a banner links to Server settings.
 
 `409 duplicate` shows "Already in the queue". `409 already_exists` asks "Already in library" with **Replace** (sends again with `"overwrite": true`) or **Keep existing** (stays on the form with the error "Already in library"). Other errors stay on the form. The category is preselected from this browser's default for the request type (Settings → Defaults), otherwise the first category that fits.
 
-**Settings.** Server address, version, access mode and concurrency; **Test connection** (version and latency); library folders with free space; per-browser default categories (stored in `localStorage`); yt-dlp version, **Check for update** and **Update to latest** (managed binary only, "Downloads are running — try again when they finish" on `ytdlp_busy`); Sign out.
+**Settings.** Server address, version, access mode and concurrency; **Test connection** (version and latency); library folders with free space; per-browser default categories (stored in `localStorage`); **Android app** connection QR code (`fetcharr://connect?url=…&token=…`; the token is typed on the page only to draw the code), the **Send to Fetcharr** bookmark, opt-in browser notifications for downloads that finish while the tab is in the background; yt-dlp version, **Check for update** and **Update to latest** (managed binary only, "Downloads are running — try again when they finish" on `ytdlp_busy`); Sign out.
 
-**Server settings.** The same full-document editor as Android ([Android §5.5](fetcharr-android.md#55-settings)): downloads, maintenance, categories with generated hidden IDs, and Jellyfin/Plex connections with write-only credentials and path mappings. Validation messages match Android. Save sends `PUT /api/system/settings` with the loaded revision. `settings_conflict` shows a reload prompt. Leaving the page or closing the tab with unsaved edits asks first. Servers without `settings_supported` show an upgrade message.
+**Server settings.** The same full-document editor as Android ([Android §5.5](fetcharr-android.md#55-settings)): downloads (including speed limit, download window and automatic retries), maintenance, notification targets with **Send test**, categories with generated hidden IDs, and Jellyfin/Plex connections with write-only credentials and path mappings. Validation messages match Android. Save sends `PUT /api/system/settings` with the loaded revision. `settings_conflict` shows a reload prompt. Leaving the page or closing the tab with unsaved edits asks first. Servers without `settings_supported` show an upgrade message.
 
 ## 4. Development
 

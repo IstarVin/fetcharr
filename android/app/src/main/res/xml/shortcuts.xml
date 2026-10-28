@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="add_download"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_add"
+        android:shortcutShortLabel="@string/shortcut_add_short"
+        android:shortcutLongLabel="@string/shortcut_add_long">
+        <intent
+            android:action="com.istarvin.fetcharr.action.ADD_DOWNLOAD"
+            android:targetPackage="com.istarvin.fetcharr"
+            android:targetClass="com.istarvin.fetcharr.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="history"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_history"
+        android:shortcutShortLabel="@string/shortcut_history_short"
+        android:shortcutLongLabel="@string/shortcut_history_long">
+        <intent
+            android:action="android.intent.action.MAIN"
+            android:targetPackage="com.istarvin.fetcharr"
+            android:targetClass="com.istarvin.fetcharr.MainActivity">
+            <extra android:name="open" android:value="history" />
+        </intent>
+    </shortcut>
+</shortcuts>

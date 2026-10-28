@@ -771,7 +771,7 @@ func TestRelativeConfigPathsWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	r := runner.New(runner.Options{Config: cfg, Store: st, PollInterval: 20 * time.Millisecond})
+	r := runner.New(runner.Options{Config: cfg, Store: st, PollInterval: 20 * time.Millisecond, AutoRetryDelay: time.Millisecond})
 	r.Start()
 	defer func() { _ = r.Shutdown(context.Background()) }()
 	j := &store.Job{Category: "misc", URL: "https://example.com/rel", Title: store.Ptr("Rel"), WorkDir: cfg.JobWorkDir("x")}

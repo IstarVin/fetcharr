@@ -9,6 +9,7 @@ import com.istarvin.fetcharr.data.network.dto.HealthDto
 import com.istarvin.fetcharr.data.network.dto.InfoDto
 import com.istarvin.fetcharr.data.network.dto.JobDto
 import com.istarvin.fetcharr.data.network.dto.JobListDto
+import com.istarvin.fetcharr.data.network.dto.NotificationTestRequest
 import com.istarvin.fetcharr.data.network.dto.PlaybackDto
 import com.istarvin.fetcharr.data.network.dto.RetryRequest
 import com.istarvin.fetcharr.data.network.dto.YtdlpCheckResponse
@@ -33,6 +34,10 @@ interface FetcharrApi {
     @PUT("system/settings")
     suspend fun saveServerSettings(@Body settings: ServerSettingsDto): ServerSettingsDto
 
+    /** `204 No Content`; a failed delivery is `400` with the reason. */
+    @POST("system/notifications/test")
+    suspend fun testNotification(@Body request: NotificationTestRequest)
+
     @GET("health")
     suspend fun health(): HealthDto
 
@@ -55,6 +60,8 @@ interface FetcharrApi {
         @Query("category") category: String? = null,
         @Query("batch_id") batchId: String? = null,
         @Query("finished_after") finishedAfter: String? = null,
+        /** Title or show name substring; servers without `history_search_supported` ignore it. */
+        @Query("q") query: String? = null,
         @Query("limit") limit: Int? = null,
         @Query("offset") offset: Int? = null,
     ): JobListDto
@@ -73,6 +80,10 @@ interface FetcharrApi {
 
     @POST("jobs/{id}/cancel")
     suspend fun cancelJob(@Path("id") id: String): JobDto
+
+    /** Moves a pending job to the front of the queue (`queue_priority_supported`). */
+    @POST("jobs/{id}/prioritize")
+    suspend fun prioritizeJob(@Path("id") id: String): JobDto
 
     /** Retry without a body. */
     @POST("jobs/{id}/retry")
@@ -104,6 +115,9 @@ interface FetcharrApi {
 
     @POST("batches/{batchId}/retry")
     suspend fun retryBatch(@Path("batchId") batchId: String): BatchJobsResponse
+
+    @POST("batches/{batchId}/prioritize")
+    suspend fun prioritizeBatch(@Path("batchId") batchId: String): BatchJobsResponse
 
     @GET("system/ytdlp/check")
     suspend fun checkYtdlpUpdate(): YtdlpCheckResponse

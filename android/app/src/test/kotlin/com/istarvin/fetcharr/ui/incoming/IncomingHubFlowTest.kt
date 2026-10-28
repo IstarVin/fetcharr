@@ -88,4 +88,17 @@ class IncomingHubFlowTest {
         hub.handleIntent("android.intent.action.MAIN", null, null, null)
         assertEquals(HubEvent.OpenAdd(null), hub.events.first())
     }
+
+    @Test
+    fun connectLinkOffersPairingAndOpensSettings() = runTest {
+        val pairing = com.istarvin.fetcharr.data.settings.PairingRequests()
+        val hub = IncomingHub(com.istarvin.fetcharr.incoming.IncomingCoordinator(this), IntentRouter(), pairing)
+        hub.handleIntent(view, "fetcharr://connect?url=http%3A%2F%2Fnas%3A8080&token=t", null, null)
+        assertEquals(HubEvent.OpenSettings, hub.events.first())
+        assertEquals(com.istarvin.fetcharr.data.settings.PairingRequest("http://nas:8080", "t"), pairing.pending.value)
+        assertEquals(null, hub.coordinator.state.value.sheet)
+
+        hub.handleIntent(view, "fetcharr://connect?url=", null, null)
+        assertEquals(HubEvent.Snackbar(IncomingHub.MESSAGE_BAD_CONNECT_LINK), hub.events.first())
+    }
 }

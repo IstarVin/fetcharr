@@ -23,6 +23,7 @@ import (
 	"github.com/istarvin/fetcharr/server/internal/jobs"
 	"github.com/istarvin/fetcharr/server/internal/logsafe"
 	"github.com/istarvin/fetcharr/server/internal/mediaserver"
+	"github.com/istarvin/fetcharr/server/internal/notify"
 	"github.com/istarvin/fetcharr/server/internal/process"
 	"github.com/istarvin/fetcharr/server/internal/runner"
 	"github.com/istarvin/fetcharr/server/internal/service"
@@ -161,6 +162,11 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 		CurrentRetentionDays: func() int { return cfg.Current().History.RetentionDays },
 	})
 	bg.Go(func() { pruner.Run(bgCtx) })
+	notifier := notify.New(notify.Options{
+		Bus: bus, Store: st, Logger: log,
+		Targets: func() []config.Notification { return cfg.Current().Notifications },
+	})
+	bg.Go(func() { notifier.Run(bgCtx) })
 	lastRetention := cfg.Current().History.RetentionDays
 	lastAuto := cfg.Current().Ytdlp.AutoUpdate
 	settingsManager.Changed = func() {
@@ -198,6 +204,7 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 			WebSocket: hub,
 			Updater:   updater,
 			WebUI:     webUI,
+			Notifier:  notifier,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

@@ -27,6 +27,10 @@ downloads:
   concurrency: 2            # simultaneous downloads (>= 1)
   merge_format: mp4         # container used when yt-dlp merges separate video/audio streams
   min_free_space: 5GB       # disk-space guard, e.g. 500MB, 5GB; 0 disables
+  rate_limit: 0             # speed limit per download, e.g. 5MB (bytes per second); 0 = unlimited
+  window_start: ""          # with window_end ("HH:MM", server local time; set TZ in Docker):
+  window_end: ""            #   new downloads start only inside this daily window; empty = any time
+  auto_retries: 1           # retry a failed download automatically up to N times (0-5)
   # Direct downloads use aria2c (bundled in Docker); HLS/DASH stay native.
   # Use ["--downloader", "native"] to use yt-dlp's native downloader for all downloads.
   pixeldrain_api_key: ""    # sent as HTTP Basic auth on pixeldrain.com links; empty = anonymous

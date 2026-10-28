@@ -79,4 +79,32 @@ class IntentRouterTest {
         assertEquals("http://a.example/x", IntentRouter.firstHttpUrl("\"http://a.example/x\""))
         assertNull(IntentRouter.firstHttpUrl("http://"))
     }
+
+    @Test
+    fun connectLinkOffersTheServer() {
+        val d = router.route(view, "fetcharr://connect?url=http%3A%2F%2F192.168.1.5%3A8080&token=a%2Bb%26c", null, null)
+        assertEquals(RouteDecision.Connect("http://192.168.1.5:8080", "a+b&c"), d)
+        assertEquals(
+            RouteDecision.Connect("https://media.example/fetcharr", ""),
+            router.route(view, "FETCHARR://Connect?url=https%3A%2F%2Fmedia.example%2Ffetcharr%2F", null, null),
+        )
+    }
+
+    @Test
+    fun connectLinkWithoutAValidUrlIsReported() {
+        assertEquals(RouteDecision.BadConnectLink, router.route(view, "fetcharr://connect", null, null))
+        assertEquals(RouteDecision.BadConnectLink, router.route(view, "fetcharr://connect?url=ftp%3A%2F%2Fx", null, null))
+    }
+
+    @Test
+    fun connectHostWithAPayloadIsStillADownloadRequest() {
+        assertTrue(router.route(view, "fetcharr://connect", null, b64(movieJson)) is RouteDecision.ShowRequest)
+        val enc = java.net.URLEncoder.encode(b64(movieJson), "UTF-8")
+        assertTrue(router.route(view, "fetcharr://connect?payload=$enc", null, null) is RouteDecision.ShowRequest)
+    }
+
+    @Test
+    fun shortcutActionOpensAdd() {
+        assertEquals(RouteDecision.OpenAdd(null), router.route(IntentRouter.ACTION_ADD_DOWNLOAD, null, null, null))
+    }
 }

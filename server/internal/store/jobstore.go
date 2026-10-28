@@ -311,8 +311,10 @@ type ListFilter struct {
 	Category      string
 	BatchID       string
 	FinishedAfter *time.Time // finished_at strictly later than this
-	Limit         int        // <= 0: no limit (the API applies its own default 50 / max 500)
-	Offset        int
+	// Query matches a case-insensitive substring of the title or show name.
+	Query  string
+	Limit  int // <= 0: no limit (the API applies its own default 50 / max 500)
+	Offset int
 }
 
 func (f ListFilter) where() (string, []any, error) {
@@ -341,11 +343,19 @@ func (f ListFilter) where() (string, []any, error) {
 		conds = append(conds, "finished_at > ?")
 		args = append(args, timefmt.Format(*f.FinishedAfter))
 	}
+	if q := strings.TrimSpace(f.Query); q != "" {
+		like := "%" + likeEscaper.Replace(q) + "%"
+		conds = append(conds, `(title LIKE ? ESCAPE '\' OR show_name LIKE ? ESCAPE '\')`)
+		args = append(args, like, like)
+	}
 	if len(conds) == 0 {
 		return "", nil, nil
 	}
 	return " WHERE " + strings.Join(conds, " AND "), args, nil
 }
+
+// likeEscaper escapes the LIKE wildcards of a search term (ESCAPE '\').
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 // List returns the jobs matching f, newest created_at first (ties: most
 // recently inserted first), plus the total number of matches ignoring
@@ -404,6 +414,41 @@ func (s *Store) PendingJobs(ctx context.Context, limit int) ([]*Job, error) {
 		return s.queryJobs(ctx, q+` LIMIT ?`, limit)
 	}
 	return s.queryJobs(ctx, q)
+}
+
+// MoveToFront makes the pending jobs ids the next ones to start, in the given
+// order, ahead of every other pending job (spec §2.5): their queued_at is set
+// just before the oldest pending queued_at. Ids that are not pending are
+// skipped. It returns the moved jobs.
+func (s *Store) MoveToFront(ctx context.Context, ids []string) ([]*Job, error) {
+	moved := []*Job{}
+	err := s.withWriteTx(ctx, func(c *sql.Conn) error {
+		var oldest sql.NullString
+		if err := c.QueryRowContext(ctx, `SELECT MIN(queued_at) FROM jobs WHERE status = 'pending'`).Scan(&oldest); err != nil {
+			return err
+		}
+		if !oldest.Valid {
+			return nil
+		}
+		base, err := timefmt.Parse(oldest.String)
+		if err != nil {
+			return err
+		}
+		for i, id := range ids {
+			at := base.Add(-time.Duration(len(ids)-i) * time.Millisecond)
+			j, err := scanJob(c.QueryRowContext(ctx, `UPDATE jobs SET queued_at = ? WHERE id = ? AND status = 'pending' RETURNING `+jobColumns,
+				timefmt.Format(at), id))
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			moved = append(moved, j)
+		}
+		return nil
+	})
+	return moved, err
 }
 
 // Opt marks an optional field of Update as set (even to a nil/zero value).

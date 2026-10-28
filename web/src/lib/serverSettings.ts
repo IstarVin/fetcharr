@@ -1,7 +1,7 @@
 // Editable draft of PUT /api/system/settings, mirroring the Android editor
 // (ui/settings/ServerSettingsViewModel.kt). Credentials stay in memory only.
-import { bytesToGb, gbToBytes } from './format'
-import type { Layout, MediaServerType, ServerSettings } from './types'
+import { bytesToGb, gbToBytes, mbToRate, rateToMb } from './format'
+import type { Layout, MediaServerType, NotificationType, ServerSettings } from './types'
 
 export interface CategoryDraft {
   key: string
@@ -28,6 +28,19 @@ export interface IntegrationDraft {
   paths: MappingDraft[]
 }
 
+export interface NotificationDraft {
+  id: string
+  type: NotificationType
+  url: string
+  /** A typed replacement token; blank keeps the saved one. */
+  credential: string
+  hasCredential: boolean
+  removeCredential: boolean
+  onCompleted: boolean
+  onFailed: boolean
+  existing: boolean
+}
+
 export interface SettingsDraft {
   revision: number
   concurrency: string
@@ -37,7 +50,17 @@ export interface SettingsDraft {
   autoUpdate: boolean
   categories: CategoryDraft[]
   integrations: IntegrationDraft[]
+  /** Speed limit, download window and automatic retries; false on older servers. */
+  downloadControls: boolean
+  rateMb: string
+  windowStart: string
+  windowEnd: string
+  autoRetries: string
+  /** Null when the server has no push notifications. */
+  notifications: NotificationDraft[] | null
 }
+
+export const MAX_AUTO_RETRIES = 5
 
 // crypto.randomUUID needs a secure context; plain-http LAN servers are common.
 function randomHex(bytes: number): string {
@@ -58,6 +81,17 @@ export const newCategoryId = () => randomHex(16)
 
 export const newCategory = (): CategoryDraft => ({ key: uuid(), id: newCategoryId(), label: '', path: '', layout: 'flat', existing: false })
 export const newMapping = (): MappingDraft => ({ key: uuid(), from: '', to: '' })
+export const newNotification = (type: NotificationType = 'ntfy'): NotificationDraft => ({
+  id: uuid(),
+  type,
+  url: '',
+  credential: '',
+  hasCredential: false,
+  removeCredential: false,
+  onCompleted: true,
+  onFailed: true,
+  existing: false,
+})
 export const newIntegration = (): IntegrationDraft => ({ id: uuid(), type: 'jellyfin', url: '', credential: '', hasCredential: false, existing: false, paths: [] })
 
 /** Adds `http://` when no scheme is given and drops trailing slashes; null when not an http(s) URL. */
@@ -92,6 +126,35 @@ export function fromDocument(d: ServerSettings): SettingsDraft {
       existing: true,
       paths: Object.entries(s.path_map ?? {}).map(([from, to]) => ({ key: uuid(), from, to })),
     })),
+    downloadControls: d.downloads.rate_limit !== undefined,
+    rateMb: rateToMb(d.downloads.rate_limit ?? 0),
+    windowStart: d.downloads.window_start ?? '',
+    windowEnd: d.downloads.window_end ?? '',
+    autoRetries: String(d.downloads.auto_retries ?? 0),
+    notifications:
+      d.notifications?.map((n) => ({
+        id: n.id,
+        type: n.type,
+        url: n.url,
+        credential: '',
+        hasCredential: n.has_credential,
+        removeCredential: false,
+        onCompleted: n.on_completed,
+        onFailed: n.on_failed,
+        existing: true,
+      })) ?? null,
+  }
+}
+
+const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/
+
+/** An absolute http(s) URL typed with its scheme (notification targets often need https). */
+function explicitHttpUrl(v: string): boolean {
+  try {
+    const u = new URL(v.trim())
+    return (u.protocol === 'http:' || u.protocol === 'https:') && !!u.hostname
+  } catch {
+    return false
   }
 }
 
@@ -111,6 +174,19 @@ export function validate(d: SettingsDraft): Record<string, string> {
     if (!c.label.trim()) e[`category.${i}.label`] = 'This field is required.'
     if (!c.path.trim().startsWith('/') || c.path.includes('\u0000')) e[`category.${i}.path`] = 'Enter an absolute server path beginning with /.'
   })
+  if (d.downloadControls) {
+    if (mbToRate(d.rateMb) == null) e.rateMb = 'Enter a speed in MB/s with at most two decimals, or leave it blank.'
+    const start = d.windowStart.trim()
+    const end = d.windowEnd.trim()
+    if (start || end) {
+      if (!CLOCK.test(start) || !CLOCK.test(end)) e.window = 'Enter both times as HH:MM, or leave both blank.'
+      else if (start === end) e.window = 'Start and end must differ.'
+    }
+    if (!isWholeNumber(d.autoRetries) || Number(d.autoRetries) > MAX_AUTO_RETRIES) e.autoRetries = `Enter a whole number from 0 to ${MAX_AUTO_RETRIES}.`
+  }
+  d.notifications?.forEach((n, i) => {
+    if (!explicitHttpUrl(n.url)) e[`notification.${i}.url`] = 'Enter a full http:// or https:// address.'
+  })
   d.integrations.forEach((s, i) => {
     if (normalizeUrl(s.url) == null) e[`integration.${i}.url`] = 'Enter a valid http:// or https:// address'
     if (!s.hasCredential && !s.credential.trim()) e[`integration.${i}.credential`] = 'This field is required.'
@@ -128,7 +204,19 @@ export function validate(d: SettingsDraft): Record<string, string> {
 export function toDocument(d: SettingsDraft): ServerSettings {
   return {
     revision: d.revision,
-    downloads: { concurrency: Number(d.concurrency.trim()), merge_format: d.mergeFormat.trim(), min_free_space: gbToBytes(d.minFreeGb)! },
+    downloads: {
+      concurrency: Number(d.concurrency.trim()),
+      merge_format: d.mergeFormat.trim(),
+      min_free_space: gbToBytes(d.minFreeGb)!,
+      ...(d.downloadControls
+        ? {
+            rate_limit: mbToRate(d.rateMb)!,
+            window_start: d.windowStart.trim(),
+            window_end: d.windowEnd.trim(),
+            auto_retries: Number(d.autoRetries.trim()),
+          }
+        : {}),
+    },
     history: { retention_days: Number(d.retentionDays.trim()) },
     ytdlp: { auto_update: d.autoUpdate },
     categories: d.categories.map((c) => ({ id: c.id, label: c.label.trim(), path: c.path.trim(), layout: c.layout })),
@@ -140,5 +228,18 @@ export function toDocument(d: SettingsDraft): ServerSettings {
       has_credential: s.hasCredential,
       ...(s.credential.trim() ? { credential: s.credential.trim() } : {}),
     })),
+    ...(d.notifications
+      ? {
+          notifications: d.notifications.map((n) => ({
+            id: n.id,
+            type: n.type,
+            url: n.url.trim(),
+            on_completed: n.onCompleted,
+            on_failed: n.onFailed,
+            has_credential: n.hasCredential,
+            ...(n.credential.trim() ? { credential: n.credential.trim() } : n.removeCredential ? { credential: '' } : {}),
+          })),
+        }
+      : {}),
   }
 }

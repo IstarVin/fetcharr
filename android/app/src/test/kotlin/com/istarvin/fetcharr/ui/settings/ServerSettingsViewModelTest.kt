@@ -1,6 +1,7 @@
 package com.istarvin.fetcharr.ui.settings
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import com.istarvin.fetcharr.R
 import com.istarvin.fetcharr.data.CategoryRepository
 import com.istarvin.fetcharr.data.ServerSettingsRepository
 import com.istarvin.fetcharr.data.network.FetcharrApiFactory
@@ -184,6 +185,50 @@ class ServerSettingsViewModelTest {
             IntegrationDraft(url = "http://plex:32400", credential = "key", paths = listOf(PathMappingDraft(from = "/media", to = "D:\\Media"))),
         ))
         assertTrue(windows.validationErrors().isEmpty())
+    }
+
+    @Test fun downloadControlsAndNotificationsRoundTripTheUpdateFixture() {
+        fun fixture(name: String) = checkNotNull(javaClass.classLoader!!.getResourceAsStream(name)).use {
+            it.readBytes().toString(Charsets.UTF_8)
+        }
+        val response = FetcharrJson.decodeFromString<ServerSettingsDto>(fixture("server-settings.json"))
+        val update = FetcharrJson.decodeFromString<ServerSettingsDto>(fixture("update-server-settings.json"))
+        val draft = ServerSettingsDraft.from(response)
+        assertTrue(draft.downloadControls)
+        assertEquals("", draft.rateMb)
+        val edited = draft.copy(
+            concurrency = "3", retentionDays = "30", autoUpdate = false,
+            integrations = draft.integrations.map { it.copy(credential = "example-replacement-key") },
+            rateMb = "5", windowStart = "23:00", windowEnd = "06:00", autoRetries = "2",
+            notifications = draft.notifications!!.map { it.copy(credential = "example-ntfy-token") },
+        )
+        assertTrue(edited.validationErrors().isEmpty())
+        assertEquals(update, edited.document())
+
+        val removed = draft.copy(notifications = draft.notifications.map { it.copy(removeCredential = true) })
+        assertEquals("", removed.document().notifications!!.single().credential)
+        assertNull(draft.document().notifications!!.single().credential)
+    }
+
+    @Test fun olderServersGetNoNewFieldsBack() {
+        val legacy = document.copy(
+            downloads = com.istarvin.fetcharr.data.network.dto.DownloadSettingsDto(2, "mp4", 5_000_000_000),
+            notifications = null,
+        )
+        val draft = ServerSettingsDraft.from(legacy)
+        assertFalse(draft.downloadControls)
+        assertNull(draft.notifications)
+        val encoded = FetcharrJson.encodeToString(draft.document())
+        for (key in listOf("rate_limit", "window_start", "auto_retries", "notifications")) assertFalse(key, encoded.contains(key))
+    }
+
+    @Test fun downloadControlAndNotificationValidation() {
+        val draft = ServerSettingsDraft.from(document).copy(
+            downloadControls = true, rateMb = "1.234", windowStart = "23:00", windowEnd = "", autoRetries = "9",
+            notifications = listOf(NotificationDraft(url = "ntfy.sh/topic")),
+        )
+        assertEquals(setOf("rateMb", "window", "autoRetries", "notification.0.url"), draft.validationErrors().keys)
+        assertEquals(R.string.server_settings_window_same, draft.copy(windowEnd = "23:00").validationErrors()["window"])
     }
 
     @Test fun newCategoryIdsAreValidUniqueAndStableAcrossEditsAndReloads() {

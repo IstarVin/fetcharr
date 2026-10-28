@@ -3,7 +3,7 @@
 // beyond this page's lifetime.
 import { SvelteMap } from 'svelte/reactivity'
 import { api, ApiError, errorMessage, setUnauthorizedHandler, wsURL } from './api'
-import { ACTIVE_STATUSES, FINISHED_STATUSES, type Category, type Info, type Job, type WsMessage } from './types'
+import { ACTIVE_STATUSES, FINISHED_STATUSES, type Category, type Info, type Job, type JobStatus, type WsMessage } from './types'
 
 // ---- Session ---------------------------------------------------------------
 
@@ -168,14 +168,22 @@ class Live {
     }
   }
 
+  /** Called when a job leaves the queue; batchActive: other episodes of its batch are still queued. */
+  onFinished: ((job: Job, batchActive: boolean) => void) | null = null
+
   /** Applies a job from an event or an action response. */
   upsert(job: Job): void {
     if (isActive(job)) {
       this.jobs.set(job.id, job)
       history.remove([job.id])
     } else {
+      const was = this.jobs.get(job.id)
       this.jobs.delete(job.id)
       history.upsert(job)
+      if (was && isActive(was)) {
+        const batchActive = !!job.batch_id && [...this.jobs.values()].some((j) => j.batch_id === job.batch_id)
+        this.onFinished?.(job, batchActive)
+      }
     }
   }
 
@@ -208,51 +216,102 @@ export const live = new Live()
 
 const PAGE = 50
 
+export type HistoryFilter = 'all' | 'completed' | 'failed'
+
+const FILTER_STATUSES: Record<HistoryFilter, readonly JobStatus[]> = {
+  all: FINISHED_STATUSES,
+  completed: ['completed'],
+  failed: ['failed', 'cancelled'],
+}
+
+/** Whether a job's title or show name contains query, ignoring case (like the server's `q`). */
+export function matchesQuery(job: Job, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  return [job.title, job.show_name].some((v) => v?.toLowerCase().includes(q))
+}
+
 class History {
   jobs = $state<Job[]>([])
   total = $state(0)
   loading = $state(false)
   error = $state<string | null>(null)
   loaded = $state(false)
+  /** The status filter and search are applied by the server. */
+  filter = $state<HistoryFilter>('all')
+  query = $state('')
+  // Responses for an older filter or query are dropped.
+  #generation = 0
 
   get done(): boolean {
     return this.loaded && this.jobs.length >= this.total
   }
 
+  get filtered(): boolean {
+    return this.filter !== 'all' || this.query.trim() !== ''
+  }
+
   reset(): void {
+    this.#generation++
     this.jobs = []
     this.total = 0
     this.loaded = false
+    this.loading = false
     this.error = null
   }
 
+  setFilter(filter: HistoryFilter): void {
+    if (filter === this.filter) return
+    this.filter = filter
+    void this.load()
+  }
+
+  setQuery(query: string): void {
+    if (query.trim() === this.query.trim()) return
+    this.query = query
+    void this.load()
+  }
+
+  #params() {
+    const q = session.info?.history_search_supported ? this.query.trim() || undefined : undefined
+    return { status: [...FILTER_STATUSES[this.filter]], q }
+  }
+
+  matches(job: Job): boolean {
+    return FILTER_STATUSES[this.filter].includes(job.status) && (!session.info?.history_search_supported || matchesQuery(job, this.query))
+  }
+
   async load(): Promise<void> {
+    const gen = ++this.#generation
     this.loading = true
     this.error = null
     try {
-      const page = await api.listJobs({ status: [...FINISHED_STATUSES], limit: PAGE, offset: 0 })
+      const page = await api.listJobs({ ...this.#params(), limit: PAGE, offset: 0 })
+      if (gen !== this.#generation) return
       this.jobs = page.jobs
       this.total = page.total
       this.loaded = true
     } catch (e) {
-      this.error = errorMessage(e)
+      if (gen === this.#generation) this.error = errorMessage(e)
     } finally {
-      this.loading = false
+      if (gen === this.#generation) this.loading = false
     }
   }
 
   async loadMore(): Promise<void> {
     if (this.loading || this.done) return
+    const gen = this.#generation
     this.loading = true
     try {
-      const page = await api.listJobs({ status: [...FINISHED_STATUSES], limit: PAGE, offset: this.jobs.length })
+      const page = await api.listJobs({ ...this.#params(), limit: PAGE, offset: this.jobs.length })
+      if (gen !== this.#generation) return
       const seen = new Set(this.jobs.map((j) => j.id))
       this.jobs = [...this.jobs, ...page.jobs.filter((j) => !seen.has(j.id))]
       this.total = page.total
     } catch (e) {
-      this.error = errorMessage(e)
+      if (gen === this.#generation) this.error = errorMessage(e)
     } finally {
-      this.loading = false
+      if (gen === this.#generation) this.loading = false
     }
   }
 
@@ -260,8 +319,10 @@ class History {
     if (!this.loaded) return
     const since = this.jobs.reduce<string | null>((max, j) => (j.finished_at && (!max || j.finished_at > max) ? j.finished_at : max), null)
     if (!since) return void this.load()
+    const gen = this.#generation
     try {
-      const page = await api.listJobs({ status: [...FINISHED_STATUSES], finished_after: since, limit: 500 })
+      const page = await api.listJobs({ ...this.#params(), finished_after: since, limit: 500 })
+      if (gen !== this.#generation) return
       for (const j of page.jobs) this.upsert(j)
     } catch {
       // Next reconnect or a manual refresh tries again.
@@ -271,6 +332,10 @@ class History {
   /** Inserts or replaces a finished job, keeping newest `created_at` first. */
   upsert(job: Job): void {
     if (!this.loaded) return
+    if (!this.matches(job)) {
+      this.remove([job.id])
+      return
+    }
     const i = this.jobs.findIndex((j) => j.id === job.id)
     if (i >= 0) {
       this.jobs[i] = job

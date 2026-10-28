@@ -31,6 +31,21 @@ data class InfoDto(
     val categories: List<CategoryDto> = emptyList(),
     @SerialName("settings_supported") val settingsSupported: Boolean = false,
     @SerialName("setup_required") val setupRequired: Boolean = false,
+    @SerialName("queue_priority_supported") val queuePrioritySupported: Boolean = false,
+    @SerialName("history_search_supported") val historySearchSupported: Boolean = false,
+    @SerialName("notifications_supported") val notificationsSupported: Boolean = false,
+    /** Null without a window (or on older servers). */
+    @SerialName("download_window") val downloadWindow: DownloadWindowDto? = null,
+)
+
+/** The daily window in which new downloads start (`GET /api/info`). */
+@Serializable
+data class DownloadWindowDto(
+    val start: String,
+    val end: String,
+    val open: Boolean,
+    /** RFC 3339; null while the window is open. */
+    @SerialName("opens_at") val opensAt: String? = null,
 )
 
 /** `GET /api/health`. */

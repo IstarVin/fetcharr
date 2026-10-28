@@ -7,6 +7,10 @@ movie, TV, or flat library folders. Both clients show the live queue and
 history; Android adds background notifications. Server settings and optional
 Jellyfin/Plex connections can be managed in either client.
 
+The server can push results to ntfy or a webhook, limit download speed, start
+downloads only inside a daily window, and retry failed downloads automatically.
+Pair a phone by scanning the QR code under **Settings → Android app** in the web UI.
+
 Tap **Play** on a completed History item to stream the saved file in an external
 Android player. Both the app and server need the playback update. Seeking is
 supported; temporary playback links keep the API token inside Fetcharr.

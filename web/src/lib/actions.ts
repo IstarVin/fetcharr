@@ -42,6 +42,20 @@ export async function batchAction(batchId: string, title: string, action: 'pause
   }
 }
 
+/** Moves a queued job (or every queued episode of a batch) to the front of the queue. */
+export async function downloadNext(target: { job: Job } | { batchId: string }): Promise<void> {
+  try {
+    if ('job' in target) {
+      live.upsert(await api.prioritize(target.job.id))
+    } else {
+      for (const j of (await api.batchAction(target.batchId, 'prioritize')).jobs) live.upsert(j)
+    }
+    toasts.show('Moved to the front of the queue')
+  } catch (e) {
+    toasts.show(errorMessage(e))
+  }
+}
+
 /** Retry; `already_exists` asks before overwriting the library file. */
 export async function retryJob(job: Job): Promise<void> {
   let overwrite = false

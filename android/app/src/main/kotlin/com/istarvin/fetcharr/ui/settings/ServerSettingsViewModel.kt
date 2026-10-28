@@ -11,6 +11,7 @@ import com.istarvin.fetcharr.data.network.ServerConfig
 import com.istarvin.fetcharr.data.network.dto.DownloadSettingsDto
 import com.istarvin.fetcharr.data.network.dto.HistorySettingsDto
 import com.istarvin.fetcharr.data.network.dto.MediaServerSettingsDto
+import com.istarvin.fetcharr.data.network.dto.NotificationSettingsDto
 import com.istarvin.fetcharr.data.network.dto.ServerCategoryDto
 import com.istarvin.fetcharr.data.network.dto.ServerSettingsDto
 import com.istarvin.fetcharr.data.network.dto.YtdlpSettingsDto
@@ -19,6 +20,7 @@ import com.istarvin.fetcharr.data.settings.UrlNormalizer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.math.BigDecimal
 import java.util.UUID
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import javax.inject.Inject
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,6 +54,19 @@ data class IntegrationDraft(
     val paths: List<PathMappingDraft> = emptyList(),
 )
 
+data class NotificationDraft(
+    val id: String = UUID.randomUUID().toString(),
+    val type: String = NotificationSettingsDto.TYPE_NTFY,
+    val url: String = "",
+    /** A typed replacement token; blank keeps the saved one. */
+    val credential: String = "",
+    val hasCredential: Boolean = false,
+    val removeCredential: Boolean = false,
+    val onCompleted: Boolean = true,
+    val onFailed: Boolean = true,
+    val existing: Boolean = false,
+)
+
 /** This draft stays in memory only: credentials are never written to SavedStateHandle or DataStore. */
 data class ServerSettingsDraft(
     val revision: Long,
@@ -62,6 +77,16 @@ data class ServerSettingsDraft(
     val autoUpdate: Boolean,
     val categories: List<CategoryDraft>,
     val integrations: List<IntegrationDraft>,
+    /** Speed limit, download window and automatic retries; false for servers that do not report them. */
+    val downloadControls: Boolean = false,
+    /** MB/s per download; blank = unlimited. */
+    val rateMb: String = "",
+    /** "HH:MM", or blank for any time. */
+    val windowStart: String = "",
+    val windowEnd: String = "",
+    val autoRetries: String = "0",
+    /** Null when the server has no push notifications. */
+    val notifications: List<NotificationDraft>? = null,
 ) {
     fun validationErrors(): Map<String, Int> = buildMap {
         if ((concurrency.toIntOrNull() ?: 0) < 1) put("concurrency", R.string.server_settings_positive_integer)
@@ -73,6 +98,23 @@ data class ServerSettingsDraft(
                 put("category.$index.id", R.string.server_settings_category_id_invalid)
             }
             if (!c.path.startsWith('/') || c.path.contains('\u0000')) put("category.$index.path", R.string.server_settings_path_invalid)
+        }
+        if (downloadControls) {
+            if (rateBytes() == null) put("rateMb", R.string.server_settings_rate_invalid)
+            val start = windowStart.trim()
+            val end = windowEnd.trim()
+            if (start.isNotEmpty() || end.isNotEmpty()) {
+                if (!CLOCK.matches(start) || !CLOCK.matches(end)) {
+                    put("window", R.string.server_settings_window_invalid)
+                } else if (start == end) {
+                    put("window", R.string.server_settings_window_same)
+                }
+            }
+            if ((autoRetries.toIntOrNull() ?: -1) !in 0..MAX_AUTO_RETRIES) put("autoRetries", R.string.server_settings_retries_invalid)
+        }
+        notifications?.forEachIndexed { index, n ->
+            val url = n.url.trim().toHttpUrlOrNull()
+            if (url == null || !n.url.trim().startsWith("http", ignoreCase = true)) put("notification.$index.url", R.string.server_settings_notification_url_invalid)
         }
         integrations.forEachIndexed { index, s ->
             if (UrlNormalizer.normalize(s.url) == null) put("integration.$index.url", R.string.settings_server_url_invalid)
@@ -86,13 +128,31 @@ data class ServerSettingsDraft(
         }
     }
 
+    /** MB/s with at most two decimals, as bytes per second; blank is 0 (unlimited). */
+    private fun rateBytes(): Long? {
+        val text = rateMb.trim()
+        if (text.isEmpty()) return 0
+        if (!Regex("^\\d+(\\.\\d{0,2})?$").matches(text)) return null
+        return try {
+            text.toBigDecimal().movePointRight(6).longValueExact()
+        } catch (_: ArithmeticException) { null }
+    }
+
     private fun freeBytes(): Long? = try {
         minFreeGb.toBigDecimalOrNull()?.movePointRight(9)?.longValueExact()?.takeIf { it >= 0 }
     } catch (_: ArithmeticException) { null }
 
     fun document() = ServerSettingsDto(
         revision = revision,
-        downloads = DownloadSettingsDto(concurrency.toInt(), mergeFormat.trim(), requireNotNull(freeBytes())),
+        downloads = if (downloadControls) {
+            DownloadSettingsDto(
+                concurrency.toInt(), mergeFormat.trim(), requireNotNull(freeBytes()),
+                rateLimit = requireNotNull(rateBytes()), windowStart = windowStart.trim(), windowEnd = windowEnd.trim(),
+                autoRetries = autoRetries.toInt(),
+            )
+        } else {
+            DownloadSettingsDto(concurrency.toInt(), mergeFormat.trim(), requireNotNull(freeBytes()))
+        },
         history = HistorySettingsDto(retentionDays.toInt()),
         ytdlp = YtdlpSettingsDto(autoUpdate),
         categories = categories.map { ServerCategoryDto(it.id, it.label, it.path.trim(), it.layout) },
@@ -103,9 +163,19 @@ data class ServerSettingsDraft(
                 credential = s.credential.takeIf { it.isNotBlank() }, hasCredential = s.hasCredential,
             )
         },
+        notifications = notifications?.map { n ->
+            NotificationSettingsDto(
+                id = n.id, type = n.type, url = n.url.trim(), onCompleted = n.onCompleted, onFailed = n.onFailed,
+                hasCredential = n.hasCredential,
+                credential = n.credential.trim().takeIf { it.isNotEmpty() } ?: "".takeIf { n.removeCredential },
+            )
+        },
     )
 
     companion object {
+        const val MAX_AUTO_RETRIES = 5
+        private val CLOCK = Regex("^([01]\\d|2[0-3]):[0-5]\\d$")
+
         fun from(d: ServerSettingsDto) = ServerSettingsDraft(
             revision = d.revision,
             concurrency = d.downloads.concurrency.toString(), mergeFormat = d.downloads.mergeFormat,
@@ -116,6 +186,17 @@ data class ServerSettingsDraft(
                 IntegrationDraft(
                     id = s.id, type = s.type, url = s.url, hasCredential = s.hasCredential, existing = true,
                     paths = s.pathMap.map { PathMappingDraft(from = it.key, to = it.value) },
+                )
+            },
+            downloadControls = d.downloads.rateLimit != null,
+            rateMb = d.downloads.rateLimit?.takeIf { it > 0 }?.let { BigDecimal.valueOf(it).movePointLeft(6).stripTrailingZeros().toPlainString() }.orEmpty(),
+            windowStart = d.downloads.windowStart.orEmpty(),
+            windowEnd = d.downloads.windowEnd.orEmpty(),
+            autoRetries = (d.downloads.autoRetries ?: 0).toString(),
+            notifications = d.notifications?.map { n ->
+                NotificationDraft(
+                    id = n.id, type = n.type, url = n.url, hasCredential = n.hasCredential,
+                    onCompleted = n.onCompleted, onFailed = n.onFailed, existing = true,
                 )
             },
         )
@@ -134,9 +215,19 @@ data class ServerSettingsUiState(
     val fieldErrors: Map<String, Int> = emptyMap(),
     val conflict: Boolean = false,
     val saved: Boolean = false,
+    /** Notification targets with a test in flight. */
+    val testing: Set<String> = emptySet(),
+    /** The last test result per notification target: null message = sent. */
+    val testResults: Map<String, NotificationTestResult> = emptyMap(),
 ) {
     val dirty: Boolean get() = draft != baseline
+
+    /** A test goes to the saved target, so it needs the saved, unedited version. */
+    fun canTest(id: String): Boolean =
+        !saving && id !in testing && draft?.notifications?.find { it.id == id }?.let { it.existing && it == baseline?.notifications?.find { b -> b.id == id } } == true
 }
+
+data class NotificationTestResult(val error: String?)
 
 @HiltViewModel
 class ServerSettingsViewModel @Inject constructor(
@@ -222,6 +313,22 @@ class ServerSettingsViewModel @Inject constructor(
                     }
                 }
             }
+        }
+    }
+
+    fun testNotification(id: String) {
+        val target = connection ?: return
+        if (!state.value.canTest(id)) return
+        val session = generation
+        state.update { it.copy(testing = it.testing + id) }
+        viewModelScope.launch {
+            val result = repository.testNotification(target, id)
+            if (!isCurrent(target, session)) return@launch
+            val outcome = when (result) {
+                is ApiResult.Success -> NotificationTestResult(null)
+                is ApiResult.Failure -> NotificationTestResult(result.error.userMessage)
+            }
+            state.update { it.copy(testing = it.testing - id, testResults = it.testResults + (id to outcome)) }
         }
     }
 

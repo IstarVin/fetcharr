@@ -707,10 +707,10 @@ func TestBatchActions(t *testing.T) {
 	}
 
 	// A retry that collides is skipped, not fatal.
-	b2 := create("https://bb.example/z", 1)
+	b2 := create("https://bb.example/z", 4)
 	l2 := e.store3(b2)
-	e.want(e.request("POST", "/api/jobs/"+l2[1]+"/cancel", nil), 200)
-	e.want(e.request("POST", "/api/jobs", map[string]any{"url": "https://bb.example/z/1", "category": "tv", "show_name": "B", "season": 1, "episode": 1}), 201)
+	e.want(e.request("POST", "/api/jobs/"+l2[4]+"/cancel", nil), 200)
+	e.want(e.request("POST", "/api/jobs", map[string]any{"url": "https://bb.example/z/4", "category": "tv", "show_name": "B", "season": 1, "episode": 4}), 201)
 	r = e.want(e.request("POST", "/api/batches/"+b2+"/retry", nil), 200).Obj(t)
 	if len(r["jobs"].([]any)) != 0 {
 		t.Errorf("colliding retry should be skipped: %v", r)

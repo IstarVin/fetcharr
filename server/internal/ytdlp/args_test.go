@@ -74,3 +74,17 @@ func TestWithPixeldrainAuth(t *testing.T) {
 		t.Fatalf("job Authorization overridden: %v", h)
 	}
 }
+
+func TestBuildArgsRateLimit(t *testing.T) {
+	got := BuildArgs(Spec{URL: "https://u", WorkDir: "/w", MergeFormat: "mp4", RateLimit: 2_500_000, ExtraArgs: []string{"--limit-rate", "1M"}})
+	i := slices.Index(got, "--limit-rate")
+	if i < 0 || got[i+1] != "2500000" {
+		t.Fatalf("rate limit missing: %q", got)
+	}
+	if j := slices.Index(got[i+1:], "--limit-rate"); j < 0 {
+		t.Fatalf("extra_args must come after the setting so they can override it: %q", got)
+	}
+	if slices.Contains(BuildArgs(Spec{URL: "https://u", WorkDir: "/w", MergeFormat: "mp4"}), "--limit-rate") {
+		t.Fatal("no limit flag expected when unlimited")
+	}
+}

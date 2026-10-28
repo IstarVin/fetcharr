@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/istarvin/fetcharr/server/internal/config"
@@ -26,6 +28,10 @@ const maxCASAttempts = 4
 // each transition and its runner hooks ordered against subsequent actions.
 type Service struct {
 	lifecycle chan struct{}
+	// submit serializes the active-target check with the insert or retry
+	// that makes a job active, so two submissions for one library file
+	// cannot both pass it.
+	submit sync.Mutex
 
 	store *store.Store
 	cfg   *config.Config
@@ -131,6 +137,50 @@ func (s *Service) existingMedia(cat config.Category, j *store.Job) string {
 	return ""
 }
 
+// targetKey identifies the library item a job writes: its folder and base
+// name, compared without case, since every video extension counts (§4.1).
+func targetKey(t naming.Target) string {
+	return strings.ToLower(filepath.Join(t.Dir, t.Base))
+}
+
+// activeTargets maps the library items of every active job to the job. Jobs
+// whose category or name cannot be resolved are left out.
+func (s *Service) activeTargets(ctx context.Context) (map[string]*store.Job, error) {
+	active, _, err := s.store.List(ctx, store.ListFilter{Statuses: jobs.ActiveStatuses()})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]*store.Job, len(active))
+	for _, j := range active {
+		cat, ok := s.cfg.Category(j.Category)
+		if !ok {
+			continue
+		}
+		if t, err := library.TargetOf(cat, j); err == nil {
+			out[targetKey(t)] = j
+		}
+	}
+	return out, nil
+}
+
+// queuedFor returns the active job that already writes j's library item, if
+// any. Different source URLs for one episode (common with expiring stream
+// links) would otherwise download it twice and fail the second job.
+func (s *Service) queuedFor(cat config.Category, j *store.Job, active map[string]*store.Job) *store.Job {
+	t, err := library.TargetOf(cat, j)
+	if err != nil {
+		return nil
+	}
+	if other := active[targetKey(t)]; other != nil && other.ID != j.ID {
+		return other
+	}
+	return nil
+}
+
+func queuedErr(j *store.Job) error {
+	return newErr(CodeDuplicate, nil, "already queued for the same library file (job %s)", j.ID)
+}
+
 // Create validates req and creates one pending job (spec §6.3
 // POST /api/jobs). Errors: invalid_request, already_exists, duplicate.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*store.Job, error) {
@@ -179,6 +229,15 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*store.Job, er
 		j.Season, j.Episode, j.Year = req.Season, req.Episode, req.Year
 	case naming.LayoutFlat:
 		// Year, show, season and episode do not apply: stored as null.
+	}
+	s.submit.Lock()
+	defer s.submit.Unlock()
+	active, err := s.activeTargets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if other := s.queuedFor(cat, j, active); other != nil {
+		return nil, queuedErr(other)
 	}
 	if !j.Overwrite {
 		if path := s.existingMedia(cat, j); path != "" {
@@ -263,9 +322,23 @@ func (s *Service) CreateBatch(ctx context.Context, req BatchRequest) (*BatchResu
 	}
 	// Queue order follows ascending episode number (spec §2.5).
 	sort.SliceStable(items, func(a, b int) bool { return items[a].ep < items[b].ep })
+	s.submit.Lock()
+	defer s.submit.Unlock()
+	active, err := s.activeTargets(ctx)
+	if err != nil {
+		return nil, err
+	}
 	skipReason := make([]string, len(items))
 	var batch []*store.Job
 	for i, it := range items {
+		if s.queuedFor(cat, it.job, active) != nil {
+			skipReason[i] = SkipReasonDuplicate
+			continue
+		}
+		// A repeated episode number in one request writes the same file.
+		if t, err := library.TargetOf(cat, it.job); err == nil {
+			active[targetKey(t)] = it.job
+		}
 		if !req.Overwrite && s.existingMedia(cat, it.job) != "" {
 			skipReason[i] = SkipReasonAlreadyExists
 			continue
@@ -407,6 +480,10 @@ func (s *Service) apply(ctx context.Context, id string, ev jobs.Event, opts Retr
 	case <-ctx.Done():
 		return nil, context.Cause(ctx)
 	}
+	if ev == jobs.EventRetry {
+		s.submit.Lock()
+		defer s.submit.Unlock()
+	}
 	for range maxCASAttempts {
 		cur, err := s.store.Get(ctx, id)
 		if errors.Is(err, store.ErrNotFound) {
@@ -443,6 +520,13 @@ func (s *Service) apply(ctx context.Context, id string, ev jobs.Event, opts Retr
 				return nil, wrapValidation("", err)
 			}
 			update.DestinationRoot = store.Set(cat.Path)
+			active, err := s.activeTargets(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if other := s.queuedFor(cat, cur, active); other != nil {
+				return nil, queuedErr(other)
+			}
 			if source := opts.Source; source != nil {
 				update.URL = store.Set(source.URL)
 				headers := map[string]string{}
@@ -529,6 +613,53 @@ func (s *Service) afterAction(ev jobs.Event, from jobs.Status, j *store.Job) {
 	case jobs.EventCancel:
 		s.ctl.Stop(j.ID, StopCancel)
 	}
+}
+
+// Prioritize makes a pending job the next one to start (spec §2.5). Errors:
+// not_found, invalid_state (not pending).
+func (s *Service) Prioritize(ctx context.Context, id string) (*store.Job, error) {
+	cur, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if cur.Status != jobs.StatusPending {
+		return nil, newErr(CodeInvalidState, nil, "cannot prioritize job in status '%s'", cur.Status)
+	}
+	moved, err := s.store.MoveToFront(ctx, []string{id})
+	if err != nil {
+		return nil, err
+	}
+	if len(moved) == 0 {
+		return nil, newErr(CodeInvalidState, nil, "job %s is no longer pending", id)
+	}
+	s.pub.Publish(Change{Kind: ChangeUpdated, Job: moved[0]})
+	return moved[0], nil
+}
+
+// PrioritizeBatch moves the pending episodes of a batch ahead of every other
+// pending job, keeping their order, and returns them. Error: not_found.
+func (s *Service) PrioritizeBatch(ctx context.Context, batchID string) ([]*store.Job, error) {
+	members, err := s.store.ListByBatch(ctx, batchID)
+	if err != nil {
+		return nil, err
+	}
+	if len(members) == 0 {
+		return nil, notFound("batch", batchID)
+	}
+	var ids []string
+	for _, m := range members {
+		if m.Status == jobs.StatusPending {
+			ids = append(ids, m.ID)
+		}
+	}
+	moved, err := s.store.MoveToFront(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, j := range moved {
+		s.pub.Publish(Change{Kind: ChangeUpdated, Job: j})
+	}
+	return moved, nil
 }
 
 // Delete removes the record of a finished job. The status check and the

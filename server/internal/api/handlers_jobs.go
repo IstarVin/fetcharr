@@ -14,6 +14,7 @@ import (
 const (
 	defaultLimit = 50
 	maxLimit     = 500
+	maxQueryLen  = 200
 )
 
 func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +98,13 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.FinishedAfter = &t
+	}
+	if v := strings.TrimSpace(q.Get("q")); v != "" {
+		if len(v) > maxQueryLen {
+			badRequest(w, "q must be at most %d bytes", maxQueryLen)
+			return
+		}
+		f.Query = v
 	}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -213,4 +221,22 @@ func (s *server) handleDeleteMany(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"deleted": n})
+}
+
+func (s *server) handlePrioritize(w http.ResponseWriter, r *http.Request) {
+	j, err := s.svc.Prioritize(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, NewJobDTO(j))
+}
+
+func (s *server) handlePrioritizeBatch(w http.ResponseWriter, r *http.Request) {
+	moved, err := s.svc.PrioritizeBatch(r.Context(), r.PathValue("batch_id"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string][]JobDTO{"jobs": NewJobDTOs(moved)})
 }

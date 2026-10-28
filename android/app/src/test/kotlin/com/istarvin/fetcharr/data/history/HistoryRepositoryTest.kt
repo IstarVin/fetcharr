@@ -249,6 +249,52 @@ class HistoryRepositoryTest {
         assertTrue(repo.state.value.items.isEmpty())
     }
 
+    @Test
+    fun aFilterAndSearchAreSentToTheServer() = runBlocking {
+        server.enqueue(page(jobs(3), total = 3))
+        repo.refresh()
+        server.takeRequest()
+        val failed = jobs(1, base = 10).map { it.copy(status = JobStatus.FAILED, title = "Dune") }
+        server.enqueue(page(failed, total = 1))
+        assertNull(repo.setQuery(HistoryQuery(HistoryFilter.Failed, "dune")))
+        val request = server.takeRequest().requestUrl!!
+        assertEquals("failed,cancelled", request.queryParameter("status"))
+        assertEquals("dune", request.queryParameter("q"))
+        assertEquals(listOf("job-11"), idsOf())
+        assertEquals(HistoryQuery(HistoryFilter.Failed, "dune"), repo.state.value.query)
+
+        server.enqueue(page(failed, total = 1))
+        repo.loadMore() // the end was reached: nothing is requested
+        repo.refresh()
+        assertEquals("failed,cancelled", server.takeRequest().requestUrl!!.queryParameter("status"))
+    }
+
+    @Test
+    fun liveResultsFollowTheQuery() = runBlocking {
+        server.enqueue(page(emptyList(), total = 0))
+        repo.setQuery(HistoryQuery(HistoryFilter.Completed, "sever"))
+        val running = fixture("job-failed.json").copy(id = "live", status = JobStatus.DOWNLOADING, finishedAt = null, showName = "Severance")
+        store.apply(WsEvent.JobAdded(running))
+        store.apply(WsEvent.JobUpdated(running.copy(status = JobStatus.FAILED, finishedAt = 9_000_000L)))
+        assertTrue("a failed job is not shown under Completed", idsOf().isEmpty())
+        val other = running.copy(id = "other", showName = "Other Show")
+        store.apply(WsEvent.JobAdded(other))
+        store.apply(WsEvent.JobUpdated(other.copy(status = JobStatus.COMPLETED, finishedAt = 9_100_000L)))
+        assertTrue("a non-matching title is not shown", idsOf().isEmpty())
+        val match = running.copy(id = "match")
+        store.apply(WsEvent.JobAdded(match))
+        store.apply(WsEvent.JobUpdated(match.copy(status = JobStatus.COMPLETED, finishedAt = 9_200_000L)))
+        assertEquals(listOf("match"), idsOf())
+    }
+
+    @Test
+    fun anUnchangedQueryDoesNotReload() = runBlocking {
+        server.enqueue(page(jobs(1), total = 1))
+        repo.refresh()
+        assertNull(repo.setQuery(HistoryQuery()))
+        assertEquals(1, server.requestCount)
+    }
+
     private suspend fun withTimeoutPoll(condition: () -> Boolean) {
         val deadline = System.nanoTime() + 3_000_000_000L
         while (!condition() && System.nanoTime() < deadline) kotlinx.coroutines.delay(10)

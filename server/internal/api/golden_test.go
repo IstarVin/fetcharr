@@ -64,7 +64,7 @@ func TestGoldenInfo(t *testing.T) {
 	}
 	r := e.want(e.request("GET", "/api/info", nil), 200)
 	got := r.Obj(t)
-	assertShape(t, "info", fixture(t, "info.json"), got, nil)
+	assertShape(t, "info", fixture(t, "info.json"), got, map[string]bool{"download_window": true})
 	if got["ytdlp_version"] != "2099.01.01" {
 		t.Errorf("ytdlp_version = %v, want the fake binary's version", got["ytdlp_version"])
 	}

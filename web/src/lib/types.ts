@@ -61,7 +61,20 @@ export interface Info {
   settings_supported?: boolean
   setup_required?: boolean
   source_replacement_supported?: boolean
+  queue_priority_supported?: boolean
+  history_search_supported?: boolean
+  notifications_supported?: boolean
+  /** Daily window in which new downloads start; null or absent = any time. */
+  download_window?: DownloadWindow | null
   categories: Category[]
+}
+
+export interface DownloadWindow {
+  start: string
+  end: string
+  open: boolean
+  /** When the window opens next; null while it is open. */
+  opens_at: string | null
 }
 
 export interface JobList {
@@ -156,13 +169,39 @@ export interface SettingsMediaServer {
   credential?: string
 }
 
+export type NotificationType = 'ntfy' | 'webhook'
+
+export interface SettingsNotification {
+  id: string
+  type: NotificationType
+  url: string
+  on_completed: boolean
+  on_failed: boolean
+  has_credential: boolean
+  /** Write-only: omit to keep the saved token, '' removes it. */
+  credential?: string
+}
+
+export interface SettingsDownloads {
+  concurrency: number
+  merge_format: string
+  min_free_space: number
+  // Absent on older servers; sent back only when the server returned them.
+  rate_limit?: number
+  window_start?: string
+  window_end?: string
+  auto_retries?: number
+}
+
 export interface ServerSettings {
   revision: number
-  downloads: { concurrency: number; merge_format: string; min_free_space: number }
+  downloads: SettingsDownloads
   history: { retention_days: number }
   ytdlp: { auto_update: boolean }
   categories: SettingsCategory[]
   media_servers: SettingsMediaServer[]
+  /** Absent on servers without push notifications. */
+  notifications?: SettingsNotification[]
 }
 
 export type WsMessage =

@@ -21,6 +21,7 @@ import (
 const (
 	DefaultPollInterval     = 5 * time.Second
 	DefaultProgressInterval = 500 * time.Millisecond
+	DefaultAutoRetryDelay   = 30 * time.Second
 )
 
 // Stop causes, carried by the worker contexts (context.Cause).
@@ -59,8 +60,13 @@ type Options struct {
 	// FreeBytes returns the bytes available on the filesystem holding path
 	// (default syscall.Statfs). Tests inject it.
 	FreeBytes func(path string) (uint64, error)
-	// Now is the clock (default time.Now).
+	// Now is the clock (default time.Now). The download window is read in
+	// its location.
 	Now func() time.Time
+	// AutoRetryDelay is the wait before the first automatic retry of a
+	// failed yt-dlp run; later retries wait proportionally longer (default
+	// DefaultAutoRetryDelay).
+	AutoRetryDelay time.Duration
 }
 
 // entry is one busy job id: a worker, or the placeholder of a work directory
@@ -91,6 +97,7 @@ type Runner struct {
 	killGrace       time.Duration
 	freeBytes       func(string) (uint64, error)
 	now             func() time.Time
+	retryDelay      time.Duration
 
 	wake      chan struct{}
 	quit      chan struct{} // closed by Shutdown
@@ -130,6 +137,7 @@ func New(o Options) *Runner {
 		killGrace:       o.KillGrace,
 		freeBytes:       o.FreeBytes,
 		now:             o.Now,
+		retryDelay:      o.AutoRetryDelay,
 		wake:            make(chan struct{}, 1),
 		quit:            make(chan struct{}),
 		loopDone:        make(chan struct{}),
@@ -172,6 +180,9 @@ func New(o Options) *Runner {
 	}
 	if r.now == nil {
 		r.now = time.Now
+	}
+	if r.retryDelay <= 0 {
+		r.retryDelay = DefaultAutoRetryDelay
 	}
 	return r
 }
@@ -392,8 +403,12 @@ const (
 )
 
 // fill starts workers for pending jobs, oldest queued_at first, while slots
-// are free.
+// are free and the download window is open. Running jobs continue past the
+// end of the window; the safety poll starts queued ones when it reopens.
 func (r *Runner) fill() {
+	if !r.cfg.Current().Downloads.WindowOpen(r.now()) {
+		return
+	}
 	r.mu.Lock()
 	free := r.maxWorkers() - r.workers
 	limit := free + len(r.busy)

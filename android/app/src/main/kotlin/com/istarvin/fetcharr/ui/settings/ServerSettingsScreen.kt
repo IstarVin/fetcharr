@@ -75,7 +75,20 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material.icons.outlined.Replay
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import com.istarvin.fetcharr.R
+import com.istarvin.fetcharr.data.network.dto.NotificationSettingsDto
 import com.istarvin.fetcharr.ui.LocalSnackbarHostState
 import com.istarvin.fetcharr.ui.common.AppCard
 import com.istarvin.fetcharr.ui.common.IconTile
@@ -180,7 +193,7 @@ fun ServerSettingsScreen(onBack: () -> Unit, viewModel: ServerSettingsViewModel 
                     else -> {
                         state.error?.let { ErrorNotice(it) }
                         if (state.fieldErrors.isNotEmpty()) ErrorNotice(stringResource(R.string.server_settings_check_fields))
-                        state.draft?.let { draft -> ServerSettingsForm(state, draft, viewModel::edit) }
+                        state.draft?.let { draft -> ServerSettingsForm(state, draft, viewModel::edit, viewModel::testNotification) }
                     }
                 }
             }
@@ -193,6 +206,7 @@ private fun ServerSettingsForm(
     state: ServerSettingsUiState,
     draft: ServerSettingsDraft,
     edit: ((ServerSettingsDraft) -> ServerSettingsDraft) -> Unit,
+    onTestNotification: (String) -> Unit,
 ) {
     val enabled = !state.saving
     SectionTitle(R.string.server_settings_downloads)
@@ -205,6 +219,25 @@ private fun ServerSettingsForm(
             SettingField(R.string.server_settings_free_space, draft.minFreeGb, { value -> edit { it.copy(minFreeGb = value) } },
                 enabled, state.fieldErrors["minFreeGb"], KeyboardType.Decimal, icon = Icons.Outlined.Storage)
             Hint(R.string.server_settings_free_space_hint)
+            if (draft.downloadControls) {
+                SettingField(R.string.server_settings_rate, draft.rateMb, { value -> edit { it.copy(rateMb = value) } },
+                    enabled, state.fieldErrors["rateMb"], KeyboardType.Decimal, icon = Icons.Outlined.Speed,
+                    placeholder = R.string.server_settings_rate_unlimited)
+                Text(stringResource(R.string.server_settings_window), style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TimeField(R.string.server_settings_window_start, draft.windowStart, enabled, state.fieldErrors["window"] != null, Modifier.weight(1f)) { value ->
+                        edit { it.copy(windowStart = value) }
+                    }
+                    TimeField(R.string.server_settings_window_end, draft.windowEnd, enabled, state.fieldErrors["window"] != null, Modifier.weight(1f)) { value ->
+                        edit { it.copy(windowEnd = value) }
+                    }
+                }
+                state.fieldErrors["window"]?.let { ErrorNotice(stringResource(it)) }
+                Hint(R.string.server_settings_window_hint)
+                SettingField(R.string.server_settings_retries, draft.autoRetries, { value -> edit { it.copy(autoRetries = value) } },
+                    enabled, state.fieldErrors["autoRetries"], KeyboardType.Number, icon = Icons.Outlined.Replay)
+                Hint(R.string.server_settings_retries_hint)
+            }
         }
     }
 
@@ -261,7 +294,145 @@ private fun ServerSettingsForm(
         }
     }
     AddButton(R.string.server_settings_add_integration, enabled) { edit { it.copy(integrations = it.integrations + IntegrationDraft()) } }
+
+    draft.notifications?.let { notifications ->
+        SectionTitle(R.string.server_settings_notifications)
+        Hint(R.string.server_settings_notifications_hint)
+        if (notifications.isEmpty()) Hint(R.string.server_settings_no_notifications)
+        notifications.forEachIndexed { index, target ->
+            key(target.id) {
+                NotificationEditor(
+                    target, index, state,
+                    change = { value -> edit { d -> d.copy(notifications = d.notifications?.map { if (it.id == target.id) value else it }) } },
+                    remove = { edit { d -> d.copy(notifications = d.notifications?.filterNot { it.id == target.id }) } },
+                    onTest = { onTestNotification(target.id) },
+                )
+            }
+        }
+        AddButton(R.string.server_settings_add_notification, enabled) { edit { it.copy(notifications = it.notifications.orEmpty() + NotificationDraft()) } }
+    }
     Spacer(Modifier.height(16.dp))
+}
+
+@Composable
+private fun NotificationEditor(
+    n: NotificationDraft,
+    index: Int,
+    state: ServerSettingsUiState,
+    change: (NotificationDraft) -> Unit,
+    remove: () -> Unit,
+    onTest: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(!n.existing) }
+    val hasErrors = state.fieldErrors.keys.any { it.startsWith("notification.$index.") }
+    val enabled = !state.saving
+    AppCard(onClick = { expanded = !expanded }) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconTile(
+                    Icons.Outlined.NotificationsActive,
+                    container = MaterialTheme.colorScheme.secondaryContainer,
+                    content = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(stringResource(if (n.type == NotificationSettingsDto.TYPE_WEBHOOK) R.string.server_settings_webhook else R.string.server_settings_ntfy), style = MaterialTheme.typography.titleMedium)
+                    if (n.url.isNotBlank()) {
+                        Text(n.url, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                ExpandIndicator(expanded || hasErrors)
+            }
+            if (expanded || hasErrors) {
+                ChoiceField(R.string.server_settings_notification_type, n.type, listOf(NotificationSettingsDto.TYPE_NTFY to R.string.server_settings_ntfy,
+                    NotificationSettingsDto.TYPE_WEBHOOK to R.string.server_settings_webhook), enabled && !n.existing) { change(n.copy(type = it)) }
+                SettingField(if (n.type == NotificationSettingsDto.TYPE_WEBHOOK) R.string.server_settings_webhook_url else R.string.server_settings_ntfy_url,
+                    n.url, { change(n.copy(url = it)) }, enabled, state.fieldErrors["notification.$index.url"], KeyboardType.Uri)
+                SettingField(R.string.server_settings_notification_token, n.credential, { change(n.copy(credential = it)) },
+                    enabled && !n.removeCredential, keyboard = KeyboardType.Password, secret = true)
+                if (n.hasCredential) {
+                    Hint(R.string.server_settings_notification_token_saved)
+                    SwitchRow(R.string.server_settings_notification_token_remove, n.removeCredential, enabled) { change(n.copy(removeCredential = it)) }
+                }
+                SwitchRow(R.string.server_settings_notify_completed, n.onCompleted, enabled) { change(n.copy(onCompleted = it)) }
+                SwitchRow(R.string.server_settings_notify_failed, n.onFailed, enabled) { change(n.copy(onFailed = it)) }
+                OutlinedButton(onClick = onTest, enabled = state.canTest(n.id), modifier = Modifier.heightIn(min = 48.dp)) {
+                    if (n.id in state.testing) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Outlined.NotificationsActive, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
+                    Text(stringResource(R.string.server_settings_notification_test), Modifier.padding(start = 8.dp))
+                }
+                val result = state.testResults[n.id]
+                when {
+                    !state.canTest(n.id) && n.id !in state.testing -> Hint(R.string.server_settings_notification_test_save_first)
+                    result != null -> Text(
+                        result.error ?: stringResource(R.string.server_settings_notification_test_sent),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (result.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
+                RemoveButton(R.string.server_settings_remove_notification, enabled, remove)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SwitchRow(label: Int, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp)
+            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onChange)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(stringResource(label), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
+    }
+}
+
+/** An "HH:MM" field edited with the Material time picker; the clear button empties it. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimeField(label: Int, value: String, enabled: Boolean, isError: Boolean, modifier: Modifier = Modifier, onChange: (String) -> Unit) {
+    var picking by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Box(modifier) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            readOnly = true,
+            enabled = enabled,
+            isError = isError,
+            label = { Text(stringResource(label)) },
+            placeholder = { Text(stringResource(R.string.server_settings_window_any)) },
+            singleLine = true,
+            trailingIcon = if (value.isNotEmpty() && enabled) {
+                { IconButton(onClick = { onChange("") }) { Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.server_settings_window_clear)) } }
+            } else {
+                null
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        // The read-only field does not take clicks; this layer opens the picker, leaving room for the clear button.
+        Box(Modifier.matchParentSize().padding(end = if (value.isNotEmpty()) 48.dp else 0.dp).clickable(enabled = enabled) { picking = true })
+    }
+    if (picking) {
+        val (h, m) = value.split(':').let { (it.getOrNull(0)?.toIntOrNull() ?: 0) to (it.getOrNull(1)?.toIntOrNull() ?: 0) }
+        val pickerState = rememberTimePickerState(initialHour = h, initialMinute = m, is24Hour = android.text.format.DateFormat.is24HourFormat(context))
+        AlertDialog(
+            onDismissRequest = { picking = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    onChange("%02d:%02d".format(java.util.Locale.ROOT, pickerState.hour, pickerState.minute))
+                    picking = false
+                }) { Text(stringResource(android.R.string.ok)) }
+            },
+            dismissButton = { TextButton(onClick = { picking = false }) { Text(stringResource(android.R.string.cancel)) } },
+            text = { TimePicker(pickerState) },
+        )
+    }
 }
 
 @Composable
@@ -391,10 +562,11 @@ private fun IntegrationEditor(s: IntegrationDraft, index: Int, state: ServerSett
 @Composable
 private fun SettingField(
     label: Int, value: String, onChange: (String) -> Unit, enabled: Boolean, error: Int? = null,
-    keyboard: KeyboardType = KeyboardType.Text, secret: Boolean = false, icon: ImageVector? = null,
+    keyboard: KeyboardType = KeyboardType.Text, secret: Boolean = false, icon: ImageVector? = null, placeholder: Int? = null,
 ) {
     OutlinedTextField(
         value = value, onValueChange = onChange, label = { Text(stringResource(label)) }, modifier = Modifier.fillMaxWidth(),
+        placeholder = placeholder?.let { { Text(stringResource(it)) } },
         leadingIcon = icon?.let { { Icon(it, contentDescription = null) } },
         enabled = enabled, singleLine = true, isError = error != null,
         supportingText = error?.let { { Text(stringResource(it)) } },

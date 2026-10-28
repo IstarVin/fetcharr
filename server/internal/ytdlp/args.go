@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -27,6 +28,7 @@ type Spec struct {
 	Headers     map[string]string
 	WorkDir     string   // output goes to <WorkDir>/media.%(ext)s
 	MergeFormat string   // container used when separate streams are merged
+	RateLimit   int64    // bytes per second; 0 = unlimited
 	ExtraArgs   []string // downloads.extra_args, appended before "--"
 }
 
@@ -40,6 +42,7 @@ type Spec struct {
 //	--replace-in-metadata video:ext (?i)^matroska$ mkv
 //	-o <work_dir>/media.%(ext)s
 //	[--add-header "Name: value" ...]   (sorted by header name)
+//	[--limit-rate <bytes>]
 //	<extra_args...> -- <url>
 //
 // "--progress" is required in addition to "--newline": --print implies
@@ -49,6 +52,8 @@ type Spec struct {
 // The video stage runs after format selection and before filename creation;
 // the default pre_process stage can be overwritten by the selected format.
 // This preserves yt-dlp's extension safety checks for all other extensions.
+// yt-dlp passes --limit-rate on to aria2c as --max-overall-download-limit, so
+// one flag covers both downloaders; extra_args come later and can override it.
 func BuildArgs(s Spec) []string {
 	args := []string{
 		"--newline", "--progress", "--no-playlist",
@@ -67,6 +72,9 @@ func BuildArgs(s Spec) []string {
 	sort.Strings(names)
 	for _, k := range names {
 		args = append(args, "--add-header", k+": "+s.Headers[k])
+	}
+	if s.RateLimit > 0 {
+		args = append(args, "--limit-rate", strconv.FormatInt(s.RateLimit, 10))
 	}
 	args = append(args, s.ExtraArgs...)
 	return append(args, "--", s.URL)

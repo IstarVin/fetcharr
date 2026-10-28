@@ -179,7 +179,7 @@
     <string name="settings_default_none">None</string>
     <string name="settings_defaults_hint">Test the connection to load your server\'s categories.</string>
     <string name="settings_group_about">About</string>
-    <string name="settings_server_settings_summary">Downloads, categories and media servers</string>
+    <string name="settings_server_settings_summary">Downloads, categories, media servers and notifications</string>
     <string name="a11y_loading">Loading</string>
     <string name="a11y_sending">Sending download request</string>
     <string name="settings_group_ytdlp">yt-dlp</string>
@@ -293,4 +293,68 @@
     <string name="source_leave_body">The server may still replace the source and start the download. Check the queue before trying again.</string>
     <string name="source_leave">Leave</string>
     <string name="source_stay">Stay</string>
+
+    <!-- Launcher shortcuts and Quick Settings tile -->
+    <string name="shortcut_add_short">Add</string>
+    <string name="shortcut_add_long">Add download</string>
+    <string name="shortcut_history_short">History</string>
+    <string name="shortcut_history_long">Download history</string>
+    <string name="tile_add_label">Add download</string>
+
+    <!-- Appearance and pairing -->
+    <string name="settings_group_appearance">Appearance</string>
+    <string name="settings_dynamic_color">Use wallpaper colors</string>
+    <string name="settings_dynamic_color_summary">Match your phone\'s Material You colors</string>
+    <string name="pairing_title">Connect to this server?</string>
+    <string name="pairing_with_token">The code includes an API token.</string>
+    <string name="pairing_without_token">The code has no API token.</string>
+    <string name="pairing_replaces">This replaces the server you saved before.</string>
+    <string name="pairing_connect">Connect</string>
+    <string name="pairing_cancel">Cancel</string>
+
+    <!-- Queue priority and download window -->
+    <string name="queue_download_next">Download next</string>
+    <string name="queue_window_hint">Starts at %1$s</string>
+
+    <!-- History search -->
+    <string name="history_search_hint">Search titles and shows</string>
+    <string name="history_search_clear">Clear search</string>
+    <string name="history_search_empty">No downloads match “%1$s”</string>
+
+    <!-- Server settings: download controls -->
+    <string name="server_settings_rate">Speed limit per download (MB/s)</string>
+    <string name="server_settings_rate_unlimited">Unlimited</string>
+    <string name="server_settings_rate_invalid">Enter a speed in MB/s with at most two decimals, or leave it blank.</string>
+    <string name="server_settings_window">Start downloads only between</string>
+    <string name="server_settings_window_start">From</string>
+    <string name="server_settings_window_end">Until</string>
+    <string name="server_settings_window_any">Any time</string>
+    <string name="server_settings_window_clear">Clear time</string>
+    <string name="server_settings_window_invalid">Set both times, or clear both to allow any time.</string>
+    <string name="server_settings_window_same">Start and end must differ.</string>
+    <string name="server_settings_window_hint">Uses the server\'s clock. Downloads that are running when the window ends finish normally.</string>
+    <string name="server_settings_retries">Automatic retries</string>
+    <string name="server_settings_retries_invalid">Enter a whole number from 0 to 5.</string>
+    <string name="server_settings_retries_hint">A failed download is retried after a short pause, resuming where it stopped.</string>
+
+    <!-- Server settings: notifications -->
+    <string name="server_settings_notifications">Notifications</string>
+    <string name="server_settings_notifications_hint">The server tells these targets when downloads finish, even when no app is open. A season is announced once, when all its episodes are done.</string>
+    <string name="server_settings_no_notifications">Add an ntfy topic or a webhook to get notified on any device.</string>
+    <string name="server_settings_add_notification">Add notification target</string>
+    <string name="server_settings_remove_notification">Remove target</string>
+    <string name="server_settings_ntfy">ntfy</string>
+    <string name="server_settings_webhook">Webhook</string>
+    <string name="server_settings_notification_type">Notification type</string>
+    <string name="server_settings_ntfy_url">Topic URL, e.g. https://ntfy.sh/my-topic</string>
+    <string name="server_settings_webhook_url">Webhook URL</string>
+    <string name="server_settings_notification_token">Access token (optional)</string>
+    <string name="server_settings_notification_token_saved">A token is saved on the server. Leave blank to keep it.</string>
+    <string name="server_settings_notification_token_remove">Remove saved token</string>
+    <string name="server_settings_notify_completed">Completed downloads</string>
+    <string name="server_settings_notify_failed">Failed downloads</string>
+    <string name="server_settings_notification_test">Send test</string>
+    <string name="server_settings_notification_test_sent">Test notification sent.</string>
+    <string name="server_settings_notification_test_save_first">Save to send a test to this target.</string>
+    <string name="server_settings_notification_url_invalid">Enter a full http:// or https:// address.</string>
 </resources>

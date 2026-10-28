@@ -77,7 +77,9 @@ Any other action on a job returns `409 invalid_state`.
 
 ### 2.5 Queue order
 
-Pending jobs are dispatched in ascending `queued_at` order. `queued_at` is set when a job is created, resumed or retried, so those jobs go to the back of the queue. A batch's episodes are queued in ascending episode order.
+Pending jobs are dispatched in ascending `queued_at` order. `queued_at` is set when a job is created, resumed or retried, so those jobs go to the back of the queue. A batch's episodes are queued in ascending episode order. **Prioritize** (`POST /api/jobs/{id}/prioritize`, or `/api/batches/{batch_id}/prioritize` for every pending episode of a batch) moves pending jobs to the front by giving them a `queued_at` just before the oldest pending one.
+
+When a daily download window is configured (`downloads.window_start`/`window_end`), the dispatcher starts new jobs only inside it; jobs already running when it closes finish normally.
 
 ---
 
@@ -101,6 +103,10 @@ downloads:
   concurrency: 2            # simultaneous downloads (≥1)
   merge_format: mp4         # container used when yt-dlp merges separate video/audio streams
   min_free_space: 5GB       # disk-space guard; 0 disables
+  rate_limit: 0             # speed limit per download (bytes/s, e.g. 5MB); 0 = unlimited
+  window_start: ""          # "HH:MM", server local time: start new downloads only in this daily window
+  window_end: ""            # both empty = any time; end before start spans midnight
+  auto_retries: 1           # retry a failed yt-dlp run up to N times (0-5)
   pixeldrain_api_key: ""    # HTTP Basic auth for pixeldrain.com links; empty = anonymous
   extra_args: []            # extra yt-dlp arguments appended to every run
 
@@ -175,11 +181,14 @@ yt-dlp runs as a subprocess in its own process group. It writes into the job's w
 - print the final file path after post-processing (`--print after_move:filepath`). If nothing is printed, the server falls back to the largest media file in the work directory;
 - pass each request header with `--add-header`;
 - keep partial files (no `--no-part`), so a resume continues where the download stopped;
+- pass `--limit-rate <rate_limit>` when a speed limit is set (yt-dlp forwards it to aria2c as `--max-overall-download-limit`);
 - append `extra_args`, then `--`, then the URL. The `--` stops a URL from being read as an option.
 
 **Progress.** aria2c transfers currently emit structured progress only at completion, so live percent, speed and ETA can remain unavailable during those transfers. Native HLS/DASH downloads retain live progress. Parse `downloaded_bytes`, `total_bytes` (or `total_bytes_estimate`), `speed` and `eta`. Store them on the job and broadcast at most one update per second per job.
 
-**Failure.** If yt-dlp exits non-zero, the job fails with `download_failed`. `error_message` holds the last `ERROR:` lines from stderr, with header values redacted.
+**Automatic retry.** If yt-dlp exits non-zero and `auto_retries` is above zero, the worker waits (30 s, then 60 s, …), keeping the job `downloading` and its partial files, and runs yt-dlp again. A pause or cancel during the wait ends it as usual.
+
+**Failure.** If yt-dlp still exits non-zero, the job fails with `download_failed`. `error_message` holds the last `ERROR:` lines from stderr, with header values redacted.
 
 ### 4.3 Processing (`processing`)
 
@@ -207,6 +216,15 @@ When a job completes, queue a refresh for its folder (the show folder for `tv`, 
 - **Plex.** Find the library section whose location contains the folder, then call `GET {url}/library/sections/{id}/refresh?path=<folder>` with `X-Plex-Token`.
 
 Failures are logged and otherwise ignored.
+
+### 4.5a Push notifications
+
+`notifications` targets (managed through the settings API) receive a message when a job reaches `completed` or `failed`, filtered by each target's `on_completed`/`on_failed`. A batch is announced once, as a summary ("Severance S02 — 8 downloaded, 1 failed"), when none of its episodes is active; an episode retried after that gets its own message. Cancelled jobs are never announced.
+
+- **ntfy.** `POST {url}` with the message as the body and `Title`/`Tags` headers.
+- **webhook.** `POST {url}` with JSON `{"event", "title", "message", "text", "content", "job"}`. `text` and `content` hold the one-line message so Slack- and Discord-style incoming webhooks can show it; `job` omits the source URL and headers.
+
+An optional token is sent as `Authorization: Bearer`. Delivery is best effort, with a 15 s timeout; failures are logged without the URL or token.
 
 ### 4.6 History pruning
 
@@ -363,7 +381,9 @@ Category IDs are fixed in Android after creation. Destination paths must be abso
 
 Live updates never kill existing downloads. Decreased concurrency takes effect as workers finish; increased concurrency wakes dispatch. Download arguments and free-space checks use a snapshot for each new attempt. Retention changes wake the pruner and remove records only. Auto-update can be toggled only for the managed binary; enabling it schedules an immediate safe check. Pending integration refreshes use the current connections at dispatch time. No filesystem browser or folder-creation API is provided.
 
-The optional `/api/info` capability fields default to false on older servers. `settings_supported` indicates this API exists; `setup_required` means the category list is empty. Existing job responses and WebSocket events retain their shape.
+The optional `/api/info` capability fields default to false on older servers. `settings_supported` indicates this API exists; `setup_required` means the category list is empty. `queue_priority_supported`, `history_search_supported` and `notifications_supported` advertise the prioritize endpoints, `q`, and notification targets. `download_window` is `{start, end, open, opens_at}` while a window is configured (`opens_at` is null while it is open), else null.
+
+The settings document also has `downloads.rate_limit` (bytes/s), `window_start`/`window_end` ("HH:MM" or both ""), `auto_retries` (0–5) and a `notifications` array of `{id, type: "ntfy"|"webhook", url, on_completed, on_failed, has_credential}` with an optional write-only `credential` (omit to keep, `""` to remove). A PUT that omits these fields, from an older client, keeps their saved values. Existing job responses and WebSocket events retain their shape.
 
 #### `POST /api/jobs`
 Creates one job. Returns `201` with the Job object.
@@ -386,7 +406,7 @@ Validation:
 - The layout's required fields (§2.1) must be present and non-empty after sanitizing.
 - `season` must be ≥0 and `episode` ≥0 when given. `year` must be a 4-digit number when given.
 - Each subtitle `url` must be `http` or `https`.
-- If the same `url` is already active, return `409 duplicate`.
+- If the same `url` is already active, or another active job will write the same library file (same folder and name, ignoring case and extension), return `409 duplicate`. This also applies with `overwrite`, and to retries.
 - Unless `overwrite` is `true`, if the target (§5) already has a video file with the same base name (any extension), return `409 already_exists`. The message names the existing file. Resubmit with `"overwrite": true` to replace it; the job then skips the §4.1 existing-file check.
 
 #### `POST /api/jobs/batch`
@@ -432,6 +452,7 @@ Lists jobs, newest `created_at` first.
 | `category` | Category id |
 | `batch_id` | Jobs of one batch |
 | `finished_after` | RFC 3339 time; only jobs with a later `finished_at` |
+| `q` | Case-insensitive substring of the title or show name (max 200 bytes) |
 | `limit` | Default 50, max 500 |
 | `offset` | Default 0 |
 
@@ -455,6 +476,9 @@ Resolve `url` relative to the configured API base (`<server>/api/`), preserving 
 
 #### `GET /api/jobs/{id}/media` · `HEAD /api/jobs/{id}/media`
 Requires the `expires` and `signature` query parameters issued by the playback endpoint; missing, modified or expired links return `401 unauthorized`. No Bearer header is needed by the external player. Streams the completed file directly, with `Content-Type`, `Content-Length`, `Accept-Ranges: bytes`, and standard range responses (`206` / `416`) for seeking. HEAD returns headers only. There is no transcoding. Each request rechecks the job and file, confined to the job's saved original destination using symlink-safe filesystem access. Removing the history record makes its link unavailable, even if the file is kept. Query strings are excluded from request logs.
+
+#### `POST /api/jobs/{id}/prioritize` · `POST /api/batches/{batch_id}/prioritize`
+Moves a pending job (or every pending episode of a batch, in order) to the front of the queue (§2.5). Returns `200` with the Job, or `{ "jobs": [...] }` for a batch. A job that is not pending returns `409 invalid_state`; unknown ids `404`.
 
 #### `POST /api/jobs/{id}/pause` · `/resume` · `/cancel`
 Apply the transition (§2.4). Return `200` with the updated Job.
@@ -504,6 +528,9 @@ Clears history. Deletes every finished job matching `?status=` (default `complet
 
 #### `POST /api/batches/{batch_id}/pause` · `/resume` · `/cancel` · `/retry`
 Applies the action to each job in the batch where the transition is allowed and skips the rest. Returns `200 { "jobs": [ …updated jobs… ] }`, or `404` if the batch doesn't exist.
+
+#### `POST /api/system/notifications/test`
+Body `{"id": "<notification id>"}`. Sends a test message to that saved target and returns `204`. An unknown id returns `404`; a failed delivery returns `400 invalid_request` with the reason.
 
 #### `GET /api/system/ytdlp/check`
 Checks the latest stable yt-dlp release without installing it or interrupting downloads. Returns `200 {"current": "2026.09.01", "latest": "2026.09.30", "update_available": true}`. Returns `409 ytdlp_unmanaged` when `ytdlp.binary` is set. Both versions must be available for a successful response.

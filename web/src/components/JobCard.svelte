@@ -1,12 +1,13 @@
 <script lang="ts">
-  import { jobAction } from '../lib/actions'
-  import { actionsFor, cardFraction, categoryLabel, categoryLayout, heading, percentLabel, secondary, STATUS_LABEL, statParts } from '../lib/format'
+  import { downloadNext, jobAction } from '../lib/actions'
+  import { actionsFor, cardFraction, categoryLabel, categoryLayout, heading, percentLabel, secondary, STATUS_LABEL, statParts, windowHint, windowOpensAt } from '../lib/format'
   import { session } from '../lib/store.svelte'
   import type { Job } from '../lib/types'
   import Icon from './Icon.svelte'
   import ProgressBar from './ProgressBar.svelte'
 
-  let { job, nested = false }: { job: Job; nested?: boolean } = $props()
+  // first: the job is already next in line, so "Download next" is hidden.
+  let { job, nested = false, first = false }: { job: Job; nested?: boolean; first?: boolean } = $props()
 
   const title = $derived(heading(job))
   const sub = $derived(secondary(job))
@@ -14,11 +15,13 @@
   const stats = $derived(statParts(job))
   const layout = $derived(categoryLayout(session.categories, job.category))
   let busy = $state(false)
+  const canPrioritize = $derived(job.status === 'pending' && !first && session.info?.queue_priority_supported === true)
+  const opensAt = $derived(job.status === 'pending' ? windowOpensAt(session.info?.download_window) : null)
 
-  async function run(action: 'pause' | 'resume' | 'cancel') {
+  async function run(action: 'pause' | 'resume' | 'cancel' | 'next') {
     busy = true
     try {
-      await jobAction(job, action)
+      await (action === 'next' ? downloadNext({ job }) : jobAction(job, action))
     } finally {
       busy = false
     }
@@ -56,9 +59,14 @@
       {#if stats?.speed}<span>{stats.speed}</span>{/if}
       {#if stats?.eta}<span>{stats.eta}</span>{/if}
       {#if stats?.size}<span>{stats.size}</span>{/if}
-      {#if job.status === 'pending'}<span class="muted">Waiting for a free slot</span>{/if}
+      {#if job.status === 'pending'}<span class="muted">{opensAt ? windowHint(opensAt) : 'Waiting for a free slot'}</span>{/if}
     </p>
     <div class="row-actions">
+      {#if canPrioritize}
+        <button class="btn small" disabled={busy} onclick={() => run('next')} aria-label="Download {title} next">
+          <Icon name="next" size={16} />Download next
+        </button>
+      {/if}
       {#each actionsFor(job.status) as a (a)}
         <button class="btn small" class:danger={a === 'cancel'} disabled={busy} onclick={() => run(a)} aria-label="{ACTION[a].label} {title}">
           <Icon name={ACTION[a].icon} size={16} />{ACTION[a].label}

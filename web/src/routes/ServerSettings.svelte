@@ -4,7 +4,7 @@
   import { api, ApiError, errorMessage } from '../lib/api'
   import { LAYOUT_LABEL } from '../lib/format'
   import { href, router } from '../lib/router.svelte'
-  import { fromDocument, newCategory, newIntegration, newMapping, toDocument, validate, type SettingsDraft } from '../lib/serverSettings'
+  import { fromDocument, newCategory, newIntegration, newMapping, newNotification, toDocument, validate, type NotificationDraft, type SettingsDraft } from '../lib/serverSettings'
   import { confirm, readPref, session, toasts, writePref } from '../lib/store.svelte'
   import type { Layout } from '../lib/types'
 
@@ -89,9 +89,26 @@
   })
 
   const LAYOUTS: Layout[] = ['movie', 'tv', 'flat']
+
+  // Test messages go to the saved target, so edits must be saved first.
+  let testing = $state<string | null>(null)
+  let testResult = $state<Record<string, { ok: boolean; text: string }>>({})
+  const savedUnchanged = (n: NotificationDraft) =>
+    n.existing && JSON.stringify(n) === JSON.stringify(baseline?.notifications?.find((b) => b.id === n.id))
+
+  async function sendTest(n: NotificationDraft) {
+    testing = n.id
+    try {
+      await api.testNotification(n.id)
+      testResult[n.id] = { ok: true, text: 'Test notification sent.' }
+    } catch (e) {
+      testResult[n.id] = { ok: false, text: errorMessage(e) }
+    } finally {
+      testing = null
+    }
+  }
 </script>
 
-<svelte:head><title>Server settings · Fetcharr</title></svelte:head>
 
 <div class="page-head">
   <div class="title">
@@ -157,6 +174,33 @@
         </label>
       </div>
       <p class="hint">0 disables the free-space check. New download attempts use the saved settings; running downloads continue.</p>
+      {#if draft.downloadControls}
+        <div class="three">
+          <label class="field">
+            <span>Speed limit per download (MB/s)</span>
+            <input inputmode="decimal" bind:value={draft.rateMb} placeholder="Unlimited" aria-invalid={err('rateMb') ? 'true' : undefined} />
+            {#if err('rateMb')}<span class="hint error-text">{err('rateMb')}</span>{/if}
+          </label>
+          <div class="field">
+            <span id="window-label">Start downloads only between</span>
+            <div class="window" role="group" aria-labelledby="window-label">
+              <input type="time" bind:value={draft.windowStart} aria-label="Window start" aria-invalid={err('window') ? 'true' : undefined} />
+              <span aria-hidden="true">–</span>
+              <input type="time" bind:value={draft.windowEnd} aria-label="Window end" aria-invalid={err('window') ? 'true' : undefined} />
+            </div>
+            {#if err('window')}<span class="hint error-text">{err('window')}</span>{/if}
+          </div>
+          <label class="field">
+            <span>Automatic retries</span>
+            <input inputmode="numeric" bind:value={draft.autoRetries} aria-invalid={err('autoRetries') ? 'true' : undefined} />
+            {#if err('autoRetries')}<span class="hint error-text">{err('autoRetries')}</span>{/if}
+          </label>
+        </div>
+        <p class="hint">
+          Leave the window blank to start downloads any time. It uses the server's clock; downloads that are running when it ends finish normally. A failed download
+          is retried after a short pause, resuming where it stopped.
+        </p>
+      {/if}
     </fieldset>
 
     <fieldset class="card panel" disabled={saving}>
@@ -253,6 +297,59 @@
       {/each}
       <div><button type="button" class="btn small outlined" onclick={() => draft!.integrations.push(newIntegration())}><Icon name="add" size={16} />Add media server</button></div>
     </fieldset>
+
+    {#if draft.notifications}
+      <fieldset class="card panel" disabled={saving}>
+        <legend><h2>Notifications</h2></legend>
+        <p class="hint">
+          The server tells these targets when downloads finish, even when no app is open. A season is announced once, when all its episodes are done. Webhooks
+          receive JSON with <code>text</code> and <code>content</code> fields.
+        </p>
+        {#if draft.notifications.length === 0}<p class="muted">Add an ntfy topic or a webhook to get notified on your devices.</p>{/if}
+        {#each draft.notifications as n, i (n.id)}
+          <div class="item">
+            <div class="item-grid">
+              <div class="field">
+                <span>Type</span>
+                <div class="chips" role="radiogroup" aria-label="Notification type">
+                  {#each [['ntfy', 'ntfy'], ['webhook', 'Webhook']] as [t, label] (t)}
+                    <button type="button" class="chip" role="radio" aria-checked={n.type === t} disabled={n.existing} onclick={() => (n.type = t as 'ntfy' | 'webhook')}>{label}</button>
+                  {/each}
+                </div>
+              </div>
+              <label class="field">
+                <span>{n.type === 'ntfy' ? 'Topic URL' : 'Webhook URL'}</span>
+                <input bind:value={n.url} placeholder={n.type === 'ntfy' ? 'https://ntfy.sh/my-fetcharr' : 'https://…'} spellcheck="false" aria-invalid={err(`notification.${i}.url`) ? 'true' : undefined} />
+                {#if err(`notification.${i}.url`)}<span class="hint error-text">{err(`notification.${i}.url`)}</span>{/if}
+              </label>
+              <label class="field">
+                <span>Access token (optional)</span>
+                <input type="password" bind:value={n.credential} autocomplete="off" disabled={n.removeCredential} placeholder={n.hasCredential && !n.removeCredential ? '•••••••• (saved)' : ''} />
+                <span class="hint">Sent as a Bearer token.{n.hasCredential ? ' Leave blank to keep the saved one.' : ''}</span>
+              </label>
+            </div>
+            <div class="toggles">
+              <label class="check"><input type="checkbox" bind:checked={n.onCompleted} /> Completed downloads</label>
+              <label class="check"><input type="checkbox" bind:checked={n.onFailed} /> Failed downloads</label>
+              {#if n.hasCredential}<label class="check"><input type="checkbox" bind:checked={n.removeCredential} /> Remove saved token</label>{/if}
+              <span class="grow"></span>
+              <button type="button" class="btn small" disabled={!savedUnchanged(n) || testing === n.id} onclick={() => sendTest(n)}>
+                <Icon name="bell" size={16} />{testing === n.id ? 'Sending…' : 'Send test'}
+              </button>
+            </div>
+            {#if !savedUnchanged(n)}
+              <p class="hint">Save to send a test to this target.</p>
+            {:else if testResult[n.id]}
+              <p class="hint" class:error-text={!testResult[n.id]!.ok} role="status">{testResult[n.id]!.text}</p>
+            {/if}
+            <button type="button" class="icon-btn" aria-label="Remove notification target" title="Remove notification target" onclick={() => (draft!.notifications = draft!.notifications!.filter((x) => x.id !== n.id))}>
+              <Icon name="delete" size={20} />
+            </button>
+          </div>
+        {/each}
+        <div><button type="button" class="btn small outlined" onclick={() => draft!.notifications!.push(newNotification())}><Icon name="add" size={16} />Add notification target</button></div>
+      </fieldset>
+    {/if}
 
     <div class="savebar">
       {#if error}
@@ -352,6 +449,24 @@
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
     align-items: center;
     gap: 8px;
+  }
+
+  .window {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .window input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .toggles {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 20px;
   }
 
   .savebar {

@@ -50,6 +50,8 @@ Entry points:
 - **`fetcharr://` intent** opens the Incoming sheet (§4.1).
 - **Share sheet**: `ACTION_SEND` with `text/plain` opens the Add screen with the first `http(s)` URL in the text filled in.
 - **Notification tap** opens the Queue (from a progress notification) or History (from a result notification).
+- **Launcher shortcuts** (long-press the icon): Add download and History. A **Quick Settings tile** opens Add download.
+- **`fetcharr://connect?url=…&token=…`** (the web UI's QR code) opens Settings and asks before saving that server.
 
 The activity uses `singleTask`, so it receives intents in both `onCreate` and `onNewIntent`.
 
@@ -167,6 +169,8 @@ Shows every active job: `pending`, `downloading`, `processing` and `paused`.
 - **Batch grouping:** jobs with the same `batch_id` are shown as one expandable group card per section, titled "Severance — Season 2". The collapsed card shows the episode count, combined progress, and a menu with Pause all, Resume all and Cancel all, which call the batch endpoints. Expanded, it lists the episode cards.
 - **Pull to refresh** reconnects the WebSocket and reloads categories.
 - **FAB** opens the Add screen.
+- **Download next** (overflow menu) moves a queued job, or a queued batch, to the front, on servers with `queue_priority_supported`. The first queued item does not offer it.
+- While the server's download window is closed, the Queued heading and cards read "Starts at 11:00 PM".
 - **Empty state:** "Nothing downloading".
 - The connection banner (§3.3) is shown when the app isn't connected.
 
@@ -196,7 +200,7 @@ Cancel asks for confirmation.
 
 ### 5.4 History
 
-Shows `completed`, `failed` and `cancelled` jobs, newest first, grouped by date (Today, Yesterday, then the date). It loads more pages as the user scrolls.
+Shows `completed`, `failed` and `cancelled` jobs, newest first, grouped by date (Today, Yesterday, then the date). It loads more pages as the user scrolls. The All / Completed / Failed chips and the search box (titles and show names, shown when the server has `history_search_supported`) are applied by the server, so every page matches.
 
 | Status | Shows | Actions |
 | --- | --- | --- |
@@ -230,9 +234,13 @@ Defaults
 yt-dlp
   Version                 2026.09.30
   Update now              (hidden when the server's yt-dlp is unmanaged)
+Appearance (Android 12+)
+  Use wallpaper colors    Material You dynamic color, on by default
 About
   App version · Server version · Source code link
 ```
+
+The API token lives in the settings DataStore, which is excluded from cloud backups (it still moves with a direct device-to-device transfer).
 
 - **Test connection** calls `GET /api/info` and reports one of: connected (with version and latency), "Can't reach server", "Wrong API token" (`401`), or "Not a Fetcharr server" (the response doesn't parse).
 - A URL entered without a scheme gets `http://` added. A trailing slash is removed.
@@ -254,7 +262,7 @@ responsive and asks before leaving during submission, explaining that the server
 may still apply the request. Success closes the editor, removes the History row
 and shows “Added to queue”; ordinary Retry remains available with existing behavior.
 
-**Server settings** opens a separate editor for download concurrency, merge format, minimum free space (decimal GB), history retention, managed yt-dlp auto-update, categories, and Jellyfin/Plex connections with optional path mappings. Save applies the whole document through `PUT /api/system/settings`. The app generates category IDs automatically and keeps them fixed across edits; existing IDs are preserved and no ID field is shown. Users enter a label, server/container destination path, and layout. Saving a new category creates missing folders, including parents. Destinations must be writable; changing an existing category's path requires an existing folder. Docker mounts are configured on the host. Saved credentials are never displayed; blank fields retain them and typed values replace them.
+**Server settings** opens a separate editor for download concurrency, merge format, minimum free space (decimal GB), speed limit (MB/s per download), a daily download window (time pickers), automatic retries, history retention, notification targets (ntfy or webhook, optional write-only token, completed/failed switches, **Send test** for saved targets), managed yt-dlp auto-update, categories, and Jellyfin/Plex connections with optional path mappings. Save applies the whole document through `PUT /api/system/settings`. The app generates category IDs automatically and keeps them fixed across edits; existing IDs are preserved and no ID field is shown. Users enter a label, server/container destination path, and layout. Saving a new category creates missing folders, including parents. Destinations must be writable; changing an existing category's path requires an existing folder. Docker mounts are configured on the host. Saved credentials are never displayed; blank fields retain them and typed values replace them.
 
 The editor loads from the saved connection, keeps drafts and secrets in memory only, and discards them when that connection changes. Back and Reload prompt before discarding unsaved edits. Errors preserve the draft; stale revisions require a reload. Successful saves refresh categories and clear defaults that no longer match the available layouts. A server without `settings_supported` shows an upgrade message and receives no settings request. Connection settings, default categories, and the existing manual yt-dlp update remain available as before.
 

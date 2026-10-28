@@ -1,5 +1,6 @@
 package com.istarvin.fetcharr.ui.settings
 
+import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -25,6 +26,8 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Movie
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.NetworkCheck
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.SystemUpdateAlt
@@ -33,6 +36,7 @@ import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
@@ -49,6 +53,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -232,6 +238,18 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel(), onServerSetti
                     }
                 }
 
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    SectionLabel(stringResource(R.string.settings_group_appearance))
+                    AppCard(onClick = { viewModel.onDynamicColor(!state.dynamicColor) }) {
+                        SettingsRow(
+                            icon = Icons.Outlined.Palette,
+                            title = stringResource(R.string.settings_dynamic_color),
+                            subtitle = stringResource(R.string.settings_dynamic_color_summary),
+                            trailing = { Switch(checked = state.dynamicColor, onCheckedChange = null) },
+                        )
+                    }
+                }
+
                 if (state.serverVersion != null) YtdlpSection(state, onCheck = viewModel::checkYtdlpUpdate, onUpdate = viewModel::updateYtdlp)
 
                 SectionLabel(stringResource(R.string.settings_group_about))
@@ -257,6 +275,34 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel(), onServerSetti
             }
         }
     }
+    state.pairing?.let { pairing ->
+        PairingDialog(
+            url = pairing.url,
+            hasToken = pairing.token.isNotEmpty(),
+            replacing = state.hasSavedServer && state.url != pairing.url,
+            onAccept = viewModel::acceptPairing,
+            onDismiss = viewModel::dismissPairing,
+        )
+    }
+}
+
+/** Confirms a `fetcharr://connect` link before it replaces the saved server. */
+@Composable
+private fun PairingDialog(url: String, hasToken: Boolean, replacing: Boolean, onAccept: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Outlined.QrCodeScanner, contentDescription = null) },
+        title = { Text(stringResource(R.string.pairing_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(url, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                Text(stringResource(if (hasToken) R.string.pairing_with_token else R.string.pairing_without_token))
+                if (replacing) Text(stringResource(R.string.pairing_replaces))
+            }
+        },
+        confirmButton = { TextButton(onClick = onAccept) { Text(stringResource(R.string.pairing_connect)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.pairing_cancel)) } },
+    )
 }
 
 /** Keeps the version, check result, and next action together without squeezing the row. */

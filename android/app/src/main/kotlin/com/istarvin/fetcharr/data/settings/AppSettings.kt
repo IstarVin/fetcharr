@@ -14,4 +14,6 @@ data class AppSettings(
     val cachedCategories: List<CategoryDto> = emptyList(),
     /** Newest `finished_at` processed, epoch ms. Null until initialised. */
     val lastSeenFinishedAt: Long? = null,
+    /** Material You wallpaper colors on Android 12+; the brand palette otherwise. */
+    val dynamicColor: Boolean = true,
 )

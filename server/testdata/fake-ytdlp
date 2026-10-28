@@ -125,6 +125,15 @@ def main():
         if ":" in p and p.split(":", 1)[0] in ("home", "temp"):
             p = p.split(":", 1)[1]
         out_tmpl = os.path.join(p, out_tmpl)
+
+    if "flaky" in url:
+        # Fails the first run in a work directory, then succeeds.
+        marker = os.path.join(os.path.dirname(os.path.abspath(out_tmpl)), "flaky-attempted")
+        if not os.path.exists(marker):
+            os.makedirs(os.path.dirname(marker), exist_ok=True)
+            open(marker, "w").close()
+            sys.stderr.write("ERROR: [generic] simulated transient failure\n")
+            return 1
     ext = opts.get("merge") or "mp4"
     final = out_tmpl.replace("%(ext)s", ext)
     part = final + ".part"

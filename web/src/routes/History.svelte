@@ -6,21 +6,38 @@
   import SourceReplacement from '../components/SourceReplacement.svelte'
   import { clearHistory } from '../lib/actions'
   import { groupByDay } from '../lib/format'
-  import { history } from '../lib/store.svelte'
+  import { history, session, type HistoryFilter } from '../lib/store.svelte'
   import type { Job } from '../lib/types'
 
-  type Filter = 'all' | 'completed' | 'failed'
-  let filter = $state<Filter>('all')
+  const FILTERS: [HistoryFilter, string][] = [
+    ['all', 'All'],
+    ['completed', 'Completed'],
+    ['failed', 'Failed'],
+  ]
   let playing = $state<Job | null>(null)
   let replacing = $state<Job | null>(null)
   let sentinel: HTMLElement | undefined = $state()
+  let search = $state(history.query)
+  let searchTimer: ReturnType<typeof setTimeout> | undefined
 
   if (!history.loaded && !history.loading) void history.load()
 
-  const visible = $derived(
-    filter === 'all' ? history.jobs : history.jobs.filter((j) => (filter === 'completed' ? j.status === 'completed' : j.status !== 'completed')),
-  )
-  const groups = $derived(groupByDay(visible))
+  const canSearch = $derived(session.info?.history_search_supported === true)
+  const groups = $derived(groupByDay(history.jobs))
+
+  function onSearch(value: string) {
+    search = value
+    clearTimeout(searchTimer)
+    searchTimer = setTimeout(() => history.setQuery(value), 250)
+  }
+
+  function clearFilters() {
+    clearTimeout(searchTimer)
+    search = ''
+    history.query = ''
+    history.filter = 'all'
+    void history.load()
+  }
 
   // Load the next page as the end of the list scrolls into view.
   $effect(() => {
@@ -33,7 +50,6 @@
   })
 </script>
 
-<svelte:head><title>History · Fetcharr</title></svelte:head>
 
 <div class="page-head">
   <h1>History</h1>
@@ -45,11 +61,20 @@
 
 <ConnectionBanner />
 
-{#if history.jobs.length > 0}
-  <div class="chips filters" role="radiogroup" aria-label="Filter">
-    {#each [['all', 'All'], ['completed', 'Completed'], ['failed', 'Failed']] as [f, label] (f)}
-      <button class="chip" role="radio" aria-checked={filter === f} onclick={() => (filter = f as Filter)}>{label}</button>
-    {/each}
+{#if history.jobs.length > 0 || history.filtered}
+  <div class="tools">
+    {#if canSearch}
+      <label class="search">
+        <Icon name="search" size={18} />
+        <span class="visually-hidden">Search history</span>
+        <input type="search" placeholder="Search titles and shows" value={search} oninput={(e) => onSearch(e.currentTarget.value)} />
+      </label>
+    {/if}
+    <div class="chips filters" role="radiogroup" aria-label="Filter">
+      {#each FILTERS as [f, label] (f)}
+        <button class="chip" role="radio" aria-checked={history.filter === f} onclick={() => history.setFilter(f)}>{label}</button>
+      {/each}
+    </div>
   </div>
 {/if}
 
@@ -61,14 +86,17 @@
   </div>
 {:else if !history.loaded}
   <div class="empty"><p>Loading…</p></div>
+{:else if history.jobs.length === 0 && history.filtered}
+  <div class="empty">
+    <p>No downloads match{history.query.trim() ? ` “${history.query.trim()}”` : ' this filter'}.</p>
+    <button class="btn" onclick={clearFilters}>Show all</button>
+  </div>
 {:else if history.jobs.length === 0}
   <div class="empty">
     <div class="glyph"><Icon name="history" size={32} /></div>
     <h2>No finished downloads</h2>
     <p>Completed, failed and cancelled downloads will show up here.</p>
   </div>
-{:else if visible.length === 0}
-  <div class="empty"><p>Nothing here. Switch the filter to see other downloads.</p></div>
 {:else}
   {#each groups as g (g.key)}
     <section aria-label={g.label}>
@@ -92,8 +120,41 @@
 <SourceReplacement job={replacing} onclose={() => (replacing = null)} />
 
 <style>
-  .filters {
+  .tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 16px;
     margin-bottom: 4px;
+  }
+
+  .search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 240px;
+    max-width: 420px;
+    height: 40px;
+    padding: 0 12px;
+    border: 1px solid var(--outline-variant);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--fg-muted);
+  }
+
+  .search:focus-within {
+    border-color: var(--primary);
+    outline: 2px solid color-mix(in srgb, var(--primary) 25%, transparent);
+  }
+
+  .search input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: none;
+    color: var(--fg);
+    font: inherit;
+    outline: none;
   }
 
   .list {

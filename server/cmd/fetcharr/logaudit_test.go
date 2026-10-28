@@ -220,6 +220,7 @@ func TestLogsNeverContainSecrets(t *testing.T) {
 	cfg.Server.AuthToken = secToken
 	cfg.Server.LogLevel = "debug"
 	cfg.Downloads.Concurrency = 2
+	cfg.Downloads.AutoRetries = 0 // a retry would only delay the failing job
 	cfg.MediaServers = []config.MediaServer{
 		{Type: config.MediaServerJellyfin, URL: jelly.URL, APIKey: secJFKey},
 		{Type: config.MediaServerJellyfin, URL: "http://user:" + secUserinfo + "@" + deadAddr, APIKey: secJFKeyBad},

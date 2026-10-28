@@ -1,0 +1,16 @@
+{
+  "name": "Fetcharr",
+  "short_name": "Fetcharr",
+  "description": "Send media links to your Fetcharr server and follow their downloads.",
+  "start_url": "./#/queue",
+  "scope": "./",
+  "display": "standalone",
+  "theme_color": "#1E6FD9",
+  "background_color": "#1E6FD9",
+  "icons": [{ "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }],
+  "share_target": {
+    "action": "./",
+    "method": "GET",
+    "params": { "title": "title", "text": "text", "url": "url" }
+  }
+}

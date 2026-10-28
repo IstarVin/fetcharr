@@ -74,6 +74,8 @@ type Options struct {
 	// WebUI, when set, serves the browser frontend for every path outside
 	// /api. It is static code and is mounted without authentication.
 	WebUI http.Handler
+	// Notifier sends test notifications (default: none; the endpoint fails).
+	Notifier NotificationTester
 	// Now overrides the clock used for session expiry (tests).
 	Now func() time.Time
 }
@@ -89,6 +91,7 @@ type server struct {
 	ytdlp       *versionCache
 	playbackKey [32]byte
 	clock       func() time.Time
+	notifier    NotificationTester
 }
 
 // New returns the HTTP handler for the whole API (everything lives under
@@ -105,6 +108,7 @@ func New(opts Options) http.Handler {
 		log:      opts.Logger,
 		maxBody:  opts.MaxBodyBytes,
 		clock:    opts.Now,
+		notifier: opts.Notifier,
 	}
 	if s.updater == nil {
 		s.updater = unimplementedUpdater{}
@@ -139,6 +143,9 @@ func New(opts Options) http.Handler {
 		{"POST", "/api/jobs/{id}/resume", s.handleAction("resume")},
 		{"POST", "/api/jobs/{id}/cancel", s.handleAction("cancel")},
 		{"POST", "/api/jobs/{id}/retry", s.handleAction("retry")},
+		{"POST", "/api/jobs/{id}/prioritize", s.handlePrioritize},
+		{"POST", "/api/batches/{batch_id}/prioritize", s.handlePrioritizeBatch},
+		{"POST", "/api/system/notifications/test", s.handleTestNotification},
 		{"POST", "/api/batches/{batch_id}/pause", s.handleBatchAction("pause")},
 		{"POST", "/api/batches/{batch_id}/resume", s.handleBatchAction("resume")},
 		{"POST", "/api/batches/{batch_id}/cancel", s.handleBatchAction("cancel")},

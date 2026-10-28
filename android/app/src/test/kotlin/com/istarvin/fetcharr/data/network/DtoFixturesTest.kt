@@ -36,6 +36,11 @@ class DtoFixturesTest {
         assertEquals("tv", info.categories[1].layout)
         assertEquals(812345678901L, info.categories[0].freeBytes)
         assertTrue(info.authRequired)
+        assertTrue(info.queuePrioritySupported && info.historySearchSupported && info.notificationsSupported)
+        val window = requireNotNull(info.downloadWindow)
+        assertEquals("23:00", window.start)
+        assertEquals(false, window.open)
+        assertEquals("2026-10-14T23:00:00.000Z", window.opensAt)
     }
 
     @Test

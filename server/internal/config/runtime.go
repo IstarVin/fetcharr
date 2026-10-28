@@ -23,6 +23,7 @@ func (c *Config) Clone() *Config {
 	v.Downloads.ExtraArgs = slices.Clone(c.Downloads.ExtraArgs)
 	v.Categories = slices.Clone(c.Categories)
 	v.MediaServers = slices.Clone(c.MediaServers)
+	v.Notifications = slices.Clone(c.Notifications)
 	for i := range v.MediaServers {
 		v.MediaServers[i].PathMap = maps.Clone(v.MediaServers[i].PathMap)
 	}

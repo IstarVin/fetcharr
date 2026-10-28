@@ -101,17 +101,30 @@ type CategoryDTO struct {
 	FreeBytes int64  `json:"free_bytes"`
 }
 
+// DownloadWindowDTO describes the daily window in which new downloads start.
+// OpensAt is null while the window is open.
+type DownloadWindowDTO struct {
+	Start   string       `json:"start"`
+	End     string       `json:"end"`
+	Open    bool         `json:"open"`
+	OpensAt timefmt.Time `json:"opens_at"`
+}
+
 // InfoDTO is the body of GET /api/info.
 type InfoDTO struct {
-	SourceReplacementSupported bool          `json:"source_replacement_supported"`
-	SettingsSupported          bool          `json:"settings_supported"`
-	SetupRequired              bool          `json:"setup_required"`
-	Version                    string        `json:"version"`
-	YtdlpVersion               string        `json:"ytdlp_version"`
-	YtdlpManaged               bool          `json:"ytdlp_managed"`
-	Concurrency                int           `json:"concurrency"`
-	AuthRequired               bool          `json:"auth_required"`
-	Categories                 []CategoryDTO `json:"categories"`
+	SourceReplacementSupported bool               `json:"source_replacement_supported"`
+	QueuePrioritySupported     bool               `json:"queue_priority_supported"`
+	HistorySearchSupported     bool               `json:"history_search_supported"`
+	NotificationsSupported     bool               `json:"notifications_supported"`
+	DownloadWindow             *DownloadWindowDTO `json:"download_window"`
+	SettingsSupported          bool               `json:"settings_supported"`
+	SetupRequired              bool               `json:"setup_required"`
+	Version                    string             `json:"version"`
+	YtdlpVersion               string             `json:"ytdlp_version"`
+	YtdlpManaged               bool               `json:"ytdlp_managed"`
+	Concurrency                int                `json:"concurrency"`
+	AuthRequired               bool               `json:"auth_required"`
+	Categories                 []CategoryDTO      `json:"categories"`
 }
 
 // ListDTO is the body of GET /api/jobs.

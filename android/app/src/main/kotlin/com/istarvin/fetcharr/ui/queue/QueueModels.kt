@@ -13,7 +13,7 @@ import kotlin.math.roundToInt
 
 enum class QueueSectionKind { Active, Queued, Paused }
 
-enum class JobAction { Pause, Resume, Cancel }
+enum class JobAction { Pause, Resume, Cancel, DownloadNext }
 
 /** What one job card shows. Text is ready to display; null means "hide that line". */
 data class JobCardModel(
@@ -63,6 +63,8 @@ data class BatchGroup(
     val jobs: List<JobCardModel>,
     /** Combined progress 0..1; null when unknown. */
     val progress: Float?,
+    /** Its queued episodes can be moved to the front of the queue. */
+    val canDownloadNext: Boolean = false,
 ) : QueueItem {
     override val key: String get() = "${section.name}:batch:$batchId"
     val episodeCount: Int get() = jobs.size
@@ -74,7 +76,8 @@ data class QueueSection(val kind: QueueSectionKind, val items: List<QueueItem>, 
 
 data class QueueBanner(val text: String, val connecting: Boolean)
 
-fun buildQueueSections(jobs: List<JobDto>, categories: List<CategoryDto>): List<QueueSection> {
+/** [prioritySupported]: the server can move queued jobs to the front; every queued item but the first offers it. */
+fun buildQueueSections(jobs: List<JobDto>, categories: List<CategoryDto>, prioritySupported: Boolean = false): List<QueueSection> {
     val labels = categories.associate { it.id to it.label }
     val layouts = categories.associate { it.id to it.layout }
     fun card(job: JobDto) = job.toCard(labels[job.category] ?: job.category, layouts[job.category])
@@ -88,7 +91,19 @@ fun buildQueueSections(jobs: List<JobDto>, categories: List<CategoryDto>): List<
         QueueSectionKind.Queued to queued,
         QueueSectionKind.Paused to paused,
     ).filter { it.second.isNotEmpty() }
-        .map { (kind, list) -> QueueSection(kind, groupItems(kind, list, ::card), if (kind == QueueSectionKind.Active) combinedSpeed(list) else null) }
+        .map { (kind, list) ->
+            val items = groupItems(kind, list, ::card)
+            QueueSection(
+                kind,
+                if (kind == QueueSectionKind.Queued && prioritySupported) items.mapIndexed { i, item -> if (i == 0) item else item.withDownloadNext() } else items,
+                if (kind == QueueSectionKind.Active) combinedSpeed(list) else null,
+            )
+        }
+}
+
+private fun QueueItem.withDownloadNext(): QueueItem = when (this) {
+    is JobItem -> copy(job = job.copy(actions = listOf(JobAction.DownloadNext) + job.actions))
+    is BatchGroup -> copy(canDownloadNext = true)
 }
 
 /** Sum of the live speeds of downloading jobs; null when nothing reports one. */
