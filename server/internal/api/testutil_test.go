@@ -430,6 +430,23 @@ func newJobWith(url, category string) *store.Job {
 	return j
 }
 
+// writeLibraryFile creates an empty file at rel inside the root of category cat.
+func writeLibraryFile(t *testing.T, e *env, cat, rel string) string {
+	t.Helper()
+	c, ok := e.cfg.Category(cat)
+	if !ok {
+		t.Fatalf("no category %s", cat)
+	}
+	p := filepath.Join(c.Path, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 func storeFilterBatch(id string) store.ListFilter { return store.ListFilter{BatchID: id} }
 
 // id extracts the "id" of a job response.

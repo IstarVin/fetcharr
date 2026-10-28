@@ -37,6 +37,8 @@ data class IncomingUiState(
     val form: ItemForm = ItemForm(),
     val submitting: Boolean = false,
     val error: String? = null,
+    /** The server answered `already_exists`: ask whether to replace the library file(s). */
+    val confirmReplace: Boolean = false,
 ) {
     /** Two or more episodes: the season layout. One episode is shown with the single-item layout. */
     val isSeasonMode: Boolean get() = (sheet as? IncomingSheet.SeasonSheet)?.let { it.episodes.size >= 2 } == true
@@ -130,7 +132,25 @@ class IncomingViewModel @Inject constructor(
 
     // ---- submit ----------------------------------------------------------------------------
 
-    fun download() {
+    fun download() = download(overwrite = false)
+
+    /** "Replace" in the already-in-library dialog: submit again, replacing the library file(s). */
+    fun replaceExisting() {
+        _uiState.update { it.copy(confirmReplace = false) }
+        download(overwrite = true)
+    }
+
+    /** "Keep existing": nothing to download, so close the sheet like a duplicate. */
+    fun keepExisting() {
+        val sheet = _uiState.value.sheet ?: return
+        _uiState.update { it.copy(confirmReplace = false) }
+        finish(sheet.id, SubmitOutcome.MESSAGE_ALREADY_EXISTS)
+    }
+
+    /** Dialog dismissed: back to the sheet, e.g. to fix the title. */
+    fun dismissReplace() = _uiState.update { it.copy(confirmReplace = false) }
+
+    private fun download(overwrite: Boolean) {
         val state = _uiState.value
         if (!state.canDownload) return
         val categoryId = state.categoryId ?: return
@@ -143,17 +163,17 @@ class IncomingViewModel @Inject constructor(
                     val r = sheet.request
                     submit.submitJob(
                         r.url, categoryId, state.layout.orEmpty(), state.form, r.headers,
-                        r.subtitles.map { SubtitleDto(it.url, it.lang) },
+                        r.subtitles.map { SubtitleDto(it.url, it.lang) }, overwrite,
                     )
                 }
                 is IncomingSheet.SeasonSheet ->
                     if (state.isSeasonMode) {
-                        submit.submitSeason(categoryId, state.form, sheet.episodes)
+                        submit.submitSeason(categoryId, state.form, sheet.episodes, overwrite)
                     } else {
                         val ep = sheet.episodes.first()
                         submit.submitJob(
                             ep.url, categoryId, state.layout.orEmpty(), state.form, ep.headers,
-                            ep.subtitles.map { SubtitleDto(it.url, it.lang) },
+                            ep.subtitles.map { SubtitleDto(it.url, it.lang) }, overwrite,
                         )
                     }
             }
@@ -163,6 +183,10 @@ class IncomingViewModel @Inject constructor(
                     finish(sheet.id, outcome.message)
                 }
                 SubmitOutcome.DuplicateSingle -> finish(sheet.id, SubmitOutcome.MESSAGE_DUPLICATE)
+                SubmitOutcome.AlreadyExists -> {
+                    hub.coordinator.endSubmit(sheet.id)
+                    _uiState.update { if (it.sheet?.id == sheet.id) it.copy(submitting = false, confirmReplace = true) else it }
+                }
                 is SubmitOutcome.Error -> fail(sheet.id, outcome.message)
                 SubmitOutcome.NotConfigured -> fail(sheet.id, SubmitOutcome.MESSAGE_NOT_CONFIGURED)
             }
@@ -195,10 +219,10 @@ class IncomingViewModel @Inject constructor(
                 serverCategories = categories,
             )
             if (sheet == null) {
-                return@update next.copy(categoryId = null, form = ItemForm(), submitting = false, error = null)
+                return@update next.copy(categoryId = null, form = ItemForm(), submitting = false, error = null, confirmReplace = false)
             }
             if (cur.sheet?.id != sheet.id) {
-                next = next.copy(categoryId = null, form = initialForm(sheet), submitting = false, error = null)
+                next = next.copy(categoryId = null, form = initialForm(sheet), submitting = false, error = null, confirmReplace = false)
             } else if (sheet is IncomingSheet.SeasonSheet && next.form.year.isBlank() && sheet.year != null) {
                 // A later episode of the same season carried the year the first one lacked.
                 next = next.copy(form = next.form.copy(year = sheet.year.toString()))

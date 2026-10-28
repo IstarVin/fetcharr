@@ -4,10 +4,10 @@
   import Icon from '../components/Icon.svelte'
   import SubtitleRows from '../components/SubtitleRows.svelte'
   import { api, ApiError, errorMessage } from '../lib/api'
-  import { LAYOUT_LABEL } from '../lib/format'
+  import { batchAddedMessage, LAYOUT_LABEL } from '../lib/format'
   import { href, router } from '../lib/router.svelte'
   import { headerRowsValid, headersRecord, newHeader, newSubtitle, rowId, subtitleRowsValid, subtitlesList, validHttpUrl, type HeaderRow, type SubtitleRow } from '../lib/rows'
-  import { live, readPref, session, toasts } from '../lib/store.svelte'
+  import { confirm, live, readPref, session, toasts } from '../lib/store.svelte'
   import type { Category } from '../lib/types'
 
   type Mode = 'single' | 'season'
@@ -113,6 +113,15 @@
     submitting = true
     error = null
     try {
+      await send(category, false)
+    } finally {
+      submitting = false
+    }
+  }
+
+  /** `already_exists` asks before sending again with `overwrite`; keeping the file stays on the form. */
+  async function send(category: Category, overwrite: boolean): Promise<void> {
+    try {
       if (mode === 'single') {
         const tv = category.layout === 'tv'
         const job = await api.createJob({
@@ -124,6 +133,7 @@
           ...(category.layout !== 'flat' && year.trim() ? { year: num(year) } : {}),
           headers: headersRecord(headers),
           subtitles: subtitlesList(subtitles),
+          ...(overwrite ? { overwrite } : {}),
         })
         live.upsert(job)
         toasts.show('Added 1 download')
@@ -136,21 +146,30 @@
           ...(year.trim() ? { year: num(year) } : {}),
           headers: headersRecord(headers),
           episodes: used.map((r) => ({ episode: Number(r.episode.trim()), url: r.url.trim(), ...(r.title.trim() ? { title: r.title.trim() } : {}) })),
+          ...(overwrite ? { overwrite } : {}),
         })
         for (const j of res.jobs) live.upsert(j)
-        const added = res.jobs.length === 1 ? 'Added 1 download' : `Added ${res.jobs.length} downloads`
-        toasts.show(res.skipped.length ? `Added ${res.jobs.length} · ${res.skipped.length} already queued` : added)
+        toasts.show(batchAddedMessage(res.jobs.length, res.skipped))
       }
       router.go('queue')
     } catch (err) {
       if (err instanceof ApiError && err.code === 'duplicate') {
         toasts.show('Already in the queue')
         router.go('queue')
+      } else if (err instanceof ApiError && err.code === 'already_exists' && !overwrite) {
+        const replace = await confirm({
+          title: 'Already in library',
+          body: mode === 'single'
+            ? 'A file with this name is already in the library. Replace it with this download?'
+            : 'The episodes are already in the library or in the queue. Replace the library files?',
+          confirm: 'Replace',
+          cancel: 'Keep existing',
+        })
+        if (replace) await send(category, true)
+        else error = 'Already in library'
       } else {
         error = errorMessage(err)
       }
-    } finally {
-      submitting = false
     }
   }
 </script>

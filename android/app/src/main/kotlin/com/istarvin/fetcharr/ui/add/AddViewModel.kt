@@ -70,6 +70,8 @@ data class AddUiState(
     val subtitles: List<SubtitleRow> = emptyList(),
     val submitting: Boolean = false,
     val error: String? = null,
+    /** The server answered `already_exists`: ask whether to replace the library file. */
+    val confirmReplace: Boolean = false,
 ) {
     val urlValid: Boolean get() = isHttpUrl(url)
 
@@ -283,7 +285,18 @@ class AddViewModel @Inject constructor(
 
     // ---- submit ----------------------------------------------------------------------------
 
-    fun submit() {
+    fun submit() = submit(overwrite = false)
+
+    /** "Replace" in the already-in-library dialog: submit again, replacing the library file. */
+    fun replaceExisting() {
+        _uiState.update { it.copy(confirmReplace = false) }
+        submit(overwrite = true)
+    }
+
+    /** "Keep existing" or dismissed: stay on the form, which says why nothing was added. */
+    fun keepExisting() = _uiState.update { it.copy(confirmReplace = false, error = SubmitOutcome.MESSAGE_ALREADY_EXISTS) }
+
+    private fun submit(overwrite: Boolean) {
         val state = _uiState.value
         if (!state.canSubmit) return
         val categoryId = state.categoryId ?: return
@@ -296,6 +309,7 @@ class AddViewModel @Inject constructor(
                 form = state.form,
                 headers = state.headers.filter { it.name.isNotBlank() }.associate { it.name.trim() to it.value },
                 subtitles = state.subtitles.filter { it.url.isNotBlank() }.map { SubtitleDto(it.url, it.lang) },
+                overwrite = overwrite,
             )
             when (outcome) {
                 is SubmitOutcome.Success -> {
@@ -305,6 +319,7 @@ class AddViewModel @Inject constructor(
                 }
                 // Add keeps the form on a duplicate so the URL can be fixed, unlike the Incoming sheet.
                 SubmitOutcome.DuplicateSingle -> failWith(SubmitOutcome.MESSAGE_DUPLICATE)
+                SubmitOutcome.AlreadyExists -> _uiState.update { it.copy(submitting = false, confirmReplace = true) }
                 is SubmitOutcome.Error -> failWith(outcome.message)
                 SubmitOutcome.NotConfigured -> failWith(SubmitOutcome.MESSAGE_NOT_CONFIGURED)
             }

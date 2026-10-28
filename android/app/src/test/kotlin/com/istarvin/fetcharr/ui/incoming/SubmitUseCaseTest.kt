@@ -6,6 +6,7 @@ import com.istarvin.fetcharr.data.network.FetcharrJson
 import com.istarvin.fetcharr.data.network.Fixtures
 import com.istarvin.fetcharr.data.network.ServerConfig
 import com.istarvin.fetcharr.data.network.ServerConfigProvider
+import com.istarvin.fetcharr.data.network.dto.SkippedEpisodeDto
 import com.istarvin.fetcharr.data.network.dto.SubtitleDto
 import com.istarvin.fetcharr.incoming.IncomingSubtitle
 import com.istarvin.fetcharr.incoming.SeasonEpisode
@@ -118,6 +119,42 @@ class SubmitUseCaseTest {
         server.enqueue(json(409, Fixtures.text("error-duplicate.json")))
         val outcome = runBlocking { useCase.submitJob("https://cdn.example/dune2.m3u8", "movies", "movie", ItemForm(title = "D"), emptyMap(), emptyList()) }
         assertEquals(SubmitOutcome.DuplicateSingle, outcome)
+    }
+
+    @Test
+    fun alreadyExistsAsksThenOverwriteIsSent() {
+        server.enqueue(json(409, Fixtures.text("error-already_exists.json")))
+        server.enqueue(json(201, Fixtures.text("job-pending.json")))
+        val outcome = runBlocking { useCase.submitJob("https://cdn.example/dune2.m3u8", "movies", "movie", ItemForm(title = "D"), emptyMap(), emptyList()) }
+        assertEquals(SubmitOutcome.AlreadyExists, outcome)
+        assertFalse(parse(server.takeRequest().body.readUtf8()).jsonObject.containsKey("overwrite"))
+
+        val replaced = runBlocking {
+            useCase.submitJob("https://cdn.example/dune2.m3u8", "movies", "movie", ItemForm(title = "D"), emptyMap(), emptyList(), overwrite = true)
+        }
+        assertEquals(SubmitOutcome.Success("Added 1 download"), replaced)
+        assertEquals("true", parse(server.takeRequest().body.readUtf8()).jsonObject["overwrite"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun batchMessageCountsSkipReasons() {
+        val skipped = listOf(
+            SkippedEpisodeDto(1, "already_exists"), SkippedEpisodeDto(2, "already_exists"), SkippedEpisodeDto(3, "duplicate"),
+        )
+        assertEquals("Added 4 · 2 already in library · 1 already queued", SubmitUseCase.batchMessage(4, skipped))
+        assertEquals("Added 4 · 2 already in library", SubmitUseCase.batchMessage(4, skipped.take(2)))
+        assertEquals("Added 4 downloads", SubmitUseCase.batchMessage(4, emptyList()))
+    }
+
+    @Test
+    fun batchAllInLibraryAsksAndOverwriteIsSent() {
+        server.enqueue(json(409, Fixtures.text("error-already_exists.json")))
+        server.enqueue(json(201, Fixtures.text("batch-create-response.json")))
+        val form = ItemForm(show = "S", season = "2")
+        assertEquals(SubmitOutcome.AlreadyExists, runBlocking { useCase.submitSeason("tv", form, listOf(ep(1), ep(2))) })
+        assertFalse(parse(server.takeRequest().body.readUtf8()).jsonObject.containsKey("overwrite"))
+        runBlocking { useCase.submitSeason("tv", form, listOf(ep(1), ep(2)), overwrite = true) }
+        assertEquals("true", parse(server.takeRequest().body.readUtf8()).jsonObject["overwrite"]!!.jsonPrimitive.content)
     }
 
     @Test

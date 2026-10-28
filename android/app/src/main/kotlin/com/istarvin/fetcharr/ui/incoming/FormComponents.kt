@@ -20,6 +20,8 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Title
 import androidx.compose.material.icons.outlined.Tv
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -223,4 +225,19 @@ fun FormFooter(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
             }
         }
     }
+}
+
+/**
+ * Asks before replacing a file the library already has (`409 already_exists`). [season] picks the wording for a
+ * batch, where every selected episode was in the library or already queued.
+ */
+@Composable
+fun ReplaceExistingDialog(season: Boolean, onReplace: () -> Unit, onKeep: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.replace_existing_title)) },
+        text = { Text(stringResource(if (season) R.string.replace_existing_body_season else R.string.replace_existing_body)) },
+        confirmButton = { TextButton(onClick = onReplace) { Text(stringResource(R.string.replace_existing_confirm)) } },
+        dismissButton = { TextButton(onClick = onKeep) { Text(stringResource(R.string.replace_existing_keep)) } },
+    )
 }

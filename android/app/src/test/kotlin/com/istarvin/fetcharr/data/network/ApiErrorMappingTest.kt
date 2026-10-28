@@ -18,6 +18,8 @@ class ApiErrorMappingTest {
         assertTrue(map(409, "invalid_state") is ApiError.InvalidState)
         val dup = map(409, "duplicate") as ApiError.Duplicate
         assertTrue(dup.message.contains("already active"))
+        val exists = map(409, "already_exists") as ApiError.AlreadyExists
+        assertTrue(exists.message.contains("already exists"))
         assertEquals(ApiError.YtdlpUnmanaged, map(409, "ytdlp_unmanaged"))
         assertEquals(ApiError.YtdlpBusy, map(409, "ytdlp_busy"))
     }
@@ -63,5 +65,6 @@ class ApiErrorMappingTest {
         assertEquals("Server error — try again", ApiError.Server(500).userMessage)
         assertEquals("Downloads are running — try again when they finish", ApiError.YtdlpBusy.userMessage)
         assertEquals("Already in the queue", map(409, "duplicate").userMessage)
+        assertEquals("Already in library", map(409, "already_exists").userMessage)
     }
 }

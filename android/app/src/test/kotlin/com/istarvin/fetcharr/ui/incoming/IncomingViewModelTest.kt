@@ -216,6 +216,45 @@ class IncomingViewModelTest {
     }
 
     @Test
+    fun alreadyExistsAsksThenReplaceSendsOverwrite() = runVm {
+        env.configureServer()
+        env.server.enqueue(env.json(409, Fixtures.text("error-already_exists.json")))
+        env.server.enqueue(env.json(201, Fixtures.text("job-pending.json")))
+        open(movie())
+        vm.download()
+        val asking = vm.uiState.first { it.confirmReplace }
+        assertNotNull(asking.sheet)
+        assertFalse(asking.submitting)
+        env.server.takeRequest()
+
+        vm.replaceExisting()
+        assertEquals("Added 1 download", (vm.events.first() as HubEvent.Snackbar).message)
+        vm.uiState.first { it.sheet == null }
+        val body = Json.parseToJsonElement(env.server.takeRequest().body.readUtf8()).jsonObject
+        assertEquals("true", body["overwrite"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun alreadyExistsKeepClosesAndDismissStays() = runVm {
+        env.configureServer()
+        env.server.enqueue(env.json(409, Fixtures.text("error-already_exists.json")))
+        env.server.enqueue(env.json(409, Fixtures.text("error-already_exists.json")))
+        open(movie())
+        vm.download()
+        vm.uiState.first { it.confirmReplace }
+        vm.dismissReplace()
+        val back = vm.uiState.first { !it.confirmReplace }
+        assertNotNull(back.sheet)
+        assertTrue(back.canDownload)
+
+        vm.download()
+        vm.uiState.first { it.confirmReplace }
+        vm.keepExisting()
+        assertEquals("Already in library", (vm.events.first() as HubEvent.Snackbar).message)
+        vm.uiState.first { it.sheet == null && !it.confirmReplace }
+    }
+
+    @Test
     fun badRequestStaysOpenWithServerMessageThenCanRetry() = runVm {
         env.configureServer()
         env.server.enqueue(env.json(400, Fixtures.text("error-invalid_request.json")))

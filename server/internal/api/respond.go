@@ -58,7 +58,7 @@ func statusFor(c service.Code) int {
 		return http.StatusBadRequest
 	case service.CodeNotFound:
 		return http.StatusNotFound
-	case service.CodeInvalidState, service.CodeDuplicate:
+	case service.CodeInvalidState, service.CodeDuplicate, service.CodeAlreadyExists:
 		return http.StatusConflict
 	}
 	return http.StatusInternalServerError

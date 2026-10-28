@@ -151,6 +151,28 @@ class AddViewModelTest {
     }
 
     @Test
+    fun alreadyExistsAsksThenKeepStaysOrReplaceSubmits() = run {
+        prepare()
+        repeat(2) { env.server.enqueue(env.json(409, Fixtures.text("error-already_exists.json"))) }
+        env.server.enqueue(env.json(201, Fixtures.text("job-pending.json")))
+        val vm = vm("https://cdn.example/a")
+        vm.uiState.first { it.categoryId != null }
+        vm.onTitle("X")
+        vm.submit()
+        vm.uiState.first { it.confirmReplace }
+        vm.keepExisting()
+        assertEquals("Already in library", vm.uiState.value.error)
+        assertFalse(vm.uiState.value.confirmReplace)
+        vm.submit()
+        vm.uiState.first { it.confirmReplace }
+        vm.replaceExisting()
+        assertEquals(AddEvent.Done, vm.events.first())
+        assertEquals(1, submitsReported)
+        val bodies = List(3) { env.server.takeRequest().body.readUtf8() }
+        assertEquals(listOf(false, false, true), bodies.map { it.contains("\"overwrite\":true") })
+    }
+
+    @Test
     fun withoutServerSubmitIsDisabled() = run {
         env.settings.setCachedCategories(env.categories)
         val vm = vm("https://cdn.example/a")

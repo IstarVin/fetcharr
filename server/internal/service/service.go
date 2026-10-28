@@ -116,8 +116,23 @@ func duplicateErr(err error, url string) error {
 	return newErr(CodeDuplicate, err, "url is already active: %s", url)
 }
 
+// existingMedia returns the library file that j would replace; "" if there is
+// none. A failed lookup is logged and treated as none, because the worker
+// pre-check (spec §4.1) looks again before the download starts.
+func (s *Service) existingMedia(cat config.Category, j *store.Job) string {
+	t, err := library.TargetOf(cat, j)
+	if err == nil {
+		var path string
+		if path, err = library.ExistingMedia(t); err == nil {
+			return path
+		}
+	}
+	s.log.Warn("cannot check for an existing file", "job", j, "err", err)
+	return ""
+}
+
 // Create validates req and creates one pending job (spec §6.3
-// POST /api/jobs). Errors: invalid_request, duplicate.
+// POST /api/jobs). Errors: invalid_request, already_exists, duplicate.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*store.Job, error) {
 	unlock := s.cfg.ReadSettings()
 	defer unlock()
@@ -153,6 +168,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*store.Job, er
 		Title:           optString(req.Title),
 		Subtitles:       subs,
 		Status:          jobs.StatusPending,
+		Overwrite:       req.Overwrite,
 		WorkDir:         s.cfg.JobWorkDir(id),
 	}
 	switch cat.Layout {
@@ -163,6 +179,11 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*store.Job, er
 		j.Season, j.Episode, j.Year = req.Season, req.Episode, req.Year
 	case naming.LayoutFlat:
 		// Year, show, season and episode do not apply: stored as null.
+	}
+	if !j.Overwrite {
+		if path := s.existingMedia(cat, j); path != "" {
+			return nil, newErr(CodeAlreadyExists, nil, "a file already exists: %s", path)
+		}
 	}
 	if err := s.store.Insert(ctx, j); err != nil {
 		if errors.Is(err, store.ErrDuplicate) {
@@ -178,8 +199,10 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*store.Job, er
 
 // CreateBatch validates req and creates the episodes of one season (spec §6.3
 // POST /api/jobs/batch). Any invalid episode rejects the whole request;
-// episodes whose URL is already active are skipped and reported. Errors:
-// invalid_request, duplicate (every episode skipped).
+// episodes already in the library (unless req.Overwrite) or whose URL is
+// already active are skipped and reported. Errors: invalid_request,
+// already_exists (every episode skipped, at least one of them because it is
+// in the library), duplicate (every episode skipped as duplicate).
 func (s *Service) CreateBatch(ctx context.Context, req BatchRequest) (*BatchResult, error) {
 	unlock := s.cfg.ReadSettings()
 	defer unlock()
@@ -234,27 +257,51 @@ func (s *Service) CreateBatch(ctx context.Context, req BatchRequest) (*BatchResu
 			Year:            req.Year,
 			Subtitles:       subs,
 			Status:          jobs.StatusPending,
+			Overwrite:       req.Overwrite,
 			WorkDir:         s.cfg.JobWorkDir(id),
 		}})
 	}
 	// Queue order follows ascending episode number (spec §2.5).
 	sort.SliceStable(items, func(a, b int) bool { return items[a].ep < items[b].ep })
-	batch := make([]*store.Job, len(items))
+	skipReason := make([]string, len(items))
+	var batch []*store.Job
 	for i, it := range items {
-		batch[i] = it.job
+		if !req.Overwrite && s.existingMedia(cat, it.job) != "" {
+			skipReason[i] = SkipReasonAlreadyExists
+			continue
+		}
+		batch = append(batch, it.job)
 	}
 
-	results, err := s.store.InsertBatch(ctx, batch)
-	if err != nil {
-		return nil, err
+	var results []error
+	if len(batch) > 0 {
+		if results, err = s.store.InsertBatch(ctx, batch); err != nil {
+			return nil, err
+		}
+	}
+	// results is aligned with batch, which holds the items not yet skipped.
+	n := 0
+	for i := range items {
+		if skipReason[i] != "" {
+			continue
+		}
+		if results[n] != nil {
+			skipReason[i] = SkipReasonDuplicate
+		}
+		n++
 	}
 	res := &BatchResult{BatchID: batchID, Jobs: []*store.Job{}, Skipped: []SkippedEpisode{}}
+	inLibrary := false
 	for i, it := range items {
-		if results[i] != nil {
-			res.Skipped = append(res.Skipped, SkippedEpisode{Episode: it.ep, Reason: SkipReasonDuplicate})
+		if skipReason[i] != "" {
+			res.Skipped = append(res.Skipped, SkippedEpisode{Episode: it.ep, Reason: skipReason[i]})
+			inLibrary = inLibrary || skipReason[i] == SkipReasonAlreadyExists
 			continue
 		}
 		res.Jobs = append(res.Jobs, it.job)
+	}
+	if len(res.Jobs) == 0 && inLibrary {
+		return nil, newErr(CodeAlreadyExists, nil, "every episode is already in the library or active")
 	}
 	if len(res.Jobs) == 0 {
 		return nil, newErr(CodeDuplicate, nil, "every episode url is already active")

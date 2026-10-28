@@ -143,8 +143,9 @@ Modal bottom sheet. Swiping it down or tapping **Cancel** discards the request.
 **Submitting:**
 
 - One item is sent with `POST /api/jobs`. Two or more selected episodes go to `POST /api/jobs/batch`.
-- On success, the sheet closes and shows the snackbar "Added N downloads". If some episodes were skipped as duplicates, the snackbar says "Added 6 · 2 already queued".
+- On success, the sheet closes and shows the snackbar "Added N downloads". If some episodes were skipped, the snackbar counts them by reason: "Added 6 · 2 already in library · 1 already queued". Episodes already in the library are skipped, not replaced.
 - On `409 duplicate` for a single item, the snackbar reads "Already in the queue" and the sheet closes.
+- On `409 already_exists` (the item is already in the library, or for a season every selected episode is in the library or queued), a dialog "Already in library" offers **Replace** and **Keep existing**. Replace sends the same request again with `"overwrite": true`. Keep existing closes the sheet with the snackbar "Already in library". Dismissing the dialog returns to the sheet, for example to correct the title. The Add screen shows the same dialog, but Keep existing stays on the form with the inline error "Already in library".
 - Any other error is shown inside the sheet, and the sheet stays open so the user can retry.
 - If no server is configured, the sheet shows "Server not set up" with a button to Settings. The request stays in memory and the sheet reopens afterwards.
 

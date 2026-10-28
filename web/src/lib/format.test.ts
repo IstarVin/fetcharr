@@ -7,6 +7,7 @@ import completed from '../../../contract/job-completed.json'
 import type { Job } from './types'
 import {
   actionsFor,
+  batchAddedMessage,
   batchTitle,
   buildQueueSections,
   bytes,
@@ -124,5 +125,14 @@ describe('history groups', () => {
     const at = (d: Date) => ({ ...job(completed), id: String(d.getTime()), finished_at: d.toISOString() })
     const groups = groupByDay([at(new Date(2026, 9, 14, 9)), at(new Date(2026, 9, 13, 9)), at(new Date(2025, 0, 2, 9))], now, 'en-GB')
     expect(groups.map((g) => g.label)).toEqual(['Today', 'Yesterday', 'Thu, 2 Jan 2025'])
+  })
+})
+
+describe('batchAddedMessage', () => {
+  it('counts skip reasons', () => {
+    expect(batchAddedMessage(2, [])).toBe('Added 2 downloads')
+    expect(batchAddedMessage(1, [])).toBe('Added 1 download')
+    expect(batchAddedMessage(2, [{ reason: 'duplicate' }])).toBe('Added 2 · 1 already queued')
+    expect(batchAddedMessage(4, [{ reason: 'already_exists' }, { reason: 'already_exists' }, { reason: 'duplicate' }])).toBe('Added 4 · 2 already in library · 1 already queued')
   })
 })

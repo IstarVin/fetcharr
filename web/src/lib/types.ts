@@ -79,6 +79,8 @@ export interface CreateJob {
   year?: number
   headers?: Record<string, string>
   subtitles?: Subtitle[]
+  /** Replace an existing library file instead of failing with `already_exists`. */
+  overwrite?: boolean
 }
 
 export interface BatchEpisode {
@@ -96,6 +98,8 @@ export interface CreateBatch {
   year?: number
   headers?: Record<string, string>
   episodes: BatchEpisode[]
+  /** Replace existing library files instead of skipping those episodes as `already_exists`. */
+  overwrite?: boolean
 }
 
 export interface BatchCreated {

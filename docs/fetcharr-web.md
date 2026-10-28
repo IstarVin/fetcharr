@@ -34,9 +34,9 @@ If `setup_required` is true, a banner links to Server settings.
 **Add download.** Two modes:
 
 - *Single:* URL, category chips, the fields of the category's layout (movie: Title, Year; tv: Show, Season, Episode, Episode title, Year; flat: Title), and optional request headers and subtitles under **Advanced**. Sends `POST /api/jobs`.
-- *Season* (tv categories only): Show, Season, Year, shared headers, and episode rows (number, optional title, URL). **Paste several URLs** turns one URL per line into numbered episodes. Sends `POST /api/jobs/batch`; per-episode headers and subtitles are not editable here. The result reads "Added 6 · 2 already queued".
+- *Season* (tv categories only): Show, Season, Year, shared headers, and episode rows (number, optional title, URL). **Paste several URLs** turns one URL per line into numbered episodes. Sends `POST /api/jobs/batch`; per-episode headers and subtitles are not editable here. The result reads "Added 6 · 2 already in library · 1 already queued"; episodes already in the library are skipped.
 
-`409 duplicate` shows "Already in the queue". Other errors stay on the form. The category is preselected from this browser's default for the request type (Settings → Defaults), otherwise the first category that fits.
+`409 duplicate` shows "Already in the queue". `409 already_exists` asks "Already in library" with **Replace** (sends again with `"overwrite": true`) or **Keep existing** (stays on the form with the error "Already in library"). Other errors stay on the form. The category is preselected from this browser's default for the request type (Settings → Defaults), otherwise the first category that fits.
 
 **Settings.** Server address, version, access mode and concurrency; **Test connection** (version and latency); library folders with free space; per-browser default categories (stored in `localStorage`); yt-dlp version, **Check for update** and **Update to latest** (managed binary only, "Downloads are running — try again when they finish" on `ytdlp_busy`); Sign out.
 

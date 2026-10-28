@@ -310,6 +310,57 @@ func TestBatchValidationAndSkips(t *testing.T) {
 		e := newEnv(t)
 		e.want(e.request("POST", "/api/jobs/batch", with("bogus", 1)), 400)
 	})
+	t.Run("in library skipped", func(t *testing.T) {
+		e := newEnv(t)
+		writeLibraryFile(t, e, "tv", "Show (2020)/Season 01/Show - S01E02 - E.mp4")
+		r := e.want(e.request("POST", "/api/jobs/batch", base()), 201).Obj(t)
+		assertEqualJSON(t, "skipped", []any{map[string]any{"episode": float64(2), "reason": "already_exists"}}, r["skipped"])
+		if js := r["jobs"].([]any); len(js) != 1 || js[0].(map[string]any)["episode"] != float64(1) {
+			t.Errorf("%v", r["jobs"])
+		}
+	})
+	t.Run("all skipped, some in library, is 409 already_exists", func(t *testing.T) {
+		e := newEnv(t)
+		e.seed(newJobWith("https://b.example/1", "tv"))
+		writeLibraryFile(t, e, "tv", "Show (2020)/Season 01/Show - S01E02 - E.mkv")
+		r := e.want(e.request("POST", "/api/jobs/batch", base()), 409)
+		if r.ErrCode(t) != "already_exists" {
+			t.Errorf("%s", r.Raw)
+		}
+		// overwrite creates the episode in the library; the active url stays a duplicate.
+		o := e.want(e.request("POST", "/api/jobs/batch", with("overwrite", true)), 201).Obj(t)
+		assertEqualJSON(t, "skipped", []any{map[string]any{"episode": float64(1), "reason": "duplicate"}}, o["skipped"])
+		listed, _, err := e.svc.List(t.Context(), storeFilterBatch(o["batch_id"].(string)))
+		if err != nil || len(listed) != 1 || !listed[0].Overwrite {
+			t.Errorf("listed = %v, %v; want one overwrite job", listed, err)
+		}
+	})
+}
+
+func TestCreateAlreadyExists(t *testing.T) {
+	body := func(overwrite bool) map[string]any {
+		b := map[string]any{"url": "https://m.example/dune", "category": "movies", "title": "Dune", "year": 2021}
+		if overwrite {
+			b["overwrite"] = true
+		}
+		return b
+	}
+	e := newEnv(t)
+	path := writeLibraryFile(t, e, "movies", "Dune (2021)/Dune (2021).webm")
+	r := e.want(e.request("POST", "/api/jobs", body(false)), 409)
+	if r.ErrCode(t) != "already_exists" || !strings.Contains(string(r.Raw), filepath.Base(path)) {
+		t.Errorf("%s", r.Raw)
+	}
+	if _, total, _ := e.svc.List(t.Context(), store.ListFilter{}); total != 0 {
+		t.Errorf("nothing may be created, got %d jobs", total)
+	}
+	id := e.want(e.request("POST", "/api/jobs", body(true)), 201).ID(t)
+	j, err := e.st.Get(t.Context(), id)
+	if err != nil || !j.Overwrite {
+		t.Errorf("job = %+v, %v; want overwrite", j, err)
+	}
+	// Another layout target is unaffected.
+	e.want(e.request("POST", "/api/jobs", map[string]any{"url": "https://m.example/other", "category": "movies", "title": "Dune", "year": 1984}), 201)
 }
 
 func TestListFilters(t *testing.T) {

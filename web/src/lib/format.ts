@@ -224,6 +224,16 @@ export function combinedProgress(members: Job[]): number | null {
   return fractions.length ? fractions.reduce((a, b) => a + b, 0) / fractions.length : null
 }
 
+// ---- Add -------------------------------------------------------------------
+
+/** `Added N downloads`, or `Added N · M already in library · K already queued` when episodes were skipped. */
+export function batchAddedMessage(created: number, skipped: { reason: string }[]): string {
+  if (!skipped.length) return created === 1 ? 'Added 1 download' : `Added ${created} downloads`
+  const inLibrary = skipped.filter((s) => s.reason === 'already_exists').length
+  const queued = skipped.length - inLibrary
+  return [`Added ${created}`, inLibrary && `${inLibrary} already in library`, queued && `${queued} already queued`].filter(Boolean).join(' · ')
+}
+
 // ---- History ---------------------------------------------------------------
 
 export function errorText(code: string | null | undefined): string {

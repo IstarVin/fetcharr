@@ -205,15 +205,31 @@ func TestCancelDuringPlacementIsRefused(t *testing.T) {
 	}
 }
 
-// A retry with overwrite replaces the file that made the first run fail with
-// already_exists; delete_file then removes file and folders.
+// Create rejects a job whose file is already in the library. When the file
+// appears after the job was created, the worker pre-check fails it with
+// already_exists, and a retry with overwrite replaces the file.
 func TestRetryWithOverwriteAndDeleteFile(t *testing.T) {
 	s := newStack(t, nil)
 	dir := filepath.Join(s.root("movies"), "Dune (2024)")
 	old := filepath.Join(dir, "Dune (2024).mkv")
 	writeFile(t, old, "old")
 
-	j := s.createMovie()
+	_, err := s.svc.Create(context.Background(), service.CreateRequest{
+		Category: "movies", URL: "https://example.com/dune", Title: "Dune", Year: store.Ptr(2024),
+	})
+	if code, ok := service.CodeOf(err); !ok || code != service.CodeAlreadyExists {
+		t.Fatalf("create: %v, want already_exists", err)
+	}
+	// Inserted directly, as if created before the file existed.
+	j := &store.Job{
+		ID: store.NewID(), Category: "movies", DestinationRoot: s.root("movies"), URL: "https://example.com/dune",
+		Title: store.Ptr("Dune"), Year: store.Ptr(2024), Status: jobs.StatusPending,
+	}
+	j.WorkDir = s.cfg.JobWorkDir(j.ID)
+	if err := s.st.Insert(context.Background(), j); err != nil {
+		t.Fatal(err)
+	}
+	s.rn.Wake()
 	failed := s.waitStatus(j.ID, jobs.StatusFailed)
 	if failed.ErrorCode == nil || *failed.ErrorCode != runner.CodeAlreadyExists {
 		t.Fatalf("error_code = %v", failed.ErrorCode)

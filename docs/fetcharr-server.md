@@ -160,7 +160,7 @@ Each worker takes the next pending job and runs these steps in order.
 ### 4.1 Pre-checks (still `pending` → `downloading`)
 
 1. **Disk space.** If free space on the category's filesystem is below `min_free_space`, the job fails with `low_disk_space`.
-2. **Existing file.** The server computes the target path (§5). If a video file with the same base name already exists in the target folder (any extension), the job fails with `already_exists`. A retry with `overwrite: true` skips this check and replaces the file.
+2. **Existing file.** The server computes the target path (§5). If a video file with the same base name already exists in the target folder (any extension), the job fails with `already_exists`. A job created or retried with `overwrite: true` skips this check and replaces the file. Create requests run the same check up front (§6.3), so this step only fires when the file appeared after the job was created, for example from another job with a different URL.
 
 ### 4.2 Download (`downloading`)
 
@@ -266,6 +266,7 @@ Example:
 | 404 | `not_found` | Job or batch not found |
 | 409 | `invalid_state` | Action not allowed in the current status |
 | 409 | `duplicate` | The same URL is already `pending`, `downloading`, `processing` or `paused` |
+| 409 | `already_exists` | Create without `overwrite`: the library already has a video file at the target (§4.1) |
 | 409 | `ytdlp_unmanaged` | Update requested but `ytdlp.binary` is set |
 | 409 | `ytdlp_busy` | Update requested while a job is `downloading` |
 | 500 | `internal` | Unexpected server error |
@@ -386,6 +387,7 @@ Validation:
 - `season` must be ≥0 and `episode` ≥0 when given. `year` must be a 4-digit number when given.
 - Each subtitle `url` must be `http` or `https`.
 - If the same `url` is already active, return `409 duplicate`.
+- Unless `overwrite` is `true`, if the target (§5) already has a video file with the same base name (any extension), return `409 already_exists`. The message names the existing file. Resubmit with `"overwrite": true` to replace it; the job then skips the §4.1 existing-file check.
 
 #### `POST /api/jobs/batch`
 Creates the episodes of one season as a batch. The category must have the `tv` layout. Episode-level `headers` are merged over batch-level `headers`.
@@ -419,7 +421,7 @@ Returns `201`:
 }
 ```
 
-If any episode fails validation, the whole request is rejected with `400` and nothing is created. Episodes whose URL is already active are skipped and listed in `skipped`. If every episode is skipped, the response is `409 duplicate`.
+If any episode fails validation, the whole request is rejected with `400` and nothing is created. Episodes are skipped and listed in `skipped` when their URL is already active (`reason: "duplicate"`) or, unless the batch has `"overwrite": true`, when their target already has a video file (`reason: "already_exists"`, same check as `POST /api/jobs`). If every episode is skipped, the response is `409 already_exists` when at least one of them is in the library, otherwise `409 duplicate`. `overwrite` applies to every episode of the request; to replace only some, send a batch with just those episodes.
 
 #### `GET /api/jobs`
 Lists jobs, newest `created_at` first.

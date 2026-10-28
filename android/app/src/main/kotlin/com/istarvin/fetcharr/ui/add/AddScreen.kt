@@ -92,6 +92,7 @@ import com.istarvin.fetcharr.ui.incoming.ResponsiveFormRow
 import com.istarvin.fetcharr.ui.incoming.CategoryChips
 import com.istarvin.fetcharr.ui.incoming.ItemFormActions
 import com.istarvin.fetcharr.ui.incoming.ItemFormFields
+import com.istarvin.fetcharr.ui.incoming.ReplaceExistingDialog
 import com.istarvin.fetcharr.ui.incoming.isHttpUrl
 import com.istarvin.fetcharr.ui.incoming.layoutIcon
 import com.istarvin.fetcharr.incoming.CategoryOption
@@ -136,6 +137,8 @@ fun AddScreen(
         onEditNewCategory = viewModel::editNewCategory,
         onDismissNewCategory = viewModel::dismissNewCategory,
         onSaveNewCategory = viewModel::saveNewCategory,
+        onReplaceExisting = viewModel::replaceExisting,
+        onKeepExisting = viewModel::keepExisting,
     )
 }
 
@@ -163,12 +166,15 @@ internal fun AddContent(
     onEditNewCategory: ((NewCategoryDraft) -> NewCategoryDraft) -> Unit = {},
     onDismissNewCategory: () -> Unit = {},
     onSaveNewCategory: () -> Unit = {},
+    onReplaceExisting: () -> Unit = {},
+    onKeepExisting: () -> Unit = {},
 ) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     state.newCategory?.let { draft ->
         NewCategoryDialog(draft, onEditNewCategory, onDismissNewCategory, onSaveNewCategory)
     }
+    if (state.confirmReplace) ReplaceExistingDialog(season = false, onReplaceExisting, onKeepExisting, onKeepExisting)
     Scaffold(
         topBar = {
             TopAppBar(

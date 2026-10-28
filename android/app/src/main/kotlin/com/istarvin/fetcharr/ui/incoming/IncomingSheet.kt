@@ -75,6 +75,9 @@ fun IncomingSheetHost(
     val hiddenForSettings = onSettingsDestination && (!state.serverConfigured || recoveringInSettings)
     if (hiddenForSettings) return
 
+    if (state.confirmReplace) {
+        ReplaceExistingDialog(state.isSeasonMode, viewModel::replaceExisting, viewModel::keepExisting, viewModel::dismissReplace)
+    }
     ModalBottomSheet(
         onDismissRequest = viewModel::cancel,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),

@@ -18,6 +18,8 @@ data class CreateJobRequest(
     val year: Int? = null,
     val headers: Map<String, String>? = null,
     val subtitles: List<SubtitleDto>? = null,
+    /** `true` replaces an existing library file instead of failing with `already_exists`. */
+    val overwrite: Boolean? = null,
 )
 
 @Serializable
@@ -38,4 +40,6 @@ data class CreateBatchRequest(
     val year: Int? = null,
     val headers: Map<String, String>? = null,
     val episodes: List<BatchEpisodeRequest>,
+    /** `true` replaces existing library files instead of skipping those episodes as `already_exists`. */
+    val overwrite: Boolean? = null,
 )

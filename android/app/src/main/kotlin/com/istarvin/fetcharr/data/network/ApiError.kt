@@ -41,6 +41,11 @@ sealed interface ApiError {
         override val userMessage: String get() = "Already in the queue"
     }
 
+    /** 409 `already_exists`: the library already has a file for this item; resubmit with `overwrite` to replace it. */
+    data class AlreadyExists(val message: String) : ApiError {
+        override val userMessage: String get() = "Already in library"
+    }
+
     /** 409 `invalid_state`: the job changed under us. Refresh it silently. */
     data class InvalidState(val message: String) : ApiError {
         override val userMessage: String get() = "Job already changed"
@@ -98,6 +103,7 @@ object ApiErrorMapper {
             "not_found" -> return ApiError.NotFound(message.orEmpty())
             "invalid_state" -> return ApiError.InvalidState(message.orEmpty())
             "duplicate" -> return ApiError.Duplicate(message.orEmpty(), envelope.details)
+            "already_exists" -> return ApiError.AlreadyExists(message.orEmpty())
             "ytdlp_busy" -> return ApiError.YtdlpBusy
             "ytdlp_unmanaged" -> return ApiError.YtdlpUnmanaged
             "internal" -> return ApiError.Server(status)

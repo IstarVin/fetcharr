@@ -105,6 +105,11 @@
     <string name="incoming_no_server_body">Add your Fetcharr server in Settings. Your download request is kept until then.</string>
     <string name="incoming_open_settings">Open Settings</string>
     <string name="field_category">Category</string>
+    <string name="replace_existing_title">Already in library</string>
+    <string name="replace_existing_body">A file with this name is already in the library. Replace it with this download?</string>
+    <string name="replace_existing_body_season">The selected episodes are already in the library or in the queue. Replace the library files?</string>
+    <string name="replace_existing_confirm">Replace</string>
+    <string name="replace_existing_keep">Keep existing</string>
     <string name="add_categories_loading">Loading categories…</string>
     <string name="add_categories_error">Couldn\'t load categories: %1$s</string>
     <string name="add_categories_empty">This server has no categories yet. Add a destination folder in Server settings to start downloading.</string>

@@ -27,6 +27,9 @@ type CreateRequest struct {
 	Year      *int              `json:"year"`
 	Headers   map[string]string `json:"headers"`
 	Subtitles []SubtitleInput   `json:"subtitles"`
+	// Overwrite replaces an existing library file instead of rejecting the
+	// request with already_exists.
+	Overwrite bool `json:"overwrite"`
 }
 
 // BatchEpisode is one episode of a BatchRequest.
@@ -46,6 +49,9 @@ type BatchRequest struct {
 	Year     *int              `json:"year"`
 	Headers  map[string]string `json:"headers"`
 	Episodes []BatchEpisode    `json:"episodes"`
+	// Overwrite replaces existing library files instead of skipping those
+	// episodes as already_exists.
+	Overwrite bool `json:"overwrite"`
 }
 
 // SkippedEpisode reports an episode that was not created.
@@ -54,8 +60,13 @@ type SkippedEpisode struct {
 	Reason  string `json:"reason"`
 }
 
-// SkipReasonDuplicate is the only skip reason: the URL is already active.
-const SkipReasonDuplicate = "duplicate"
+// Skip reasons of a batch episode.
+const (
+	// SkipReasonDuplicate: the URL is already active.
+	SkipReasonDuplicate = "duplicate"
+	// SkipReasonAlreadyExists: the episode is already in the library.
+	SkipReasonAlreadyExists = "already_exists"
+)
 
 // BatchResult is the outcome of CreateBatch. Jobs and Skipped are in
 // ascending episode order.

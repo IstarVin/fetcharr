@@ -15,6 +15,7 @@ const (
 	CodeNotFound       Code = "not_found"       // 404
 	CodeInvalidState   Code = "invalid_state"   // 409
 	CodeDuplicate      Code = "duplicate"       // 409
+	CodeAlreadyExists  Code = "already_exists"  // 409
 )
 
 // Error is a typed service error. Message is safe to show to the client.

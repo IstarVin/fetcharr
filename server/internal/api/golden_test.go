@@ -243,6 +243,11 @@ func TestGoldenErrors(t *testing.T) {
 		e.seedFixture("job-processing.json")
 		check(t, "error-duplicate.json", e.request("POST", "/api/jobs", fixtureRaw(t, "create-job-movie.json")), 409)
 	})
+	t.Run("already_exists", func(t *testing.T) {
+		e := newEnv(t)
+		writeLibraryFile(t, e, "movies", "Dune Part Two (2024)/Dune Part Two (2024).mkv")
+		check(t, "error-already_exists.json", e.request("POST", "/api/jobs", fixtureRaw(t, "create-job-movie.json")), 409)
+	})
 	t.Run("ytdlp_unmanaged", func(t *testing.T) {
 		e := newEnv(t) // ytdlp.binary is set
 		check(t, "error-ytdlp_unmanaged.json", e.request("POST", "/api/system/ytdlp/update", nil), 409)
