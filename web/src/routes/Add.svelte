@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AddCategoryDialog from '../components/AddCategoryDialog.svelte'
   import HeaderRows from '../components/HeaderRows.svelte'
   import Icon from '../components/Icon.svelte'
   import SubtitleRows from '../components/SubtitleRows.svelte'
@@ -32,11 +33,13 @@
   let submitting = $state(false)
   let error = $state<string | null>(null)
   let touched = $state(false)
+  let addingCategory = $state(false)
 
   const categories = $derived(session.categories)
   const choices = $derived(mode === 'season' ? categories.filter((c) => c.layout === 'tv') : categories)
   const category = $derived<Category | undefined>(choices.find((c) => c.id === categoryId))
   const layout = $derived(category?.layout ?? null)
+  const canAddCategory = $derived(!!session.info?.settings_supported)
 
   // Category preselection (Android §4.2): the per-browser default for the
   // kind of request, else the first category that fits.
@@ -166,14 +169,24 @@
   <div class="empty">
     <div class="glyph"><Icon name="folder" size={32} /></div>
     <h2>No categories yet</h2>
-    <p>This server has no categories yet. Add a destination folder in Server settings to start downloading.</p>
-    <a class="btn filled" href={href('server-settings')}>Set up categories</a>
+    {#if canAddCategory}
+      <p>This server has no categories yet. Add a destination folder to start downloading.</p>
+      <button type="button" class="btn filled" onclick={() => (addingCategory = true)}><Icon name="add" size={18} />Add category</button>
+    {:else}
+      <p>This server has no categories yet. Add a destination folder in Server settings to start downloading.</p>
+      <a class="btn filled" href={href('server-settings')}>Set up categories</a>
+    {/if}
   </div>
 {:else if mode === 'season' && choices.length === 0}
   <div class="empty">
     <h2>No TV categories</h2>
-    <p>Seasons go into a category with the TV show layout. Add one in Server settings.</p>
-    <a class="btn filled" href={href('server-settings')}>Server settings</a>
+    {#if canAddCategory}
+      <p>Seasons go into a category with the TV show layout.</p>
+      <button type="button" class="btn filled" onclick={() => (addingCategory = true)}><Icon name="add" size={18} />Add TV category</button>
+    {:else}
+      <p>Seasons go into a category with the TV show layout. Add one in Server settings.</p>
+      <a class="btn filled" href={href('server-settings')}>Server settings</a>
+    {/if}
   </div>
 {:else}
   <form class="layout" onsubmit={submit} novalidate>
@@ -195,6 +208,9 @@
               <Icon name={c.layout === 'tv' ? 'tv' : c.layout === 'movie' ? 'movie' : 'folder'} size={16} />{c.label}
             </button>
           {/each}
+          {#if canAddCategory}
+            <button type="button" class="chip" disabled={submitting} onclick={() => (addingCategory = true)}><Icon name="add" size={16} />Add category</button>
+          {/if}
         </div>
         {#if category}<span class="hint">{LAYOUT_LABEL[category.layout]} · <code>{category.path}</code></span>{/if}
       </div>
@@ -296,6 +312,16 @@
     </div>
   </form>
 {/if}
+
+<AddCategoryDialog
+  open={addingCategory}
+  layout={mode === 'season' ? 'tv' : 'movie'}
+  onclose={() => (addingCategory = false)}
+  oncreated={(id) => {
+    addingCategory = false
+    categoryId = id
+    toasts.show('Category added')
+  }} />
 
 <style>
   .layout {

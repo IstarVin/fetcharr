@@ -60,6 +60,8 @@ fun CategoryChips(
     selectedId: String?,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /** Placed after the last chip, for example a chip that adds a category. */
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     if (categories.isEmpty()) {
         Text(
@@ -91,6 +93,7 @@ fun CategoryChips(
                 },
             )
         }
+        trailing?.invoke()
     }
 }
 

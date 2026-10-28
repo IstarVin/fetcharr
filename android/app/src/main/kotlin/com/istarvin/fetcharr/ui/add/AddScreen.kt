@@ -24,8 +24,15 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Subtitles
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -69,6 +76,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.istarvin.fetcharr.ui.common.screenGutter
@@ -85,6 +93,8 @@ import com.istarvin.fetcharr.ui.incoming.CategoryChips
 import com.istarvin.fetcharr.ui.incoming.ItemFormActions
 import com.istarvin.fetcharr.ui.incoming.ItemFormFields
 import com.istarvin.fetcharr.ui.incoming.isHttpUrl
+import com.istarvin.fetcharr.ui.incoming.layoutIcon
+import com.istarvin.fetcharr.incoming.CategoryOption
 
 /** Manual add (spec 5.2). The URL is pre-filled from the share sheet via the route's `url` argument. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -122,6 +132,10 @@ fun AddScreen(
         onSubmit = viewModel::submit,
         onRefreshCategories = viewModel::refreshCategories,
         onOpenServerSettings = onOpenServerSettings,
+        onAddCategory = viewModel::openNewCategory,
+        onEditNewCategory = viewModel::editNewCategory,
+        onDismissNewCategory = viewModel::dismissNewCategory,
+        onSaveNewCategory = viewModel::saveNewCategory,
     )
 }
 
@@ -145,9 +159,16 @@ internal fun AddContent(
     onSubmit: () -> Unit,
     onRefreshCategories: () -> Unit = {},
     onOpenServerSettings: () -> Unit = onOpenSettings,
+    onAddCategory: () -> Unit = {},
+    onEditNewCategory: ((NewCategoryDraft) -> NewCategoryDraft) -> Unit = {},
+    onDismissNewCategory: () -> Unit = {},
+    onSaveNewCategory: () -> Unit = {},
 ) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
+    state.newCategory?.let { draft ->
+        NewCategoryDialog(draft, onEditNewCategory, onDismissNewCategory, onSaveNewCategory)
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -268,15 +289,34 @@ internal fun AddContent(
                             }
                         }
                         state.categories.isEmpty() -> {
-                            Text(stringResource(R.string.add_categories_empty))
-                            OutlinedButton(onClick = onOpenServerSettings, modifier = Modifier.heightIn(min = 48.dp)) {
-                                Text(stringResource(R.string.add_manage_categories))
+                            Text(stringResource(if (state.canAddCategory) R.string.add_categories_empty_add else R.string.add_categories_empty))
+                            if (state.canAddCategory) {
+                                Button(onClick = onAddCategory, modifier = Modifier.heightIn(min = 48.dp)) {
+                                    Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Text(stringResource(R.string.server_settings_add_category), Modifier.padding(start = 8.dp))
+                                }
+                            } else {
+                                OutlinedButton(onClick = onOpenServerSettings, modifier = Modifier.heightIn(min = 48.dp)) {
+                                    Text(stringResource(R.string.add_manage_categories))
+                                }
                             }
                             TextButton(onClick = onRefreshCategories, modifier = Modifier.heightIn(min = 48.dp)) {
                                 Text(stringResource(R.string.history_error_retry))
                             }
                         }
-                        else -> CategoryChips(state.categories, state.categoryId, onSelectCategory)
+                        else -> CategoryChips(
+                            state.categories, state.categoryId, onSelectCategory,
+                            trailing = if (state.canAddCategory) {
+                                {
+                                    AssistChip(
+                                        onClick = onAddCategory,
+                                        label = { Text(stringResource(R.string.server_settings_add_category)) },
+                                        leadingIcon = { Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) },
+                                        modifier = Modifier.heightIn(min = 48.dp),
+                                    )
+                                }
+                            } else null,
+                        )
                     }
                 }
                 state.layout?.let { layout ->
@@ -368,6 +408,88 @@ internal fun AddContent(
             }
         }
     }
+}
+
+/** Adds a category to the server without leaving the form; the server creates the folder. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun NewCategoryDialog(
+    draft: NewCategoryDraft,
+    onEdit: ((NewCategoryDraft) -> NewCategoryDraft) -> Unit,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit,
+) {
+    val enabled = !draft.saving
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(dismissOnBackPress = enabled, dismissOnClickOutside = enabled),
+        title = { Text(stringResource(R.string.server_settings_new_category)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = draft.label,
+                    onValueChange = { v -> onEdit { it.copy(label = v) } },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.server_settings_label)) },
+                    enabled = enabled,
+                    singleLine = true,
+                    isError = draft.showErrors && draft.labelInvalid,
+                    supportingText = if (draft.showErrors && draft.labelInvalid) {
+                        { Text(stringResource(R.string.server_settings_required)) }
+                    } else null,
+                )
+                OutlinedTextField(
+                    value = draft.path,
+                    onValueChange = { v -> onEdit { it.copy(path = v) } },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.server_settings_destination)) },
+                    placeholder = { Text("/media/…") },
+                    enabled = enabled,
+                    singleLine = true,
+                    isError = draft.showErrors && draft.pathInvalid,
+                    supportingText = {
+                        Text(stringResource(if (draft.showErrors && draft.pathInvalid) R.string.server_settings_path_invalid else R.string.add_category_path_hint))
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                )
+                Text(stringResource(R.string.server_settings_layout), style = MaterialTheme.typography.labelLarge)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        CategoryOption.LAYOUT_MOVIE to R.string.server_settings_movie,
+                        CategoryOption.LAYOUT_TV to R.string.server_settings_tv,
+                        CategoryOption.LAYOUT_FLAT to R.string.server_settings_flat,
+                    ).forEach { (layout, title) ->
+                        FilterChip(
+                            selected = draft.layout == layout,
+                            onClick = { onEdit { it.copy(layout = layout) } },
+                            label = { Text(stringResource(title)) },
+                            leadingIcon = { Icon(layoutIcon(layout), contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) },
+                            enabled = enabled,
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        )
+                    }
+                }
+                draft.error?.let { error ->
+                    Text(
+                        error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onSave, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(if (draft.saving) R.string.server_settings_saving else R.string.add_category_create))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(R.string.incoming_cancel))
+            }
+        },
+    )
 }
 
 /** Headers and subtitles are rarely needed: one quiet row until the user asks for them. */

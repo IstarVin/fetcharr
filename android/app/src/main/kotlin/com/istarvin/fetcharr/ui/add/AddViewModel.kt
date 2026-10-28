@@ -5,8 +5,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.istarvin.fetcharr.data.CategoryRepository
+import com.istarvin.fetcharr.data.ServerSettingsRepository
+import com.istarvin.fetcharr.data.network.ApiError
 import com.istarvin.fetcharr.data.network.ApiResult
 import com.istarvin.fetcharr.data.network.ServerConfig
+import com.istarvin.fetcharr.data.network.dto.CategoryDto
+import com.istarvin.fetcharr.data.network.dto.ServerCategoryDto
+import com.istarvin.fetcharr.data.network.dto.ServerSettingsDto
 import com.istarvin.fetcharr.data.network.dto.SubtitleDto
 import com.istarvin.fetcharr.data.settings.SettingsRepository
 import com.istarvin.fetcharr.incoming.CategoryOption
@@ -28,11 +33,25 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 
 data class HeaderRow(val id: Int, val name: String = "", val value: String = "")
 
 data class SubtitleRow(val id: Int, val url: String = "", val lang: String = "")
+
+/** The "New category" dialog: appended to the server's settings document on save. */
+data class NewCategoryDraft(
+    val label: String = "",
+    val path: String = "",
+    val layout: String = CategoryOption.LAYOUT_MOVIE,
+    val saving: Boolean = false,
+    val showErrors: Boolean = false,
+    val error: String? = null,
+) {
+    val labelInvalid: Boolean get() = label.isBlank()
+    val pathInvalid: Boolean get() = !path.trim().startsWith('/') || path.contains('\u0000')
+}
 
 /** Header values are held here, in memory only, until the screen is left. */
 data class AddUiState(
@@ -43,6 +62,9 @@ data class AddUiState(
     val categoriesLoading: Boolean = false,
     val categoryError: String? = null,
     val categoryId: String? = null,
+    /** False only once the server reported that it can't be configured from the app. */
+    val canAddCategory: Boolean = true,
+    val newCategory: NewCategoryDraft? = null,
     val form: ItemForm = ItemForm(),
     val headers: List<HeaderRow> = emptyList(),
     val subtitles: List<SubtitleRow> = emptyList(),
@@ -75,6 +97,7 @@ class AddViewModel @Inject constructor(
     private val hub: IncomingHub,
     private val settings: SettingsRepository,
     private val categoryRepository: CategoryRepository,
+    private val serverSettings: ServerSettingsRepository,
     private val submit: SubmitUseCase,
     private val submitListener: SubmitListener,
 ) : ViewModel() {
@@ -90,6 +113,7 @@ class AddViewModel @Inject constructor(
     private var connection: ServerConfig? = null
     private var categoryGeneration = 0L
     private var categoryRequest: Job? = null
+    private var newCategoryRequest: Job? = null
 
     init {
         viewModelScope.launch {
@@ -104,6 +128,8 @@ class AddViewModel @Inject constructor(
                     connection = nextConnection
                     categoryGeneration++
                     categoryRequest?.cancel()
+                    newCategoryRequest?.cancel()
+                    _uiState.update { it.copy(newCategory = null) }
                 }
                 val categories = app.cachedCategories.map { CategoryOption(it.id, it.label, it.layout) }
                 _uiState.update { cur ->
@@ -122,6 +148,11 @@ class AddViewModel @Inject constructor(
                     next
                 }
                 if (connectionChanged && nextConnection != null && categories.isEmpty()) refreshCategories()
+            }
+        }
+        viewModelScope.launch {
+            categoryRepository.info.collect { info ->
+                _uiState.update { it.copy(canAddCategory = info?.settingsSupported != false) }
             }
         }
     }
@@ -144,6 +175,68 @@ class AddViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    // ---- new category ----------------------------------------------------------------------
+
+    fun openNewCategory() = _uiState.update { if (it.newCategory == null) it.copy(newCategory = NewCategoryDraft()) else it }
+
+    fun editNewCategory(transform: (NewCategoryDraft) -> NewCategoryDraft) = _uiState.update { state ->
+        val draft = state.newCategory?.takeUnless { it.saving } ?: return@update state
+        state.copy(newCategory = transform(draft).copy(error = null))
+    }
+
+    /** Ignored while saving: the server may still apply the change. */
+    fun dismissNewCategory() = _uiState.update { if (it.newCategory?.saving == true) it else it.copy(newCategory = null) }
+
+    /** Appends the category to the server's settings, then selects it once the picker has it. */
+    fun saveNewCategory() {
+        val draft = _uiState.value.newCategory ?: return
+        val target = connection ?: return
+        if (draft.saving) return
+        if (draft.labelInvalid || draft.pathInvalid) {
+            _uiState.update { it.copy(newCategory = draft.copy(showErrors = true)) }
+            return
+        }
+        val generation = categoryGeneration
+        val category = ServerCategoryDto(
+            id = UUID.randomUUID().toString().replace("-", ""),
+            label = draft.label.trim(),
+            path = draft.path.trim(),
+            layout = draft.layout,
+        )
+        _uiState.update { it.copy(newCategory = draft.copy(saving = true, error = null)) }
+        newCategoryRequest = viewModelScope.launch {
+            val result = appendCategory(target, category)
+            if (connection != target || categoryGeneration != generation) return@launch
+            when (result) {
+                is ApiResult.Failure -> _uiState.update { state ->
+                    state.copy(newCategory = state.newCategory?.copy(saving = false, error = result.error.userMessage))
+                }
+                is ApiResult.Success -> {
+                    settings.reconcileServerCategories(target, result.value.categories.map {
+                        CategoryDto(it.id, it.label, it.layout, it.path)
+                    })
+                    _uiState.update { it.copy(newCategory = null, categoryId = category.id, error = null) }
+                    // Refreshes free space and capability flags; the save response already updated the picker.
+                    categoryRepository.refresh(target)
+                }
+            }
+        }
+    }
+
+    /** Reads the latest document so other settings are kept; retries once if it changed in between. */
+    private suspend fun appendCategory(target: ServerConfig, category: ServerCategoryDto): ApiResult<ServerSettingsDto> {
+        repeat(2) { attempt ->
+            val current = when (val loaded = serverSettings.load(target)) {
+                is ApiResult.Failure -> return loaded
+                is ApiResult.Success -> loaded.value
+            }
+            val saved = serverSettings.save(target, current.copy(categories = current.categories + category))
+            if (attempt == 0 && saved is ApiResult.Failure && saved.error is ApiError.SettingsConflict) return@repeat
+            return saved
+        }
+        error("unreachable")
     }
 
     // ---- edits -----------------------------------------------------------------------------

@@ -15,6 +15,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -45,7 +48,7 @@ class AddViewModelTest {
 
     private fun vm(url: String? = null) = AddViewModel(
         SavedStateHandle(if (url == null) emptyMap() else mapOf("url" to url)),
-        env.hub, env.settings, env.categoryRepository, env.submit, submitListener,
+        env.hub, env.settings, env.categoryRepository, env.serverSettings, env.submit, submitListener,
     ).also { created += it }
 
     private fun run(block: suspend () -> Unit) {
@@ -193,5 +196,37 @@ class AddViewModelTest {
         vm.refreshCategories()
         val ready = vm.uiState.first { it.categoryId == "misc" && !it.categoriesLoading }
         assertEquals("flat", ready.layout)
+    }
+
+    @Test
+    fun newCategoryIsAppendedToServerSettingsAndSelected() = run {
+        prepare()
+        val saved = mutableListOf<String>()
+        env.server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when {
+                request.method == "GET" && request.path == "/api/system/settings" -> env.json(200, Fixtures.text("server-settings.json"))
+                request.method == "PUT" -> env.json(200, request.body.readUtf8().also { saved += it })
+                else -> env.json(200, """{"version":"test","settings_supported":true,"categories":[]}""")
+            }
+        }
+        val vm = vm("https://example.com/v")
+        vm.uiState.first { it.categoryId != null }
+
+        vm.openNewCategory()
+        vm.saveNewCategory()
+        val invalid = vm.uiState.value.newCategory!!
+        assertTrue(invalid.showErrors && invalid.labelInvalid && invalid.pathInvalid)
+
+        vm.editNewCategory { it.copy(label = " Anime ", path = "/media/anime", layout = "tv") }
+        vm.saveNewCategory()
+        val done = vm.uiState.first { it.newCategory == null && it.layout == "tv" }
+        assertEquals("Anime", done.categories.single { it.id == done.categoryId }.label)
+
+        val body = Json.parseToJsonElement(saved.single()).jsonObject
+        val categories = body["categories"]!!.jsonArray.map { it.jsonObject }
+        assertEquals(listOf("movies", done.categoryId), categories.map { it["id"]!!.jsonPrimitive.content })
+        assertEquals("/media/anime", categories.last()["path"]!!.jsonPrimitive.content)
+        assertEquals("1", body["revision"]!!.jsonPrimitive.content)
+        assertEquals(1, body["media_servers"]!!.jsonArray.size)
     }
 }

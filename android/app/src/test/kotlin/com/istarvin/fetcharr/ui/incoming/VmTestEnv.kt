@@ -1,6 +1,7 @@
 package com.istarvin.fetcharr.ui.incoming
 
 import com.istarvin.fetcharr.data.CategoryRepository
+import com.istarvin.fetcharr.data.ServerSettingsRepository
 import com.istarvin.fetcharr.data.network.FetcharrApiFactory
 import com.istarvin.fetcharr.data.network.FetcharrApiProvider
 import com.istarvin.fetcharr.data.network.FetcharrJson
@@ -35,6 +36,7 @@ internal class VmTestEnv() {
         scope,
     )
     val categoryRepository = CategoryRepository(factory, settings, scope)
+    val serverSettings = ServerSettingsRepository(factory)
     val submit = SubmitUseCase(FetcharrApiProvider(factory, settings))
     val hub = IncomingHub(IncomingCoordinator(scope), IntentRouter())
 
