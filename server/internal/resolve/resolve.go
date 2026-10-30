@@ -48,8 +48,31 @@ func Hosts() []string {
 	return out
 }
 
+// directMirror returns the source for a URL that is already a mirror file: a
+// presigned R2 object or a Pixeldrain API file. A client may resolve a link
+// itself (a phone's network is not blocked the way a server's can be) and send
+// that URL. It is not given to yt-dlp, which rejects archives and
+// extension-less objects (see package direct).
+func directMirror(raw string) (Source, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return Source{}, false
+	}
+	host := strings.ToLower(u.Hostname())
+	switch {
+	case strings.HasSuffix(host, ".r2.cloudflarestorage.com") && u.Query().Has("X-Amz-Signature"):
+		return Source{Server: "FSL", URL: raw, Resumable: true}, true
+	case host == "pixeldrain.com" && strings.HasPrefix(u.Path, "/api/file/"):
+		return Source{Server: "Pixeldrain", URL: raw, Resumable: true}, true
+	}
+	return Source{}, false
+}
+
 // Matches reports whether raw is a link this package resolves.
 func Matches(raw string) bool {
+	if _, ok := directMirror(raw); ok {
+		return true
+	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return false
@@ -96,6 +119,9 @@ func New(client *http.Client) *Resolver {
 // Resolve returns the mirrors of the file behind raw, best first. It fails
 // when no mirror could be resolved.
 func (r *Resolver) Resolve(ctx context.Context, raw string) ([]Source, error) {
+	if s, ok := directMirror(raw); ok {
+		return []Source{s}, nil
+	}
 	current := raw
 	for range maxHops {
 		u, err := url.Parse(current)

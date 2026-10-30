@@ -60,16 +60,32 @@ func newFake(t *testing.T) (*Resolver, *fakeHosts) {
 
 func TestMatches(t *testing.T) {
 	for raw, want := range map[string]bool{
-		"https://greenmotors.club/?id=abc":       true,
-		"https://greenmotors.cc/?id=abc":         true,
-		"https://HubCloud.foo/drive/x":           true,
-		"https://hubdrive.bar/file/1":            true,
-		"https://cdn.example/movie.mkv":          false,
-		"https://example.com/hubcloud.ist/drive": false,
-		"::bad":                                  false,
+		"https://greenmotors.club/?id=abc":                            true,
+		"https://greenmotors.cc/?id=abc":                              true,
+		"https://HubCloud.foo/drive/x":                                true,
+		"https://hubdrive.bar/file/1":                                 true,
+		"https://cdn.example/movie.mkv":                               false,
+		"https://a1.r2.cloudflarestorage.com/hub/x?X-Amz-Signature=s": true,
+		"https://a1.r2.cloudflarestorage.com/hub/x":                   false,
+		"https://pixeldrain.com/api/file/abc":                         true,
+		"https://pixeldrain.com/u/abc":                                false,
+		"https://example.com/hubcloud.ist/drive":                      false,
+		"::bad":                                                       false,
 	} {
 		if got := Matches(raw); got != want {
 			t.Errorf("Matches(%q) = %v, want %v", raw, got, want)
+		}
+	}
+}
+
+func TestResolveDirectMirror(t *testing.T) {
+	for raw, server := range map[string]string{
+		"https://a1.r2.cloudflarestorage.com/hub/x?X-Amz-Signature=s": "FSL",
+		"https://pixeldrain.com/api/file/abc":                         "Pixeldrain",
+	} {
+		got, err := New(nil).Resolve(context.Background(), raw)
+		if err != nil || len(got) != 1 || got[0].URL != raw || got[0].Server != server || !got[0].Resumable {
+			t.Errorf("Resolve(%q) = %+v, %v", raw, got, err)
 		}
 	}
 }
