@@ -12,7 +12,9 @@ COPY web/ ./
 RUN npm run build
 
 # ---- build stage ------------------------------------------------------------
-FROM golang:1.26-bookworm AS build
+# Runs on the build host and cross-compiles (pure Go, CGO_ENABLED=0), so the
+# arm64 image never runs the compiler under QEMU emulation.
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS build
 WORKDIR /src
 
 COPY server/go.mod server/go.sum ./
