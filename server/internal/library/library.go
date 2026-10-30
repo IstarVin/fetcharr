@@ -48,6 +48,17 @@ func TargetOf(cat config.Category, j *store.Job) (naming.Target, error) {
 	return naming.Resolve(cat.Path, cat.Layout, MetaOf(j))
 }
 
+// SeasonTarget returns the location an archive (season pack) job fills:
+// Dir is the season folder and RefreshDir the show folder. The job's episode
+// is ignored and Base is empty.
+func SeasonTarget(cat config.Category, j *store.Job) (naming.Target, error) {
+	m := MetaOf(j)
+	m.Episode = new(int)
+	t, err := naming.Resolve(cat.Path, naming.LayoutTV, m)
+	t.Base = ""
+	return t, err
+}
+
 // MediaFiles returns the video files in t.Dir whose name without extension is
 // t.Base (any video extension), sorted by name. A missing folder is not an
 // error.

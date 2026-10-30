@@ -18,6 +18,10 @@ fun JobDto.heading(layout: String?): String {
         val code = buildString {
             if (season != null) append("S").append(season.toString().padStart(2, '0'))
             if (episode != null) append("E").append(episode.toString().padStart(2, '0'))
+            if (archive != null) {
+                append(" season pack")
+                if (files.isNotEmpty()) append(" (${files.size} episode${if (files.size == 1) "" else "s"})")
+            }
         }
         return "${showName!!.trim()} — $code"
     }

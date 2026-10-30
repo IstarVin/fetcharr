@@ -56,10 +56,21 @@ data class JobDto(
     @SerialName("error_code") val errorCode: String? = null,
     @SerialName("error_message") val errorMessage: String? = null,
     val warnings: List<String> = emptyList(),
+    /** Season-pack jobs only; absent otherwise and on older servers. */
+    val archive: ArchiveDto? = null,
+    /** Episodes a completed season-pack job placed. */
+    val files: List<String> = emptyList(),
     @SerialName("created_at") @Serializable(with = EpochMillisSerializer::class) val createdAt: Long,
     @SerialName("queued_at") @Serializable(with = EpochMillisSerializer::class) val queuedAt: Long,
     @SerialName("started_at") @Serializable(with = EpochMillisSerializer::class) val startedAt: Long? = null,
     @SerialName("finished_at") @Serializable(with = EpochMillisSerializer::class) val finishedAt: Long? = null,
+)
+
+/** Episode mapping of a season-pack (archive) job. */
+@Serializable
+data class ArchiveDto(
+    @SerialName("episode_offset") val episodeOffset: Int = 0,
+    @SerialName("episode_titles") val episodeTitles: Map<String, String> = emptyMap(),
 )
 
 /** `GET /api/jobs`. The server returns `jobs` and `total`; `limit`/`offset` are tolerated if present. */

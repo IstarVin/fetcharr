@@ -38,6 +38,9 @@ func (r *Runner) precheckWithConfig(j *store.Job, cat config.Category, cfg *conf
 // existingMedia returns the path of a video file in the job's target folder
 // whose name, without extension, is the target base name; "" if there is none.
 func existingMedia(cat config.Category, j *store.Job) (string, error) {
+	if j.Archive != nil {
+		return "", nil // checked per episode when placing
+	}
 	t, err := library.TargetOf(cat, j)
 	if err != nil {
 		return "", err

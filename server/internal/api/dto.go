@@ -39,10 +39,19 @@ type JobDTO struct {
 	ErrorCode    *string       `json:"error_code"`
 	ErrorMessage *string       `json:"error_message"`
 	Warnings     []string      `json:"warnings"`
-	CreatedAt    timefmt.Time  `json:"created_at"`
-	QueuedAt     timefmt.Time  `json:"queued_at"`
-	StartedAt    timefmt.Time  `json:"started_at"`
-	FinishedAt   timefmt.Time  `json:"finished_at"`
+	// Archive and Files are set only on season-pack jobs.
+	Archive    *ArchiveDTO  `json:"archive,omitempty"`
+	Files      []string     `json:"files,omitempty"`
+	CreatedAt  timefmt.Time `json:"created_at"`
+	QueuedAt   timefmt.Time `json:"queued_at"`
+	StartedAt  timefmt.Time `json:"started_at"`
+	FinishedAt timefmt.Time `json:"finished_at"`
+}
+
+// ArchiveDTO is the episode mapping of a season-pack job.
+type ArchiveDTO struct {
+	EpisodeOffset int               `json:"episode_offset"`
+	EpisodeTitles map[string]string `json:"episode_titles,omitempty"`
 }
 
 // NewJobDTO converts a stored job to its wire form. It is exported for the
@@ -69,6 +78,10 @@ func NewJobDTO(j *store.Job) JobDTO {
 	}
 	for _, s := range j.Subtitles {
 		d.Subtitles = append(d.Subtitles, SubtitleDTO{URL: s.URL, Lang: s.Lang})
+	}
+	if j.Archive != nil {
+		d.Archive = &ArchiveDTO{EpisodeOffset: j.Archive.EpisodeOffset, EpisodeTitles: j.Archive.EpisodeTitles}
+		d.Files = append([]string{}, j.Files...)
 	}
 	if j.Progress != nil {
 		p := ProgressDTO(*j.Progress)
@@ -112,19 +125,24 @@ type DownloadWindowDTO struct {
 
 // InfoDTO is the body of GET /api/info.
 type InfoDTO struct {
-	SourceReplacementSupported bool               `json:"source_replacement_supported"`
-	QueuePrioritySupported     bool               `json:"queue_priority_supported"`
-	HistorySearchSupported     bool               `json:"history_search_supported"`
-	NotificationsSupported     bool               `json:"notifications_supported"`
-	DownloadWindow             *DownloadWindowDTO `json:"download_window"`
-	SettingsSupported          bool               `json:"settings_supported"`
-	SetupRequired              bool               `json:"setup_required"`
-	Version                    string             `json:"version"`
-	YtdlpVersion               string             `json:"ytdlp_version"`
-	YtdlpManaged               bool               `json:"ytdlp_managed"`
-	Concurrency                int                `json:"concurrency"`
-	AuthRequired               bool               `json:"auth_required"`
-	Categories                 []CategoryDTO      `json:"categories"`
+	SourceReplacementSupported bool `json:"source_replacement_supported"`
+	QueuePrioritySupported     bool `json:"queue_priority_supported"`
+	HistorySearchSupported     bool `json:"history_search_supported"`
+	// ResolverHosts are the link hosts (4KHDHub redirector, HubCloud,
+	// HubDrive) the server resolves itself; ArchiveFormats the season-pack
+	// formats it extracts (archive jobs).
+	ResolverHosts          []string           `json:"resolver_hosts"`
+	ArchiveFormats         []string           `json:"archive_formats"`
+	NotificationsSupported bool               `json:"notifications_supported"`
+	DownloadWindow         *DownloadWindowDTO `json:"download_window"`
+	SettingsSupported      bool               `json:"settings_supported"`
+	SetupRequired          bool               `json:"setup_required"`
+	Version                string             `json:"version"`
+	YtdlpVersion           string             `json:"ytdlp_version"`
+	YtdlpManaged           bool               `json:"ytdlp_managed"`
+	Concurrency            int                `json:"concurrency"`
+	AuthRequired           bool               `json:"auth_required"`
+	Categories             []CategoryDTO      `json:"categories"`
 }
 
 // ListDTO is the body of GET /api/jobs.

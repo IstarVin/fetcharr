@@ -69,6 +69,8 @@ describe('job text', () => {
     expect(heading(d)).toMatch(/^Severance — S02E0\d$/)
     expect(heading({ ...d, show_name: null, title: 'Dune Part Two', year: 2024, season: null, episode: null })).toBe('Dune Part Two (2024)')
     expect(heading({ ...d, show_name: null, title: null, year: null, season: null, episode: null })).toBe(d.url)
+    expect(heading({ ...d, show_name: 'MobLand', season: 1, episode: null, archive: { episode_offset: 0 } })).toBe('MobLand — S01 season pack')
+    expect(heading({ ...d, show_name: 'MobLand', season: 1, episode: null, archive: { episode_offset: 0 }, files: ['a', 'b'] })).toBe('MobLand — S01 season pack (2 episodes)')
   })
 
   it('tidies scene names', () => {

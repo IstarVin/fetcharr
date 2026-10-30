@@ -292,6 +292,10 @@ func jobFromDTO(d JobDTO) *store.Job {
 	for _, s := range d.Subtitles {
 		j.Subtitles = append(j.Subtitles, store.Subtitle(s))
 	}
+	if d.Archive != nil {
+		j.Archive = &store.Archive{EpisodeOffset: d.Archive.EpisodeOffset, EpisodeTitles: d.Archive.EpisodeTitles}
+		j.Files = d.Files
+	}
 	if d.Progress != nil {
 		p := store.Progress(*d.Progress)
 		j.Progress = &p

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/istarvin/fetcharr/server/internal/archive"
+	"github.com/istarvin/fetcharr/server/internal/resolve"
 	"github.com/istarvin/fetcharr/server/internal/timefmt"
 	"github.com/istarvin/fetcharr/server/internal/ytdlp"
 )
@@ -108,6 +110,8 @@ func (s *server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		SourceReplacementSupported: true,
 		QueuePrioritySupported:     true,
 		HistorySearchSupported:     true,
+		ResolverHosts:              resolve.Hosts(),
+		ArchiveFormats:             archive.Formats(),
 		NotificationsSupported:     s.settings != nil,
 		SettingsSupported:          s.settings != nil,
 		SetupRequired:              len(cfg.Categories) == 0,

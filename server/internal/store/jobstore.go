@@ -18,7 +18,8 @@ import (
 
 const jobColumns = `id, batch_id, category, url, headers, title, show_name, season, episode, year,
  subtitles, status, progress, file_path, error_code, error_message, warnings,
- overwrite, placing, work_dir, created_at, queued_at, started_at, finished_at, destination_root, reset_work_dir`
+ overwrite, placing, work_dir, created_at, queued_at, started_at, finished_at, destination_root, reset_work_dir,
+ archive, file_paths`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -28,6 +29,8 @@ func scanJob(r rowScanner) (*Job, error) {
 		batchID, title, showName            sql.NullString
 		season, episode, year               sql.NullInt64
 		headers, subtitles, warnings        string
+		archive                             sql.NullString
+		filePaths                           string
 		progress, filePath, errCode, errMsg sql.NullString
 		status, created, queued             string
 		started, finished                   sql.NullString
@@ -35,7 +38,8 @@ func scanJob(r rowScanner) (*Job, error) {
 	)
 	err := r.Scan(&j.ID, &batchID, &j.Category, &j.URL, &headers, &title, &showName, &season, &episode, &year,
 		&subtitles, &status, &progress, &filePath, &errCode, &errMsg, &warnings,
-		&overwrite, &placing, &j.WorkDir, &created, &queued, &started, &finished, &j.DestinationRoot, &resetWorkDir)
+		&overwrite, &placing, &j.WorkDir, &created, &queued, &started, &finished, &j.DestinationRoot, &resetWorkDir,
+		&archive, &filePaths)
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +68,16 @@ func scanJob(r rowScanner) (*Job, error) {
 	j.Warnings = []string{}
 	if err := json.Unmarshal([]byte(warnings), &j.Warnings); err != nil {
 		return nil, fmt.Errorf("job %s: bad warnings json: %w", j.ID, err)
+	}
+	j.Files = []string{}
+	if err := json.Unmarshal([]byte(filePaths), &j.Files); err != nil {
+		return nil, fmt.Errorf("job %s: bad file_paths json: %w", j.ID, err)
+	}
+	if archive.Valid {
+		j.Archive = &Archive{}
+		if err := json.Unmarshal([]byte(archive.String), j.Archive); err != nil {
+			return nil, fmt.Errorf("job %s: bad archive json: %w", j.ID, err)
+		}
 	}
 	if progress.Valid {
 		j.Progress = &Progress{}
@@ -142,6 +156,14 @@ func encodeProgress(p *Progress) (any, error) {
 	return string(b), err
 }
 
+func encodeArchive(a *Archive) (any, error) {
+	if a == nil {
+		return nil, nil
+	}
+	b, err := json.Marshal(a)
+	return string(b), err
+}
+
 func b2i(b bool) int {
 	if b {
 		return 1
@@ -184,6 +206,9 @@ func prepare(j *Job, base time.Time) error {
 	if j.Warnings == nil {
 		j.Warnings = []string{}
 	}
+	if j.Files == nil {
+		j.Files = []string{}
+	}
 	return nil
 }
 
@@ -209,12 +234,21 @@ func insertJob(ctx context.Context, x execer, j *Job) error {
 	if err != nil {
 		return err
 	}
-	_, err = x.ExecContext(ctx, `INSERT INTO jobs (`+jobColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	arch, err := encodeArchive(j.Archive)
+	if err != nil {
+		return err
+	}
+	files, err := json.Marshal(j.Files)
+	if err != nil {
+		return err
+	}
+	_, err = x.ExecContext(ctx, `INSERT INTO jobs (`+jobColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		j.ID, optStr(j.BatchID), j.Category, j.URL, string(headers), optStr(j.Title), optStr(j.ShowName),
 		optInt(j.Season), optInt(j.Episode), optInt(j.Year), string(subs), string(j.Status), prog,
 		optStr(j.FilePath), optStr(j.ErrorCode), optStr(j.ErrorMessage), string(warns),
 		b2i(j.Overwrite), b2i(j.Placing), j.WorkDir,
-		timefmt.Format(j.CreatedAt), timefmt.Format(j.QueuedAt), optTime(j.StartedAt), optTime(j.FinishedAt), j.DestinationRoot, b2i(j.ResetWorkDir))
+		timefmt.Format(j.CreatedAt), timefmt.Format(j.QueuedAt), optTime(j.StartedAt), optTime(j.FinishedAt), j.DestinationRoot, b2i(j.ResetWorkDir),
+		arch, string(files))
 	if err != nil {
 		return wrapConstraint(ctx, x, err, j.URL)
 	}
@@ -473,6 +507,7 @@ type Update struct {
 	ErrorCode       Opt[*string]
 	ErrorMessage    Opt[*string]
 	Warnings        Opt[[]string]
+	Files           Opt[[]string]
 	Overwrite       Opt[bool]
 	Placing         Opt[bool]
 	WorkDir         Opt[string]
@@ -587,6 +622,17 @@ func (s *Store) update(ctx context.Context, id string, g UpdateGuard, u Update) 
 			return nil, err
 		}
 		add("warnings", string(b))
+	}
+	if u.Files.Set {
+		f := u.Files.Value
+		if f == nil {
+			f = []string{}
+		}
+		b, err := json.Marshal(f)
+		if err != nil {
+			return nil, err
+		}
+		add("file_paths", string(b))
 	}
 	if u.Overwrite.Set {
 		add("overwrite", b2i(u.Overwrite.Value))

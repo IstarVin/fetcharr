@@ -80,6 +80,9 @@ type Options struct {
 	// Rename moves a file (default os.Rename). Tests inject EXDEV to exercise
 	// the cross-filesystem copy.
 	Rename func(oldpath, newpath string) error
+	// FreeBytes returns the bytes available on the filesystem holding path
+	// (default syscall.Statfs); archive jobs check it before extracting.
+	FreeBytes func(path string) (uint64, error)
 	// Now is the clock (default timefmt.Now).
 	Now func() time.Time
 }
@@ -99,6 +102,7 @@ type Processor struct {
 	maxSubtitleBytes int64
 	killGrace        time.Duration
 	rename           func(string, string) error
+	freeBytes        func(string) (uint64, error)
 	now              func() time.Time
 	targetMu         sync.Mutex
 	targets          map[string]*targetLock
@@ -121,7 +125,7 @@ func New(o Options) *Processor {
 		onCompleted: o.OnCompleted, ffmpeg: o.FFmpeg, client: o.HTTPClient,
 		subtitleTimeout: o.SubtitleTimeout, convertTimeout: o.ConvertTimeout,
 		maxSubtitleBytes: o.MaxSubtitleBytes, killGrace: o.KillGrace,
-		rename: o.Rename, now: o.Now,
+		rename: o.Rename, now: o.Now, freeBytes: o.FreeBytes,
 	}
 	if p.pub == nil {
 		p.pub = nopPub{}
@@ -153,6 +157,9 @@ func New(o Options) *Processor {
 	if p.now == nil {
 		p.now = timefmt.Now
 	}
+	if p.freeBytes == nil {
+		p.freeBytes = statfsFree
+	}
 	return p
 }
 
@@ -173,6 +180,10 @@ func (p *Processor) Process(ctx context.Context, job *store.Job, mediaFile strin
 	workDir := p.cfg.JobWorkDir(job.ID)
 	if abs, err := filepath.Abs(workDir); err == nil {
 		workDir = abs
+	}
+
+	if job.Archive != nil {
+		return p.processArchive(ctx, job, cat, workDir, mediaFile)
 	}
 
 	// 1. Subtitles.
@@ -242,7 +253,7 @@ func (p *Processor) Process(ctx context.Context, job *store.Job, mediaFile strin
 	}
 
 	// 5. Complete.
-	return p.complete(job, finalMedia, mediaSize, warnings, target.RefreshDir)
+	return p.complete(job, finalMedia, nil, mediaSize, warnings, target.RefreshDir)
 }
 
 // clearPlacing resets the placing flag of a job that failed or was
@@ -256,20 +267,25 @@ func (p *Processor) clearPlacing(id string) {
 }
 
 // complete commits processing -> completed and notifies the media servers.
-func (p *Processor) complete(job *store.Job, filePath string, mediaSize int64, warnings []string, refreshDir string) error {
+// files are the episodes an archive job placed (nil otherwise).
+func (p *Processor) complete(job *store.Job, filePath string, files []string, mediaSize int64, warnings []string, refreshDir string) error {
 	to, err := jobs.Transition(jobs.StatusProcessing, jobs.EventProcessingDone, true)
 	if err != nil {
 		return processingFailed("%v", err)
 	}
 	finished := p.now()
-	row, err := p.st.UpdateIf(context.Background(), job.ID, []jobs.Status{jobs.StatusProcessing}, store.Update{
+	u := store.Update{
 		Status:     store.Set(to),
 		FilePath:   store.Set(&filePath),
 		Progress:   store.Set(completedProgress(job.Progress, mediaSize)),
 		Warnings:   store.Set(warnings),
 		Placing:    store.Set(false),
 		FinishedAt: store.Set(&finished),
-	})
+	}
+	if files != nil {
+		u.Files = store.Set(files)
+	}
+	row, err := p.st.UpdateIf(context.Background(), job.ID, []jobs.Status{jobs.StatusProcessing}, u)
 	switch {
 	case err == nil:
 	case errors.Is(err, store.ErrStatusMismatch), errors.Is(err, store.ErrNotFound):

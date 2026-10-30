@@ -30,6 +30,15 @@ type Progress struct {
 	ETASeconds      *int64   `json:"eta_seconds"`
 }
 
+// Archive is the episode mapping of a season-pack job.
+type Archive struct {
+	// EpisodeOffset is added to the episode number read from each file name
+	// (or to its position when the names carry none).
+	EpisodeOffset int `json:"episode_offset"`
+	// EpisodeTitles maps final episode numbers ("1", "2", …) to titles.
+	EpisodeTitles map[string]string `json:"episode_titles,omitempty"`
+}
+
 // Job is the stored job row: every field of the API job object (spec §6.2)
 // plus server-internal state.
 //
@@ -61,7 +70,14 @@ type Job struct {
 	Status   jobs.Status
 	Progress *Progress // nil until the first update
 
-	FilePath     *string
+	FilePath *string
+	// Archive marks a season-pack job: one download holding several episode
+	// files, placed one by one after extraction. Nil for ordinary jobs.
+	Archive *Archive
+	// Files are the library files an archive job placed (FilePath is then
+	// the season folder). Empty for ordinary jobs.
+	Files []string
+
 	ErrorCode    *string // low_disk_space | already_exists | download_failed | processing_failed
 	ErrorMessage *string
 	Warnings     []string

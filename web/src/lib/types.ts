@@ -37,6 +37,10 @@ export interface Job {
   error_code: string | null
   error_message: string | null
   warnings: string[]
+  /** Season-pack jobs only (absent otherwise and on older servers). */
+  archive?: { episode_offset: number; episode_titles?: Record<string, string> }
+  /** Episodes a completed season-pack job placed. */
+  files?: string[]
   created_at: string
   queued_at: string
   started_at: string | null

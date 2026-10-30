@@ -190,6 +190,8 @@ yt-dlp runs as a subprocess in its own process group. It writes into the job's w
 
 **Failure.** If yt-dlp still exits non-zero, the job fails with `download_failed`. `error_message` holds the last `ERROR:` lines from stderr, with header values redacted.
 
+**Resolver links.** A job whose URL is a 4KHDHub file link (host starting with `greenmotors.`, `hubdrive.` or `hubcloud.`, listed in `/api/info` `resolver_hosts`) does not use yt-dlp. Each attempt resolves the link again, because the file URLs behind it are signed and expire after about 8 hours: redirector page (payload decoded offline) → HubDrive page → HubCloud drive page → server list. The mirrors are tried in order FSL (presigned R2, resumable), Pixeldrain, then 10Gbps (no Range, restarts). The file is fetched by the server's own HTTP client into `<work_dir>/download.part`, resumed with `Range` when the mirror allows it, and renamed to `media.<ext>`; the extension comes from `Content-Disposition`, else the file's magic bytes, else the URL. A web page instead of a file, an HTTP error or 90 s without data is a retryable `download_failed`. Resolution and download errors never contain URLs. The job's `headers` are not sent to the mirrors.
+
 ### 4.3 Processing (`processing`)
 
 1. **Subtitles.** Download each subtitle URL using the job's headers. Anything that isn't SRT is converted to SRT with ffmpeg. A subtitle that fails to download or convert does not fail the job; it adds an entry to `warnings`.
@@ -200,6 +202,14 @@ yt-dlp runs as a subprocess in its own process group. It writes into the job's w
 6. **Notify media servers** (§4.5). This runs asynchronously and never affects the job's status.
 
 Any error in steps 2–4 fails the job with `processing_failed` (or `already_exists`). The work directory is kept so a retry can reuse it.
+
+**Archive jobs** (season packs, `archive` set) replace steps 1–3:
+
+1. The download must be a zip, tar or 7z archive (detected from its magic bytes; 7z needs `7zz` or `7z` on PATH). The filesystem holding the work directory needs room for the extracted files, else `low_disk_space`.
+2. It is extracted into `<work_dir>/extract/`. Entries that would leave that folder fail the job; links are never extracted. Extraction progress is published in `progress` while the job is `processing`.
+3. The video files (any depth) are collected, without samples (`sample` in the name, or under a tenth of the median size). Each is numbered from its name (`S01E02`, `1x02`, `E02`/`Episode 02`, ` - 02`); if a name has no number or two share one, every file is numbered by natural-sort position instead. `archive.episode_offset` is added, and `archive.episode_titles` supplies titles by final episode number.
+4. Each episode is placed like a tv job (§5). One already in the library is skipped with a warning (`episode N skipped: already in the library`) unless `overwrite` is set. If every episode is skipped, the job fails with `already_exists`. A failed placement removes the episodes this job added.
+5. On completion `file_path` is the season folder and `files` lists the placed episodes.
 
 ### 4.4 Pause, cancel, shutdown
 
@@ -381,7 +391,7 @@ Category IDs are fixed in Android after creation. Destination paths must be abso
 
 Live updates never kill existing downloads. Decreased concurrency takes effect as workers finish; increased concurrency wakes dispatch. Download arguments and free-space checks use a snapshot for each new attempt. Retention changes wake the pruner and remove records only. Auto-update can be toggled only for the managed binary; enabling it schedules an immediate safe check. Pending integration refreshes use the current connections at dispatch time. No filesystem browser or folder-creation API is provided.
 
-The optional `/api/info` capability fields default to false on older servers. `settings_supported` indicates this API exists; `setup_required` means the category list is empty. `queue_priority_supported`, `history_search_supported` and `notifications_supported` advertise the prioritize endpoints, `q`, and notification targets. `download_window` is `{start, end, open, opens_at}` while a window is configured (`opens_at` is null while it is open), else null.
+`resolver_hosts` lists the link hosts the server resolves itself (§4.2) and `archive_formats` the season-pack formats it extracts (`zip`, `tar`, plus `7z` when 7-Zip is installed); both are absent on older servers. The optional `/api/info` capability fields default to false on older servers. `settings_supported` indicates this API exists; `setup_required` means the category list is empty. `queue_priority_supported`, `history_search_supported` and `notifications_supported` advertise the prioritize endpoints, `q`, and notification targets. `download_window` is `{start, end, open, opens_at}` while a window is configured (`opens_at` is null while it is open), else null.
 
 The settings document also has `downloads.rate_limit` (bytes/s), `window_start`/`window_end` ("HH:MM" or both ""), `auto_retries` (0–5) and a `notifications` array of `{id, type: "ntfy"|"webhook", url, on_completed, on_failed, has_credential}` with an optional write-only `credential` (omit to keep, `""` to remove). A PUT that omits these fields, from an older client, keeps their saved values. Existing job responses and WebSocket events retain their shape.
 
@@ -408,6 +418,21 @@ Validation:
 - Each subtitle `url` must be `http` or `https`.
 - If the same `url` is already active, or another active job will write the same library file (same folder and name, ignoring case and extension), return `409 duplicate`. This also applies with `overwrite`, and to retries.
 - Unless `overwrite` is `true`, if the target (§5) already has a video file with the same base name (any extension), return `409 already_exists`. The message names the existing file. Resubmit with `"overwrite": true` to replace it; the job then skips the §4.1 existing-file check.
+
+**Season packs.** An optional `archive` object makes the job an archive job (§4.3). It needs a tv category and `show_name` and `season`, and `episode` must be omitted:
+
+```json
+{
+  "url": "https://greenmotors.club/?id=…",
+  "category": "tv",
+  "show_name": "Dead-End Job",
+  "season": 1,
+  "year": 2026,
+  "archive": { "episode_offset": 0, "episode_titles": { "1": "Convenience Store Rules" } }
+}
+```
+
+`episode_offset` is between -999 and 9999; `episode_titles` keys are episode numbers. An active archive job claims its whole season folder: another archive job or an episode job for that season returns `409 duplicate`, and an archive job is refused while an episode of its season is active. The existing-file check runs per episode when placing. Archive jobs return `archive` and `files` in the Job object; other jobs omit both fields. Older servers reject the field with `400`; check `archive_formats` in `/api/info` first.
 
 #### `POST /api/jobs/batch`
 Creates the episodes of one season as a batch. The category must have the `tv` layout. Episode-level `headers` are merged over batch-level `headers`.

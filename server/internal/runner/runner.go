@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/istarvin/fetcharr/server/internal/config"
 	"github.com/istarvin/fetcharr/server/internal/jobs"
+	"github.com/istarvin/fetcharr/server/internal/resolve"
 	"github.com/istarvin/fetcharr/server/internal/service"
 	"github.com/istarvin/fetcharr/server/internal/store"
 )
@@ -63,6 +65,12 @@ type Options struct {
 	// Now is the clock (default time.Now). The download window is read in
 	// its location.
 	Now func() time.Time
+	// HTTPClient downloads resolver links (default: no overall timeout, 60 s
+	// to response headers). Tests inject one.
+	HTTPClient *http.Client
+	// Resolver turns resolver links into file URLs (default resolve.New
+	// with a 30 s timeout).
+	Resolver *resolve.Resolver
 	// AutoRetryDelay is the wait before the first automatic retry of a
 	// failed yt-dlp run; later retries wait proportionally longer (default
 	// DefaultAutoRetryDelay).
@@ -98,6 +106,8 @@ type Runner struct {
 	freeBytes       func(string) (uint64, error)
 	now             func() time.Time
 	retryDelay      time.Duration
+	http            *http.Client
+	resolver        *resolve.Resolver
 
 	wake      chan struct{}
 	quit      chan struct{} // closed by Shutdown
@@ -138,6 +148,8 @@ func New(o Options) *Runner {
 		freeBytes:       o.FreeBytes,
 		now:             o.Now,
 		retryDelay:      o.AutoRetryDelay,
+		http:            o.HTTPClient,
+		resolver:        o.Resolver,
 		wake:            make(chan struct{}, 1),
 		quit:            make(chan struct{}),
 		loopDone:        make(chan struct{}),
@@ -183,6 +195,14 @@ func New(o Options) *Runner {
 	}
 	if r.retryDelay <= 0 {
 		r.retryDelay = DefaultAutoRetryDelay
+	}
+	if r.http == nil {
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		t.ResponseHeaderTimeout = 60 * time.Second
+		r.http = &http.Client{Transport: t}
+	}
+	if r.resolver == nil {
+		r.resolver = resolve.New(nil)
 	}
 	return r
 }

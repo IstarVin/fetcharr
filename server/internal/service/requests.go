@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -30,6 +31,36 @@ type CreateRequest struct {
 	// Overwrite replaces an existing library file instead of rejecting the
 	// request with already_exists.
 	Overwrite bool `json:"overwrite"`
+	// Archive makes the job a season pack: the download is a zip, 7z or tar
+	// archive whose episode files are placed into the season. It needs a
+	// tv category, and episode must be omitted.
+	Archive *ArchiveInput `json:"archive"`
+}
+
+// ArchiveInput is the episode mapping of a season-pack job.
+type ArchiveInput struct {
+	// EpisodeOffset is added to the episode number read from each file name.
+	EpisodeOffset int `json:"episode_offset"`
+	// EpisodeTitles maps final episode numbers ("1", "2", …) to titles.
+	EpisodeTitles map[string]string `json:"episode_titles"`
+}
+
+// maxArchiveTitles bounds ArchiveInput.EpisodeTitles.
+const maxArchiveTitles = 2000
+
+func (a *ArchiveInput) validate() error {
+	if a.EpisodeOffset < -999 || a.EpisodeOffset > 9999 {
+		return invalid("archive.episode_offset must be between -999 and 9999")
+	}
+	if len(a.EpisodeTitles) > maxArchiveTitles {
+		return invalid("archive.episode_titles has more than %d entries", maxArchiveTitles)
+	}
+	for k := range a.EpisodeTitles {
+		if n, err := strconv.Atoi(k); err != nil || n < 0 || strconv.Itoa(n) != k {
+			return invalid("archive.episode_titles keys must be episode numbers, got %q", k)
+		}
+	}
+	return nil
 }
 
 // BatchEpisode is one episode of a BatchRequest.

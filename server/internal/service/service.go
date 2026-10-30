@@ -126,6 +126,9 @@ func duplicateErr(err error, url string) error {
 // none. A failed lookup is logged and treated as none, because the worker
 // pre-check (spec §4.1) looks again before the download starts.
 func (s *Service) existingMedia(cat config.Category, j *store.Job) string {
+	if j.Archive != nil {
+		return "" // episodes already in the library are skipped when placing
+	}
 	t, err := library.TargetOf(cat, j)
 	if err == nil {
 		var path string
@@ -143,8 +146,15 @@ func targetKey(t naming.Target) string {
 	return strings.ToLower(filepath.Join(t.Dir, t.Base))
 }
 
-// activeTargets maps the library items of every active job to the job. Jobs
-// whose category or name cannot be resolved are left out.
+// seasonKey identifies the season folder a tv job writes into. An archive
+// job claims the whole season.
+func seasonKey(t naming.Target) string {
+	return "season:" + strings.ToLower(t.Dir)
+}
+
+// activeTargets maps the library items of every active job to the job, and
+// each season folder to an archive job filling it (else to any job writing
+// into it). Jobs whose category or name cannot be resolved are left out.
 func (s *Service) activeTargets(ctx context.Context) (map[string]*store.Job, error) {
 	active, _, err := s.store.List(ctx, store.ListFilter{Statuses: jobs.ActiveStatuses()})
 	if err != nil {
@@ -156,8 +166,19 @@ func (s *Service) activeTargets(ctx context.Context) (map[string]*store.Job, err
 		if !ok {
 			continue
 		}
+		if j.Archive != nil {
+			if t, err := library.SeasonTarget(cat, j); err == nil {
+				out[seasonKey(t)] = j
+			}
+			continue
+		}
 		if t, err := library.TargetOf(cat, j); err == nil {
 			out[targetKey(t)] = j
+			if cat.Layout == naming.LayoutTV {
+				if _, taken := out[seasonKey(t)]; !taken {
+					out[seasonKey(t)] = j
+				}
+			}
 		}
 	}
 	return out, nil
@@ -167,12 +188,27 @@ func (s *Service) activeTargets(ctx context.Context) (map[string]*store.Job, err
 // any. Different source URLs for one episode (common with expiring stream
 // links) would otherwise download it twice and fail the second job.
 func (s *Service) queuedFor(cat config.Category, j *store.Job, active map[string]*store.Job) *store.Job {
+	if j.Archive != nil {
+		t, err := library.SeasonTarget(cat, j)
+		if err != nil {
+			return nil
+		}
+		if other := active[seasonKey(t)]; other != nil && other.ID != j.ID {
+			return other
+		}
+		return nil
+	}
 	t, err := library.TargetOf(cat, j)
 	if err != nil {
 		return nil
 	}
 	if other := active[targetKey(t)]; other != nil && other.ID != j.ID {
 		return other
+	}
+	if cat.Layout == naming.LayoutTV {
+		if other := active[seasonKey(t)]; other != nil && other.Archive != nil && other.ID != j.ID {
+			return other
+		}
 	}
 	return nil
 }
@@ -196,6 +232,18 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*store.Job, er
 	meta := naming.Meta{Title: req.Title, Year: req.Year}
 	if cat.Layout == naming.LayoutTV {
 		meta.ShowName, meta.Season, meta.Episode = req.ShowName, req.Season, req.Episode
+	}
+	if req.Archive != nil {
+		if cat.Layout != naming.LayoutTV {
+			return nil, invalid("archive needs a category with the tv layout")
+		}
+		if req.Episode != nil {
+			return nil, invalid("episode must be omitted for an archive job")
+		}
+		if err := req.Archive.validate(); err != nil {
+			return nil, err
+		}
+		meta.Episode = new(int) // validated per file when placing
 	}
 	if err := naming.Validate(cat.Layout, meta); err != nil {
 		return nil, wrapValidation("", err)
@@ -227,6 +275,9 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*store.Job, er
 	case naming.LayoutTV:
 		j.ShowName = optString(req.ShowName)
 		j.Season, j.Episode, j.Year = req.Season, req.Episode, req.Year
+		if req.Archive != nil {
+			j.Archive = &store.Archive{EpisodeOffset: req.Archive.EpisodeOffset, EpisodeTitles: req.Archive.EpisodeTitles}
+		}
 	case naming.LayoutFlat:
 		// Year, show, season and episode do not apply: stored as null.
 	}

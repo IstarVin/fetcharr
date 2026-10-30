@@ -8,8 +8,11 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/istarvin/fetcharr/server/internal/config"
+	"github.com/istarvin/fetcharr/server/internal/direct"
 	"github.com/istarvin/fetcharr/server/internal/jobs"
 	"github.com/istarvin/fetcharr/server/internal/logsafe"
+	"github.com/istarvin/fetcharr/server/internal/resolve"
 	"github.com/istarvin/fetcharr/server/internal/service"
 	"github.com/istarvin/fetcharr/server/internal/store"
 	"github.com/istarvin/fetcharr/server/internal/ytdlp"
@@ -90,32 +93,20 @@ func (w *run) execute() {
 	}
 
 	pt := &progressTracker{w: w}
-	headers := ytdlp.WithPixeldrainAuth(j.URL, j.Headers, cfg.Downloads.PixeldrainAPIKey)
-	args := ytdlp.BuildArgs(ytdlp.Spec{
-		URL:         j.URL,
-		Headers:     headers,
-		WorkDir:     workDir,
-		MergeFormat: cfg.Downloads.MergeFormat,
-		RateLimit:   int64(cfg.Downloads.RateLimit),
-		ExtraArgs:   cfg.Downloads.ExtraArgs,
-	})
-	opts := ytdlp.Options{
-		Dir:        workDir,
-		Secrets:    append(ytdlp.HeaderValues(headers), cfg.Downloads.PixeldrainAPIKey),
-		KillGrace:  r.killGrace,
-		OnProgress: pt.on,
+	fetch := w.ytdlpFetch(cfg, workDir, pt)
+	if resolve.Matches(j.URL) {
+		fetch = w.directFetch(cfg, workDir, pt)
 	}
-	res, err := ytdlp.Run(w.ctx, r.binary, args, opts)
+	file, err := fetch()
 	// A failed run is retried after a growing pause; partial files are kept,
-	// so the next run resumes. Only yt-dlp failures are retried, not a
+	// so the next run resumes. Only download failures are retried, not a
 	// missing binary or a stop.
-	var ye *ytdlp.Error
-	for attempt := 1; attempt <= cfg.Downloads.AutoRetries && errors.As(err, &ye) && w.ctx.Err() == nil; attempt++ {
+	for attempt := 1; attempt <= cfg.Downloads.AutoRetries && retryable(err) && w.ctx.Err() == nil; attempt++ {
 		r.log.Info("download failed; retrying automatically", "job", j, "attempt", attempt, "of", cfg.Downloads.AutoRetries)
 		select {
 		case <-w.ctx.Done():
 		case <-time.After(r.retryDelay * time.Duration(attempt)):
-			res, err = ytdlp.Run(w.ctx, r.binary, args, opts)
+			file, err = fetch()
 		}
 	}
 	if w.ctx.Err() != nil && err != nil {
@@ -129,10 +120,6 @@ func (w *run) execute() {
 	if w.ctx.Err() != nil {
 		w.stopped() // finished just as a stop arrived
 		return
-	}
-	file := res.FilePath
-	if file == "" {
-		file = ytdlp.FallbackFile(workDir)
 	}
 	if file == "" {
 		w.fail(CodeDownloadFailed, "yt-dlp finished but produced no media file")
@@ -163,10 +150,88 @@ func (w *run) downloadError(err error) {
 	}
 	msg := err.Error()
 	var ye *ytdlp.Error
-	if errors.As(err, &ye) {
+	var re *resolve.Error
+	var de *direct.Error
+	switch {
+	case errors.As(err, &ye):
 		msg = ye.Message
+	case errors.As(err, &re):
+		msg = re.Message
+	case errors.As(err, &de):
+		msg = de.Message
 	}
 	w.fail(CodeDownloadFailed, msg)
+}
+
+// retryable reports whether a failed download attempt is retried
+// automatically.
+func retryable(err error) bool {
+	var ye *ytdlp.Error
+	return errors.As(err, &ye) || resolve.IsRetryable(err) || direct.IsRetryable(err)
+}
+
+// ytdlpFetch returns one yt-dlp download attempt of the job, giving the
+// downloaded file ("" when yt-dlp produced none).
+func (w *run) ytdlpFetch(cfg *config.Config, workDir string, pt *progressTracker) func() (string, error) {
+	j := w.job
+	headers := ytdlp.WithPixeldrainAuth(j.URL, j.Headers, cfg.Downloads.PixeldrainAPIKey)
+	args := ytdlp.BuildArgs(ytdlp.Spec{
+		URL:         j.URL,
+		Headers:     headers,
+		WorkDir:     workDir,
+		MergeFormat: cfg.Downloads.MergeFormat,
+		RateLimit:   int64(cfg.Downloads.RateLimit),
+		ExtraArgs:   cfg.Downloads.ExtraArgs,
+	})
+	opts := ytdlp.Options{
+		Dir:        workDir,
+		Secrets:    append(ytdlp.HeaderValues(headers), cfg.Downloads.PixeldrainAPIKey),
+		KillGrace:  w.r.killGrace,
+		OnProgress: pt.on,
+	}
+	return func() (string, error) {
+		res, err := ytdlp.Run(w.ctx, w.r.binary, args, opts)
+		if err != nil {
+			return "", err
+		}
+		if res.FilePath != "" {
+			return res.FilePath, nil
+		}
+		return ytdlp.FallbackFile(workDir), nil
+	}
+}
+
+// directFetch returns one attempt for a resolver link: resolve the link
+// (its file URLs are signed and expire, so every attempt resolves again),
+// then download from the first mirror that works.
+func (w *run) directFetch(cfg *config.Config, workDir string, pt *progressTracker) func() (string, error) {
+	j := w.job
+	return func() (string, error) {
+		sources, err := w.r.resolver.Resolve(w.ctx, j.URL)
+		if err != nil {
+			return "", err
+		}
+		var last error
+		for _, s := range sources {
+			file, err := direct.Download(w.ctx, w.r.http, direct.Spec{
+				URL:        s.URL,
+				Headers:    ytdlp.WithPixeldrainAuth(s.URL, nil, cfg.Downloads.PixeldrainAPIKey),
+				Dir:        workDir,
+				Resumable:  s.Resumable,
+				RateLimit:  int64(cfg.Downloads.RateLimit),
+				OnProgress: pt.on,
+			})
+			if err == nil {
+				return file, nil
+			}
+			if w.ctx.Err() != nil || !direct.IsRetryable(err) {
+				return "", err
+			}
+			w.r.log.Info("mirror failed; trying the next one", "job", j, "server", s.Server, "err", err)
+			last = err
+		}
+		return "", last
+	}
 }
 
 func (w *run) processError(err error) {

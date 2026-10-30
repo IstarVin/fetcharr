@@ -54,12 +54,19 @@ export function tidyReleaseName(raw: string): string {
   return kept.join(' ').trim() || raw
 }
 
-/** `Show — S02E03` for episodes, otherwise `Title (Year)` (falling back to the show name, then the URL). */
+/**
+ * `Show — S02E03` for episodes, `Show — S02 season pack (8 episodes)` for archive jobs, otherwise `Title (Year)`
+ * (falling back to the show name, then the URL).
+ */
 export function heading(job: Job): string {
   if (isEpisode(job)) {
     let code = ''
     if (job.season != null) code += 'S' + String(job.season).padStart(2, '0')
     if (job.episode != null) code += 'E' + String(job.episode).padStart(2, '0')
+    if (job.archive) {
+      const n = job.files?.length ?? 0
+      code += ' season pack' + (n > 0 ? ` (${n} episode${n === 1 ? '' : 's'})` : '')
+    }
     return `${job.show_name!.trim()} — ${code}`
   }
   const title = job.title?.trim()

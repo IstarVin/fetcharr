@@ -36,12 +36,13 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # Debian (glibc) rather than Alpine: the managed yt-dlp standalone binary
 # (yt-dlp_linux / yt-dlp_linux_aarch64) is a PyInstaller bundle that bundles its
 # own Python, so no python3 is needed here. ffmpeg provides ffprobe too.
-# aria2 provides aria2c for direct downloads. curl is used by HEALTHCHECK;
-# tini reaps yt-dlp/aria2c/ffmpeg child processes.
+# aria2 provides aria2c for direct downloads; 7zip (7zz) extracts 7z season
+# packs. curl is used by HEALTHCHECK; tini reaps yt-dlp/aria2c/ffmpeg child
+# processes.
 FROM debian:bookworm-slim
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends aria2 ffmpeg ca-certificates curl tini \
+ && apt-get install -y --no-install-recommends aria2 7zip ffmpeg ca-certificates curl tini \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --gid 1000 fetcharr \
  && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /tmp --shell /usr/sbin/nologin fetcharr \

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/istarvin/fetcharr/server/internal/api"
+	"github.com/istarvin/fetcharr/server/internal/archive"
 	"github.com/istarvin/fetcharr/server/internal/config"
 	"github.com/istarvin/fetcharr/server/internal/events"
 	"github.com/istarvin/fetcharr/server/internal/history"
@@ -71,6 +72,9 @@ func run(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Info("fetcharr starting", "version", version, "config", path, "addr", ln.Addr().String())
+	if archive.SevenZipBinary() == "" {
+		log.Warn("7-Zip (7zz or 7z) not found; 7z season packs cannot be extracted")
+	}
 	if err := serve(ctx, cfg, log, ln); err != nil {
 		log.Error("fetcharr stopped with an error", "err", logsafe.Err(err))
 		return 1

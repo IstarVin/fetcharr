@@ -2,6 +2,16 @@
   "source_replacement_supported": true,
   "queue_priority_supported": true,
   "history_search_supported": true,
+  "resolver_hosts": [
+    "greenmotors",
+    "hubcloud",
+    "hubdrive"
+  ],
+  "archive_formats": [
+    "zip",
+    "tar",
+    "7z"
+  ],
   "notifications_supported": true,
   "download_window": {
     "start": "23:00",
