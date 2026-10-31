@@ -92,6 +92,8 @@ export const api = {
 
   jobAction: (id: string, action: 'pause' | 'resume' | 'cancel') => request<Job>('POST', `jobs/${encodeURIComponent(id)}/${action}`),
   retry: (id: string, body?: RetryBody) => request<Job>('POST', `jobs/${encodeURIComponent(id)}/retry`, body),
+  /** Retries every failed job on the server. Older servers answer 404/405. */
+  retryFailed: () => request<{ jobs: Job[] }>('POST', 'jobs/retry', undefined, { status: 'failed' }),
   batchAction: (batchId: string, action: 'pause' | 'resume' | 'cancel' | 'retry' | 'prioritize') =>
     request<{ jobs: Job[] }>('POST', `batches/${encodeURIComponent(batchId)}/${action}`),
   prioritize: (id: string) => request<Job>('POST', `jobs/${encodeURIComponent(id)}/prioritize`),

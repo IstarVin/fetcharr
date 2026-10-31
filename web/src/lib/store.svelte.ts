@@ -3,6 +3,7 @@
 // beyond this page's lifetime.
 import { SvelteMap } from 'svelte/reactivity'
 import { api, ApiError, errorMessage, setUnauthorizedHandler, wsURL } from './api'
+import { activeInSnapshot, backoffDelay, STABLE_MS } from './liveRecovery'
 import { ACTIVE_STATUSES, FINISHED_STATUSES, type Category, type Info, type Job, type JobStatus, type WsMessage } from './types'
 
 // ---- Session ---------------------------------------------------------------
@@ -86,17 +87,24 @@ class Live {
   #attempt = 0
   #everConnected = false
   #timer: ReturnType<typeof setInterval> | null = null
+  // Resets the backoff once a socket has stayed open for STABLE_MS.
+  #stableTimer: ReturnType<typeof setTimeout> | null = null
 
   start(): void {
     if (!this.#stopped) return
     this.#stopped = false
     this.#attempt = 0
+    document.addEventListener('visibilitychange', this.#onVisible)
+    window.addEventListener('online', this.#wake)
     this.#connect()
   }
 
   stop(): void {
     this.#stopped = true
+    document.removeEventListener('visibilitychange', this.#onVisible)
+    window.removeEventListener('online', this.#wake)
     this.#clearTimer()
+    this.#clearStable()
     this.#ws?.close()
     this.#ws = null
     this.jobs.clear()
@@ -109,7 +117,20 @@ class Live {
   reconnect(): void {
     if (this.#stopped) return
     this.#clearTimer()
+    this.#clearStable()
     this.#ws?.close()
+    this.#attempt = 0
+    this.#connect()
+  }
+
+  #onVisible = () => {
+    if (document.visibilityState === 'visible') this.#wake()
+  }
+
+  /** Reconnects now when disconnected or waiting to retry; a socket that is open or connecting is left alone. */
+  #wake = () => {
+    if (this.#stopped || this.#ws) return
+    this.#clearTimer()
     this.#attempt = 0
     this.#connect()
   }
@@ -122,8 +143,12 @@ class Live {
     let opened = false
     ws.onopen = () => {
       opened = true
-      this.#attempt = 0
       this.connection = 'connected'
+      // Not reset here: a server that accepts and then closes would be hammered.
+      this.#clearStable()
+      this.#stableTimer = setTimeout(() => {
+        if (this.#ws === ws) this.#attempt = 0
+      }, STABLE_MS)
     }
     ws.onmessage = (ev) => {
       let msg: WsMessage
@@ -136,6 +161,7 @@ class Live {
     }
     ws.onclose = () => {
       if (this.#ws !== ws || this.#stopped) return
+      this.#clearStable()
       this.#ws = null
       this.connection = 'disconnected'
       if (!opened) {
@@ -152,6 +178,8 @@ class Live {
       case 'snapshot': {
         this.jobs.clear()
         for (const j of msg.jobs) this.jobs.set(j.id, j)
+        // A job retried elsewhere is active again; it must not stay in History.
+        history.remove(activeInSnapshot(history.jobs, msg.jobs))
         // Finished jobs missed while disconnected (server spec §7).
         if (this.#everConnected) void history.catchUp()
         this.#everConnected = true
@@ -188,7 +216,7 @@ class Live {
   }
 
   #scheduleRetry(): void {
-    const delay = Math.min(30, 2 ** Math.min(this.#attempt, 5))
+    const delay = backoffDelay(this.#attempt)
     this.#attempt++
     let left = delay
     this.retryIn = left
@@ -207,6 +235,11 @@ class Live {
   #clearTimer(): void {
     if (this.#timer) clearInterval(this.#timer)
     this.#timer = null
+  }
+
+  #clearStable(): void {
+    if (this.#stableTimer) clearTimeout(this.#stableTimer)
+    this.#stableTimer = null
   }
 }
 
@@ -236,6 +269,8 @@ class History {
   total = $state(0)
   loading = $state(false)
   error = $state<string | null>(null)
+  /** A failed loadMore while rows are shown; kept apart from `error` so the list stays. */
+  moreError = $state<string | null>(null)
   loaded = $state(false)
   /** The status filter and search are applied by the server. */
   filter = $state<HistoryFilter>('all')
@@ -258,6 +293,7 @@ class History {
     this.loaded = false
     this.loading = false
     this.error = null
+    this.moreError = null
   }
 
   setFilter(filter: HistoryFilter): void {
@@ -285,6 +321,7 @@ class History {
     const gen = ++this.#generation
     this.loading = true
     this.error = null
+    this.moreError = null
     try {
       const page = await api.listJobs({ ...this.#params(), limit: PAGE, offset: 0 })
       if (gen !== this.#generation) return
@@ -302,6 +339,7 @@ class History {
     if (this.loading || this.done) return
     const gen = this.#generation
     this.loading = true
+    this.moreError = null
     try {
       const page = await api.listJobs({ ...this.#params(), limit: PAGE, offset: this.jobs.length })
       if (gen !== this.#generation) return
@@ -309,7 +347,7 @@ class History {
       this.jobs = [...this.jobs, ...page.jobs.filter((j) => !seen.has(j.id))]
       this.total = page.total
     } catch (e) {
-      if (gen === this.#generation) this.error = errorMessage(e)
+      if (gen === this.#generation) this.moreError = errorMessage(e)
     } finally {
       if (gen === this.#generation) this.loading = false
     }

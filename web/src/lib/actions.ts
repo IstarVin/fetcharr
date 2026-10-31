@@ -75,6 +75,40 @@ export async function retryJob(job: Job): Promise<void> {
   }
 }
 
+/** Retries failed downloads after confirming; falls back to one request per loaded job on servers without the bulk endpoint. */
+export async function retryFailed(): Promise<void> {
+  const failed = history.jobs.filter((j) => j.status === 'failed')
+  if (failed.length === 0) return
+  const ok = await confirm({
+    title: 'Retry failed downloads?',
+    body: 'Every failed download will be added back to the queue.',
+    confirm: 'Retry',
+  })
+  if (!ok) return
+  let retried = 0
+  try {
+    try {
+      const res = await api.retryFailed()
+      for (const j of res.jobs) live.upsert(j)
+      retried = res.jobs.length
+    } catch (e) {
+      if (!(e instanceof ApiError && (e.status === 404 || e.status === 405))) throw e
+      for (const j of failed) {
+        try {
+          live.upsert(await api.retry(j.id))
+          retried++
+        } catch (err) {
+          // Already queued or unretryable: skip, and stop only when the server is unreachable.
+          if (err instanceof ApiError && err.status === 0) throw err
+        }
+      }
+    }
+    toasts.show(retried === 1 ? 'Retried 1 download' : `Retried ${retried} downloads`)
+  } catch (e) {
+    toasts.show(retried > 0 ? `Retried ${retried}, then: ${errorMessage(e)}` : errorMessage(e))
+  }
+}
+
 export async function deleteJob(job: Job): Promise<void> {
   const res = await confirmer.ask({
     title: 'Delete from history?',

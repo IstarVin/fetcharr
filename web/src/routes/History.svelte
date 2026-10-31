@@ -4,7 +4,7 @@
   import Icon from '../components/Icon.svelte'
   import PlayerDialog from '../components/PlayerDialog.svelte'
   import SourceReplacement from '../components/SourceReplacement.svelte'
-  import { clearHistory } from '../lib/actions'
+  import { clearHistory, retryFailed } from '../lib/actions'
   import { groupByDay } from '../lib/format'
   import { history, session, type HistoryFilter } from '../lib/store.svelte'
   import type { Job } from '../lib/types'
@@ -24,6 +24,7 @@
 
   const canSearch = $derived(session.info?.history_search_supported === true)
   const groups = $derived(groupByDay(history.jobs))
+  const failedCount = $derived(history.jobs.filter((j) => j.status === 'failed').length)
 
   function onSearch(value: string) {
     search = value
@@ -43,7 +44,8 @@
   $effect(() => {
     if (!sentinel) return
     const io = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) void history.loadMore()
+      // After a failed page the inline Retry button takes over, so scrolling doesn't loop.
+      if (entries.some((e) => e.isIntersecting) && !history.moreError) void history.loadMore()
     }, { rootMargin: '400px' })
     io.observe(sentinel)
     return () => io.disconnect()
@@ -55,6 +57,9 @@
   <h1>History</h1>
   <div class="row-actions">
     <button class="icon-btn" onclick={() => history.load()} aria-label="Refresh" title="Refresh"><Icon name="retry" /></button>
+    {#if failedCount > 0}
+      <button class="btn small" onclick={retryFailed}><Icon name="retry" size={16} />Retry failed ({failedCount})</button>
+    {/if}
     <button class="btn small danger" disabled={history.jobs.length === 0} onclick={clearHistory}><Icon name="delete" size={16} />Clear history</button>
   </div>
 </div>
@@ -112,7 +117,10 @@
 
 {#if history.loaded && !history.done}
   <div bind:this={sentinel} class="more">
-    {#if history.loading}<span class="muted">Loading more…</span>{:else}<button class="btn" onclick={() => history.loadMore()}>Load more</button>{/if}
+    {#if history.loading}<span class="muted">Loading more…</span>{:else if history.moreError}
+      <p class="error-text" role="alert">Couldn't load more: {history.moreError}</p>
+      <button class="btn" onclick={() => history.loadMore()}>Retry</button>
+    {:else}<button class="btn" onclick={() => history.loadMore()}>Load more</button>{/if}
   </div>
 {/if}
 
@@ -165,6 +173,11 @@
   .more {
     display: grid;
     place-items: center;
+    gap: 8px;
     padding: 24px;
+  }
+
+  .more p {
+    margin: 0;
   }
 </style>
