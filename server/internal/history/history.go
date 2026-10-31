@@ -1,5 +1,5 @@
 // Package history prunes old finished jobs (spec §4.6). It removes database
-// records only, never files.
+// records and the work directories of the pruned jobs, never library files.
 package history
 
 import (
@@ -22,6 +22,9 @@ type Options struct {
 	// rows (default: none).
 	Publisher service.Publisher
 	Logger    *slog.Logger
+	// WorkCleaner removes the work directories of pruned jobs (default:
+	// none). The runner implements it.
+	WorkCleaner WorkCleaner
 	// RetentionDays is history.retention_days; 0 disables pruning.
 	RetentionDays        int
 	CurrentRetentionDays func() int
@@ -31,11 +34,18 @@ type Options struct {
 	Now func() time.Time
 }
 
+// WorkCleaner removes the work directories of deleted jobs. It must not block
+// and logs its own failures.
+type WorkCleaner interface {
+	RemoveWorkDirs(jobIDs ...string)
+}
+
 // Pruner deletes completed, failed and cancelled jobs whose finished_at is
 // older than the retention.
 type Pruner struct {
 	st          *store.Store
 	pub         service.Publisher
+	work        WorkCleaner
 	log         *slog.Logger
 	days        int
 	currentDays func() int
@@ -47,7 +57,7 @@ type Pruner struct {
 // New returns a Pruner.
 func New(o Options) *Pruner {
 	p := &Pruner{
-		st: o.Store, pub: o.Publisher, log: o.Logger, days: o.RetentionDays,
+		st: o.Store, pub: o.Publisher, work: o.WorkCleaner, log: o.Logger, days: o.RetentionDays,
 		interval: o.Interval, now: o.Now, currentDays: o.CurrentRetentionDays, wake: make(chan struct{}, 1),
 	}
 	if p.log == nil {
@@ -87,6 +97,9 @@ func (p *Pruner) Prune(ctx context.Context) (int, error) {
 	if len(ids) > 0 {
 		if p.pub != nil {
 			p.pub.Publish(service.Change{Kind: service.ChangeRemoved, JobIDs: ids})
+		}
+		if p.work != nil {
+			p.work.RemoveWorkDirs(ids...)
 		}
 		p.log.Info("pruned history", "jobs", len(ids), "retention_days", days)
 	}

@@ -144,6 +144,8 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 		}
 		updater = ytdlpMgr
 	}
+	// Remove work directories no job needs (deleted, completed or cancelled).
+	rn.SweepWorkDirs(ctx)
 	rn.Start()
 	// Safety net for early returns; the normal path shuts the runner down
 	// explicitly, between the HTTP server and the hub.
@@ -162,7 +164,7 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ln net.Lis
 		bg.Go(func() { ytdlpMgr.Run(bgCtx) })
 	}
 	pruner := history.New(history.Options{
-		Store: st, Publisher: bus, Logger: log, RetentionDays: cfg.Current().History.RetentionDays,
+		Store: st, Publisher: bus, Logger: log, WorkCleaner: rn, RetentionDays: cfg.Current().History.RetentionDays,
 		CurrentRetentionDays: func() int { return cfg.Current().History.RetentionDays },
 	})
 	bg.Go(func() { pruner.Run(bgCtx) })

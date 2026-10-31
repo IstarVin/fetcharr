@@ -229,6 +229,12 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*store.Job, er
 	if err := validateHTTPURL("url", req.URL); err != nil {
 		return nil, err
 	}
+	if err := validateTextLen("title", req.Title); err != nil {
+		return nil, err
+	}
+	if err := validateTextLen("show_name", req.ShowName); err != nil {
+		return nil, err
+	}
 	meta := naming.Meta{Title: req.Title, Year: req.Year}
 	if cat.Layout == naming.LayoutTV {
 		meta.ShowName, meta.Season, meta.Episode = req.ShowName, req.Season, req.Episode
@@ -326,7 +332,13 @@ func (s *Service) CreateBatch(ctx context.Context, req BatchRequest) (*BatchResu
 	if len(req.Episodes) == 0 {
 		return nil, invalid("episodes must contain at least one episode")
 	}
+	if len(req.Episodes) > maxBatchEpisodes {
+		return nil, invalid("episodes must contain at most %d episodes", maxBatchEpisodes)
+	}
 	if err := validateHeaders("headers", req.Headers); err != nil {
+		return nil, err
+	}
+	if err := validateTextLen("show_name", req.ShowName); err != nil {
 		return nil, err
 	}
 
@@ -346,6 +358,12 @@ func (s *Service) CreateBatch(ctx context.Context, req BatchRequest) (*BatchResu
 			return nil, err
 		}
 		if err := validateHeaders(where+"headers", e.Headers); err != nil {
+			return nil, err
+		}
+		if err := validateTextLen(where+"title", e.Title); err != nil {
+			return nil, err
+		}
+		if err := validateHeaders(where+"headers (merged with the batch headers)", mergeHeaders(req.Headers, e.Headers)); err != nil {
 			return nil, err
 		}
 		subs, err := normalizeSubtitles(where+"subtitles", e.Subtitles)
@@ -483,6 +501,38 @@ func (s *Service) Retry(ctx context.Context, id string, opts RetryOptions) (*sto
 	return s.apply(ctx, id, jobs.EventRetry, opts)
 }
 
+// RetryMany retries every job whose status is in statuses (failed or
+// cancelled; empty = both) the same way as Retry without options: no
+// overwrite, no source replacement. Jobs whose retry is rejected (invalid_state,
+// duplicate, already_exists, or deleted meanwhile) are skipped. It returns the
+// retried jobs in queue order, oldest first.
+func (s *Service) RetryMany(ctx context.Context, statuses []jobs.Status) ([]*store.Job, error) {
+	if len(statuses) == 0 {
+		statuses = []jobs.Status{jobs.StatusFailed, jobs.StatusCancelled}
+	}
+	for _, st := range statuses {
+		if st != jobs.StatusFailed && st != jobs.StatusCancelled {
+			return nil, invalid("cannot retry jobs in status '%s'", st)
+		}
+	}
+	list, _, err := s.store.List(ctx, store.ListFilter{Statuses: statuses})
+	if err != nil {
+		return nil, err
+	}
+	updated := []*store.Job{}
+	for i := len(list) - 1; i >= 0; i-- { // List is newest first
+		j, err := s.Retry(ctx, list[i].ID, RetryOptions{})
+		if code, ok := CodeOf(err); ok && (code == CodeInvalidState || code == CodeDuplicate || code == CodeAlreadyExists || code == CodeNotFound || code == CodeInvalidRequest) {
+			continue // not retryable right now (or its category/metadata is no longer valid): skip it
+		}
+		if err != nil {
+			return nil, err
+		}
+		updated = append(updated, j)
+	}
+	return updated, nil
+}
+
 // BatchAction applies ev (pause, resume, cancel or retry) to every job of the
 // batch where the transition is allowed and skips the rest (spec §6.3). It
 // returns the updated jobs in queue order. Error: not_found for an unknown
@@ -506,8 +556,8 @@ func (s *Service) BatchAction(ctx context.Context, batchID string, ev jobs.Event
 	updated := []*store.Job{}
 	for _, m := range members {
 		j, err := s.apply(ctx, m.ID, ev, opts)
-		if code, ok := CodeOf(err); ok && (code == CodeInvalidState || code == CodeDuplicate || code == CodeNotFound) {
-			continue // not allowed for this member: skip it
+		if code, ok := CodeOf(err); ok && (code == CodeInvalidState || code == CodeDuplicate || code == CodeAlreadyExists || code == CodeNotFound || code == CodeInvalidRequest) {
+			continue // not allowed for this member (or its category/metadata is no longer valid): skip it
 		}
 		if err != nil {
 			return nil, err
@@ -737,6 +787,7 @@ func (s *Service) Delete(ctx context.Context, id string, opts DeleteOptions) err
 		switch {
 		case err == nil:
 			s.pub.Publish(Change{Kind: ChangeRemoved, JobIDs: []string{id}})
+			s.ctl.RemoveWorkDirs(id)
 			return nil
 		case errors.Is(err, store.ErrStatusMismatch):
 			continue // status changed since the read: re-read and decide again
@@ -767,13 +818,13 @@ func (s *Service) deleteFiles(j *store.Job) error {
 // DeleteMany clears history: it deletes every job whose status is in statuses
 // (empty = completed, failed and cancelled) and returns how many. Active
 // statuses are invalid_request. Files are never touched.
-func (s *Service) DeleteMany(ctx context.Context, statuses []jobs.Status) (int, error) {
+func (s *Service) DeleteMany(ctx context.Context, statuses []jobs.Status, finishedBefore *time.Time) (int, error) {
 	for _, st := range statuses {
 		if !jobs.IsFinished(st) {
 			return 0, invalid("cannot delete jobs in status '%s'", st)
 		}
 	}
-	ids, err := s.store.DeleteMany(ctx, statuses, nil)
+	ids, err := s.store.DeleteMany(ctx, statuses, finishedBefore)
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidArgument) {
 			return 0, newErr(CodeInvalidRequest, err, "%s", strings.TrimPrefix(err.Error(), store.ErrInvalidArgument.Error()+": "))
@@ -782,6 +833,7 @@ func (s *Service) DeleteMany(ctx context.Context, statuses []jobs.Status) (int, 
 	}
 	if len(ids) > 0 {
 		s.pub.Publish(Change{Kind: ChangeRemoved, JobIDs: ids})
+		s.ctl.RemoveWorkDirs(ids...)
 	}
 	return len(ids), nil
 }

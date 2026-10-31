@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/istarvin/fetcharr/server/internal/naming"
 	"github.com/istarvin/fetcharr/server/internal/store"
@@ -44,6 +45,16 @@ type ArchiveInput struct {
 	// EpisodeTitles maps final episode numbers ("1", "2", …) to titles.
 	EpisodeTitles map[string]string `json:"episode_titles"`
 }
+
+// Input caps of the create requests. They are checked before any job is
+// created, so an oversized request creates nothing.
+const (
+	maxBatchEpisodes   = 500
+	maxHeadersPerJob   = 50
+	maxSubtitlesPerJob = 20
+	maxURLLength       = 2048
+	maxTitleLength     = 500 // title and show_name, in characters
+)
 
 // maxArchiveTitles bounds ArchiveInput.EpisodeTitles.
 const maxArchiveTitles = 2000
@@ -161,6 +172,9 @@ func validateHTTPURL(field, raw string) error {
 	if strings.TrimSpace(raw) == "" {
 		return invalid("%s is required", field)
 	}
+	if utf8.RuneCountInString(raw) > maxURLLength {
+		return invalid("%s must be at most %d characters", field, maxURLLength)
+	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return invalid("%s is not a valid URL", field)
@@ -174,9 +188,20 @@ func validateHTTPURL(field, raw string) error {
 	return nil
 }
 
+// validateTextLen rejects a title or show name longer than maxTitleLength.
+func validateTextLen(field, v string) error {
+	if utf8.RuneCountInString(v) > maxTitleLength {
+		return invalid("%s must be at most %d characters", field, maxTitleLength)
+	}
+	return nil
+}
+
 // validateHeaders rejects names and values that could not be passed to
 // yt-dlp's `--add-header "Name: value"` safely.
 func validateHeaders(field string, h map[string]string) error {
+	if len(h) > maxHeadersPerJob {
+		return invalid("%s must have at most %d entries", field, maxHeadersPerJob)
+	}
 	for name, val := range h {
 		if name == "" || strings.ContainsFunc(name, func(r rune) bool {
 			return r == ':' || unicode.IsSpace(r) || unicode.IsControl(r)
@@ -192,6 +217,9 @@ func validateHeaders(field string, h map[string]string) error {
 
 // normalizeSubtitles validates subtitles and maps a missing lang to "und".
 func normalizeSubtitles(field string, in []SubtitleInput) ([]store.Subtitle, error) {
+	if len(in) > maxSubtitlesPerJob {
+		return nil, invalid("%s must have at most %d entries", field, maxSubtitlesPerJob)
+	}
 	out := make([]store.Subtitle, 0, len(in))
 	for i, s := range in {
 		if err := validateHTTPURL(fmt.Sprintf("%s[%d].url", field, i), s.URL); err != nil {

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/istarvin/fetcharr/server/internal/jobs"
 	"github.com/istarvin/fetcharr/server/internal/service"
@@ -192,6 +193,35 @@ func (s *server) handleBatchAction(action string) http.HandlerFunc {
 	}
 }
 
+// handleRetryMany retries every failed and/or cancelled job (?status=, default
+// failed) the way a plain single retry does, skipping rejected ones.
+func (s *server) handleRetryMany(w http.ResponseWriter, r *http.Request) {
+	raw := r.URL.Query().Get("status")
+	if raw == "" {
+		raw = string(jobs.StatusFailed)
+	}
+	statuses, bad := parseStatuses(raw)
+	if bad != "" {
+		badRequest(w, "unknown status '%s'", bad)
+		return
+	}
+	for _, st := range statuses {
+		if st != jobs.StatusFailed && st != jobs.StatusCancelled {
+			badRequest(w, "status must be failed, cancelled or both, not '%s'", st)
+			return
+		}
+	}
+	if len(statuses) == 0 {
+		statuses = []jobs.Status{jobs.StatusFailed}
+	}
+	updated, err := s.svc.RetryMany(r.Context(), statuses)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string][]JobDTO{"jobs": NewJobDTOs(updated)})
+}
+
 func (s *server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	var opts service.DeleteOptions
 	if v := r.URL.Query().Get("delete_file"); v != "" {
@@ -215,7 +245,16 @@ func (s *server) handleDeleteMany(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "unknown status '%s'", bad)
 		return
 	}
-	n, err := s.svc.DeleteMany(r.Context(), statuses)
+	var before *time.Time
+	if v := r.URL.Query().Get("finished_before"); v != "" {
+		t, err := timefmt.Parse(v)
+		if err != nil {
+			badRequest(w, "finished_before must be an RFC 3339 time")
+			return
+		}
+		before = &t
+	}
+	n, err := s.svc.DeleteMany(r.Context(), statuses, before)
 	if err != nil {
 		s.fail(w, r, err)
 		return

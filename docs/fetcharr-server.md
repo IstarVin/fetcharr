@@ -186,7 +186,7 @@ yt-dlp runs as a subprocess in its own process group. It writes into the job's w
 
 **Progress.** aria2c transfers currently emit structured progress only at completion, so live percent, speed and ETA can remain unavailable during those transfers. Native HLS/DASH downloads retain live progress. Parse `downloaded_bytes`, `total_bytes` (or `total_bytes_estimate`), `speed` and `eta`. Store them on the job and broadcast at most one update per second per job.
 
-**Automatic retry.** If yt-dlp exits non-zero and `auto_retries` is above zero, the worker waits (30 s, then 60 s, …), keeping the job `downloading` and its partial files, and runs yt-dlp again. A pause or cancel during the wait ends it as usual.
+**Automatic retry.** If yt-dlp exits non-zero and `auto_retries` is above zero, the worker waits (30 s, then 60 s, …), keeping the job `downloading` and its partial files, and runs yt-dlp again. A pause or cancel during the wait ends it as usual. Permanent failures are not retried: unsupported URL, video unavailable/private/removed, geo restriction, and HTTP 404/410. HTTP 403 and unrecognised errors are retried.
 
 **Failure.** If yt-dlp still exits non-zero, the job fails with `download_failed`. `error_message` holds the last `ERROR:` lines from stderr, with header values redacted.
 
@@ -214,9 +214,9 @@ Any error in steps 2–4 fails the job with `processing_failed` (or `already_exi
 ### 4.4 Pause, cancel, shutdown
 
 - **Pause.** Kill the yt-dlp process group, keep the work directory, and set `paused`. The worker slot is freed. Resume sets the job back to `pending`; yt-dlp later continues from the partial files.
-- **Cancel.** Kill the process group (yt-dlp or ffmpeg), delete the work directory, and set `cancelled`. Not allowed once placement has started (§2.4). A later retry starts from scratch.
+- **Cancel.** Kill the process group (yt-dlp or ffmpeg), delete the work directory, and set `cancelled`. Not allowed once placement has started (§2.4). A later retry starts from scratch. A failed job keeps its work directory for retry; deleting the job (single, bulk or pruning) deletes it.
 - **Graceful shutdown (SIGINT/SIGTERM).** Stop accepting requests, kill all running processes, set `downloading` and `processing` jobs back to `pending`, close WebSocket connections, and exit.
-- **Startup recovery.** Any job left in `downloading` or `processing` after a crash is set back to `pending` and keeps its work directory. Paused jobs stay paused.
+- **Startup recovery.** Any job left in `downloading` or `processing` after a crash is set back to `pending` and keeps its work directory. Paused jobs stay paused. Work directories whose job no longer exists, or is `completed` or `cancelled`, are deleted at startup.
 
 ### 4.5 Media server refresh
 
@@ -238,7 +238,7 @@ An optional token is sent as `Authorization: Bearer`. Delivery is best effort, w
 
 ### 4.6 History pruning
 
-If `history.retention_days > 0`, the server deletes `completed`, `failed` and `cancelled` jobs whose `finished_at` is older than the limit. This runs on startup and then hourly. It removes records only, never files.
+If `history.retention_days > 0`, the server deletes `completed`, `failed` and `cancelled` jobs whose `finished_at` is older than the limit. This runs on startup and then hourly. It removes records and the pruned jobs' work directories, never library files.
 
 ---
 
@@ -416,6 +416,7 @@ Validation:
 - The layout's required fields (§2.1) must be present and non-empty after sanitizing.
 - `season` must be ≥0 and `episode` ≥0 when given. `year` must be a 4-digit number when given.
 - Each subtitle `url` must be `http` or `https`.
+- Size limits, each returning `400 invalid_request` before any job is created: `url` (and each subtitle `url`) at most 2048 characters; `title` and `show_name` at most 500 characters; `headers` at most 50 entries; `subtitles` at most 20 entries. The same limits apply per episode of `POST /api/jobs/batch` (batch and episode `headers` are also checked after merging), and to `source` in a retry.
 - If the same `url` is already active, or another active job will write the same library file (same folder and name, ignoring case and extension), return `409 duplicate`. This also applies with `overwrite`, and to retries.
 - Unless `overwrite` is `true`, if the target (§5) already has a video file with the same base name (any extension), return `409 already_exists`. The message names the existing file. Resubmit with `"overwrite": true` to replace it; the job then skips the §4.1 existing-file check.
 
@@ -466,7 +467,7 @@ Returns `201`:
 }
 ```
 
-If any episode fails validation, the whole request is rejected with `400` and nothing is created. Episodes are skipped and listed in `skipped` when their URL is already active (`reason: "duplicate"`) or, unless the batch has `"overwrite": true`, when their target already has a video file (`reason: "already_exists"`, same check as `POST /api/jobs`). If every episode is skipped, the response is `409 already_exists` when at least one of them is in the library, otherwise `409 duplicate`. `overwrite` applies to every episode of the request; to replace only some, send a batch with just those episodes.
+A batch holds at most 500 episodes. If any episode fails validation (including the limits listed under `POST /api/jobs`), the whole request is rejected with `400` and nothing is created. Episodes are skipped and listed in `skipped` when their URL is already active (`reason: "duplicate"`) or, unless the batch has `"overwrite": true`, when their target already has a video file (`reason: "already_exists"`, same check as `POST /api/jobs`). If every episode is skipped, the response is `409 already_exists` when at least one of them is in the library, otherwise `409 duplicate`. `overwrite` applies to every episode of the request; to replace only some, send a batch with just those episodes.
 
 #### `GET /api/jobs`
 Lists jobs, newest `created_at` first.
@@ -551,8 +552,13 @@ Removes a finished job's record. Returns `204`.
 #### `DELETE /api/jobs`
 Clears history. Deletes every finished job matching `?status=` (default `completed,failed,cancelled`; active statuses are rejected with `400`). Never deletes files. Returns `200 {"deleted": 42}`.
 
+Optional `?finished_before=<RFC 3339 time>` (parsed like `finished_after`) deletes only jobs whose `finished_at` is earlier than that time, so a client can keep recent history. An invalid time returns `400 invalid_request`.
+
+#### `POST /api/jobs/retry`
+Retries every job matching `?status=` (default `failed`; allowed `failed` and `cancelled`, comma-separated; anything else returns `400 invalid_request`). Each job is retried exactly as `POST /api/jobs/{id}/retry` with no body (no `overwrite`, no `source`) and emits a `job_updated` event. Jobs whose retry is rejected (`duplicate`, `already_exists`, `invalid_state`) are skipped. Returns `200 { "jobs": [ …retried jobs, oldest first… ] }`, empty when nothing was retried.
+
 #### `POST /api/batches/{batch_id}/pause` · `/resume` · `/cancel` · `/retry`
-Applies the action to each job in the batch where the transition is allowed and skips the rest. Returns `200 { "jobs": [ …updated jobs… ] }`, or `404` if the batch doesn't exist.
+Applies the action to each job in the batch where the transition is allowed and skips the rest, including members that fail validation (for example a removed category). Returns `200 { "jobs": [ …updated jobs… ] }`, or `404` if the batch doesn't exist.
 
 #### `POST /api/system/notifications/test`
 Body `{"id": "<notification id>"}`. Sends a test message to that saved target and returns `204`. An unknown id returns `404`; a failed delivery returns `400 invalid_request` with the reason.

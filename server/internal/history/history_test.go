@@ -239,3 +239,31 @@ func equal(a, b []string) bool {
 	}
 	return true
 }
+
+type workCleaner struct {
+	mu  sync.Mutex
+	ids []string
+}
+
+func (w *workCleaner) RemoveWorkDirs(ids ...string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.ids = append(w.ids, ids...)
+}
+
+func TestPruneRemovesWorkDirsOfPrunedJobs(t *testing.T) {
+	st := openStore(t)
+	add(t, st, "old-failed", jobs.StatusFailed, 10, "")
+	add(t, st, "recent-failed", jobs.StatusFailed, 1, "")
+	wc := &workCleaner{}
+	p := history.New(history.Options{
+		Store: st, WorkCleaner: wc, RetentionDays: 7, Now: func() time.Time { return now },
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if n, err := p.Prune(t.Context()); err != nil || n != 1 {
+		t.Fatalf("Prune = %d, %v", n, err)
+	}
+	if len(wc.ids) != 1 || wc.ids[0] != "old-failed" {
+		t.Errorf("work dirs removed for %v, want [old-failed]", wc.ids)
+	}
+}

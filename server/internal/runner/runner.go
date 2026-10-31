@@ -336,6 +336,83 @@ func (r *Runner) Stop(jobID string, reason service.StopReason) {
 	}()
 }
 
+// RemoveWorkDirs implements service.Controller: it deletes the work
+// directories of jobs whose records were removed, in the background. Ids that
+// are not plain directory names are ignored (see validID). It does not wait.
+func (r *Runner) RemoveWorkDirs(jobIDs ...string) {
+	ids := make([]string, 0, len(jobIDs))
+	for _, id := range jobIDs {
+		if validID(id) {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	wipe := func() {
+		for _, id := range ids {
+			r.wipeWorkDir(id)
+		}
+	}
+	r.mu.Lock()
+	if r.closing {
+		r.mu.Unlock()
+		wipe()
+		return
+	}
+	r.wg.Add(1)
+	r.mu.Unlock()
+	go func() {
+		defer r.wg.Done()
+		wipe()
+	}()
+}
+
+// SweepWorkDirs deletes the work directories under <data_dir>/work that no
+// job needs: the id has no job, or the job is completed or cancelled. Pending,
+// downloading, processing, paused and failed jobs keep theirs, so a retry or
+// resume can continue. Call it before Start. Failures are logged; it returns
+// the number of directories removed.
+func (r *Runner) SweepWorkDirs(ctx context.Context) int {
+	root := r.cfg.WorkDir()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			r.log.Error("sweep work directories", "err", err)
+		}
+		return 0
+	}
+	removed := 0
+	for _, e := range entries {
+		id := e.Name()
+		if ctx.Err() != nil {
+			break
+		}
+		if !validID(id) {
+			continue
+		}
+		j, err := r.st.Get(ctx, id)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+		case err != nil:
+			r.log.Error("sweep work directories: look up job", "job", id, "err", err)
+			continue
+		case j.Status != jobs.StatusCompleted && j.Status != jobs.StatusCancelled:
+			continue
+		}
+		path := r.workDir(id)
+		if err := os.RemoveAll(path); err != nil {
+			r.log.Error("sweep work directories: delete", "job", id, "err", err)
+			continue
+		}
+		removed++
+	}
+	if removed > 0 {
+		r.log.Info("removed orphaned work directories", "count", removed)
+	}
+	return removed
+}
+
 // superseded reports whether a Stop is stale: the service commits pause and
 // cancel before calling Stop, so a job whose stored status is pending,
 // downloading or processing has been resumed, retried or restarted since, and

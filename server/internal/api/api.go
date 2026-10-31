@@ -136,6 +136,7 @@ func New(opts Options) http.Handler {
 		{"POST", "/api/jobs/batch", s.handleCreateBatch},
 		{"GET", "/api/jobs", s.handleList},
 		{"DELETE", "/api/jobs", s.handleDeleteMany},
+		{"POST", "/api/jobs/retry", s.handleRetryMany},
 		{"GET", "/api/jobs/{id}", s.handleGet},
 		{"POST", "/api/jobs/{id}/playback", s.handlePlayback},
 		{"DELETE", "/api/jobs/{id}", s.handleDelete},

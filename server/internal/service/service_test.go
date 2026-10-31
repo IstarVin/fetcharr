@@ -20,6 +20,7 @@ type recorder struct {
 	changes []Change
 	wakes   int
 	stops   []string
+	removed []string
 }
 
 func (r *recorder) Publish(c Change) {
@@ -36,6 +37,11 @@ func (r *recorder) Stop(id string, reason StopReason) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.stops = append(r.stops, id+":"+string(reason))
+}
+func (r *recorder) RemoveWorkDirs(ids ...string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.removed = append(r.removed, ids...)
 }
 func (r *recorder) kinds() []ChangeKind {
 	r.mu.Lock()
@@ -284,21 +290,24 @@ func TestDeleteAndDeleteManyPublish(t *testing.T) {
 	if err := svc.Delete(t.Context(), a.ID, DeleteOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	n, err := svc.DeleteMany(t.Context(), nil)
+	n, err := svc.DeleteMany(t.Context(), nil, nil)
 	if err != nil || n != 1 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
-	_, err = svc.DeleteMany(t.Context(), []jobs.Status{jobs.StatusPaused})
+	_, err = svc.DeleteMany(t.Context(), []jobs.Status{jobs.StatusPaused}, nil)
 	wantCode(t, err, CodeInvalidRequest)
 	if k := rec.kinds(); len(k) != 2 || k[0] != ChangeRemoved || k[1] != ChangeRemoved {
 		t.Errorf("kinds = %v", k)
 	}
 	// Nothing deleted -> nothing published.
-	if _, err := svc.DeleteMany(t.Context(), nil); err != nil {
+	if _, err := svc.DeleteMany(t.Context(), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(rec.kinds()) != 2 {
 		t.Errorf("empty clear published an event")
+	}
+	if len(rec.removed) != 2 || rec.removed[0] != a.ID {
+		t.Errorf("work dir removal hook got %v", rec.removed)
 	}
 }
 
@@ -360,7 +369,7 @@ func TestDeleteRefusesJobThatBecameActive(t *testing.T) {
 	if _, err := st.Get(t.Context(), j.ID); err != nil {
 		t.Errorf("active job deleted: %v", err)
 	}
-	if len(rec.kinds()) != 0 {
-		t.Errorf("published %v", rec.kinds())
+	if len(rec.kinds()) != 0 || len(rec.removed) != 0 {
+		t.Errorf("published %v, removed work dirs %v", rec.kinds(), rec.removed)
 	}
 }

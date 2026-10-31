@@ -52,6 +52,10 @@ const (
 //     is called for every previous status (pending, downloading, processing,
 //     paused), because the work directory of a paused or processing job must
 //     be deleted too; the runner decides whether a process is running.
+//   - RemoveWorkDirs is called after the records of finished jobs were
+//     deleted. A failed job keeps its work directory so a retry can resume,
+//     so nothing else frees it once the record is gone. Failures are the
+//     implementation's to log; they never fail the delete.
 //
 // Implementations must not block and must not call back into the Service.
 // Lifecycle actions are serialized through their hooks, so a subsequent
@@ -60,6 +64,7 @@ const (
 type Controller interface {
 	Wake()
 	Stop(jobID string, reason StopReason)
+	RemoveWorkDirs(jobIDs ...string)
 }
 
 type nopPublisher struct{}
@@ -68,5 +73,6 @@ func (nopPublisher) Publish(Change) {}
 
 type nopController struct{}
 
-func (nopController) Wake()                   {}
-func (nopController) Stop(string, StopReason) {}
+func (nopController) Wake()                    {}
+func (nopController) Stop(string, StopReason)  {}
+func (nopController) RemoveWorkDirs(...string) {}

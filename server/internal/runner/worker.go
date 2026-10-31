@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/istarvin/fetcharr/server/internal/config"
@@ -165,9 +166,44 @@ func (w *run) downloadError(err error) {
 
 // retryable reports whether a failed download attempt is retried
 // automatically.
+// A yt-dlp failure is retried unless its message says the source itself is
+// unusable; unknown messages stay retryable.
 func retryable(err error) bool {
 	var ye *ytdlp.Error
-	return errors.As(err, &ye) || resolve.IsRetryable(err) || direct.IsRetryable(err)
+	if errors.As(err, &ye) {
+		return !permanentYtdlp(ye.Message)
+	}
+	return resolve.IsRetryable(err) || direct.IsRetryable(err)
+}
+
+// permanentMarkers are lower-case fragments of yt-dlp error messages that a
+// later attempt cannot fix: unsupported or removed sources, private or
+// geo-blocked videos, HTTP 404/410. 403 stays retryable: CDNs use it for
+// rate limits and short-lived tokens.
+var permanentMarkers = []string{
+	"unsupported url",
+	"video unavailable",
+	"this video is unavailable",
+	"this video is private",
+	"private video",
+	"this video has been removed",
+	"video has been removed",
+	"video is no longer available",
+	"in your country",
+	"geo restricted",
+	"geo-restricted",
+	"http error 404",
+	"http error 410",
+}
+
+func permanentYtdlp(msg string) bool {
+	msg = strings.ToLower(msg)
+	for _, m := range permanentMarkers {
+		if strings.Contains(msg, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // ytdlpFetch returns one yt-dlp download attempt of the job, giving the
